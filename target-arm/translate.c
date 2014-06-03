@@ -9286,7 +9286,7 @@ static int disas_thumb2_insn(CPUARMState *env, DisasContext *s, uint16_t insn_hw
         /* Fall through to 32-bit decode.  */
     }
 
-    insn = arm_lduw_code(env, s->pc, s->bswap_code);
+    insn = arm_lduw_code(env, s->pc, s->sctlr_b);
     s->pc += 2;
     insn |= (uint32_t)insn_hw1 << 16;
 
@@ -10528,7 +10528,7 @@ static void disas_thumb_insn(CPUARMState *env, DisasContext *s)
         }
     }
 
-    insn = arm_lduw_code(env, s->pc, s->bswap_code);
+    insn = arm_lduw_code(env, s->pc, s->sctlr_b);
     s->pc += 2;
 
     switch (insn >> 12) {
@@ -11253,7 +11253,7 @@ static bool insn_crosses_page(CPUARMState *env, DisasContext *s)
     }
 
     /* This must be a Thumb insn */
-    insn = arm_lduw_code(env, s->pc, s->bswap_code);
+    insn = arm_lduw_code(env, s->pc, s->sctlr_b);
 
     if ((insn >> 11) >= 0x1d) {
         /* Top five bits 0b11101 / 0b11110 / 0b11111 : this is the
@@ -11307,7 +11307,7 @@ void gen_intermediate_code(CPUARMState *env, TranslationBlock *tb)
     dc->secure_routed_to_el3 = arm_feature(env, ARM_FEATURE_EL3) &&
                                !arm_el_is_aa64(env, 3);
     dc->thumb = ARM_TBFLAG_THUMB(tb->flags);
-    dc->bswap_code = ARM_TBFLAG_BSWAP_CODE(tb->flags);
+    dc->sctlr_b = ARM_TBFLAG_SCTLR_B(tb->flags);
     dc->condexec_mask = (ARM_TBFLAG_CONDEXEC(tb->flags) & 0xf) << 1;
     dc->condexec_cond = ARM_TBFLAG_CONDEXEC(tb->flags) >> 4;
     dc->mmu_idx = ARM_TBFLAG_MMUIDX(tb->flags);
@@ -11487,7 +11487,7 @@ void gen_intermediate_code(CPUARMState *env, TranslationBlock *tb)
                 }
             }
         } else {
-            unsigned int insn = arm_ldl_code(env, dc->pc, dc->bswap_code);
+            unsigned int insn = arm_ldl_code(env, dc->pc, dc->sctlr_b);
             dc->pc += 4;
             disas_arm_insn(dc, insn);
         }
@@ -11644,7 +11644,7 @@ done_generating:
         qemu_log("----------------\n");
         qemu_log("IN: %s\n", lookup_symbol(pc_start));
         log_target_disas(cs, pc_start, dc->pc - pc_start,
-                         dc->thumb | (dc->bswap_code << 1));
+                         dc->thumb | (dc->sctlr_b << 1));
         qemu_log("\n");
     }
 #endif
