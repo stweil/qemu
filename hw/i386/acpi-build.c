@@ -1926,7 +1926,7 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
     DeviceState *iommu = pcms->iommu;
     GArray *table_offsets;
     unsigned facs, dsdt, rsdt;
-    AcpiPmInfo pm;
+    AcpiPmInfo pm = {};
     AcpiMiscInfo misc;
     AcpiMcfgInfo mcfg;
     Range pci_hole = {}, pci_hole64 = {};
