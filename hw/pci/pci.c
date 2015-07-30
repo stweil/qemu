@@ -1148,8 +1148,8 @@ void pci_register_bar(PCIDevice *pci_dev, int region_num,
     uint64_t wmask;
     pcibus_t size = memory_region_size(memory);
 
-    assert(region_num >= 0);
-    assert(region_num < PCI_NUM_REGIONS);
+    g_assert(region_num >= 0);
+    g_assert(region_num < PCI_NUM_REGIONS);
     if (size & (size-1)) {
         error_report("ERROR: PCI region size must be pow2 "
                     "type=0x%x, size=0x%"FMT_PCIBUS"", type, size);
