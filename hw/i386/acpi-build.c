@@ -2607,7 +2607,7 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
     PCMachineClass *pcmc = PC_MACHINE_GET_CLASS(pcms);
     GArray *table_offsets;
     unsigned facs, dsdt, rsdt, fadt;
-    AcpiPmInfo pm;
+    AcpiPmInfo pm = {};
     AcpiMiscInfo misc;
     AcpiMcfgInfo mcfg;
     Range pci_hole, pci_hole64;
