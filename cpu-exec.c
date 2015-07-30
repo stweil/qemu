@@ -393,6 +393,9 @@ int cpu_exec(CPUState *cpu)
 
     /* prepare setjmp context for exception handling */
     for(;;) {
+#if defined(_WIN64)
+# define sigsetjmp(a, b) _setjmp(a, NULL)
+#endif
         if (sigsetjmp(cpu->jmp_env, 0) == 0) {
             /* if an exception is pending, we execute it here */
             if (cpu->exception_index >= 0) {
