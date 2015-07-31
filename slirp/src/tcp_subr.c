@@ -425,6 +425,16 @@ int tcp_fconnect(struct socket *so, unsigned short af)
     /* We don't care what port we get */
     ret = connect(s, (struct sockaddr *)&addr, sockaddr_size(&addr));
 
+#if defined(_WIN32)
+    if (ret < 0 && socket_error() == WSAEWOULDBLOCK) {
+        //~ errno = EWOULDBLOCK;
+    }
+    DEBUG_MISC((dfd, "connect returned %d, error = %d\n", ret, socket_error()));
+#else
+    DEBUG_MISC((dfd, "connect returned %d, error = %d\n", ret, errno));
+#endif
+
+
     /*
      * If it's not in progress, it failed, so we just return 0,
      * without clearing SS_NOFDREF
