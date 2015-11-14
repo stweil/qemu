@@ -470,7 +470,7 @@ gint g_poll(GPollFD *fds, guint nfds, gint timeout)
     return retval;
 }
 
-size_t getpagesize(void)
+int getpagesize(void)
 {
     SYSTEM_INFO system_info;
 
