@@ -645,9 +645,6 @@ static void common_block_job_cb(void *opaque, int ret)
     if (ret < 0) {
         error_setg_errno(cbi->errp, -ret, "Block job failed");
     }
-
-    /* Drop this block job's reference */
-    bdrv_unref(cbi->bs);
 }
 
 static void run_block_job(BlockJob *job, Error **errp)
@@ -656,7 +653,8 @@ static void run_block_job(BlockJob *job, Error **errp)
 
     do {
         aio_poll(aio_context, true);
-        qemu_progress_print((float)job->offset / job->len * 100.f, 0);
+        qemu_progress_print(job->len ?
+                            ((float)job->offset / job->len * 100.f) : 0.0f, 0);
     } while (!job->ready);
 
     block_job_complete_sync(job, errp);

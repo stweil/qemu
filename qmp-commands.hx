@@ -718,6 +718,25 @@ Example:
 
 EQMP
     {
+        .name       = "migrate-start-postcopy",
+        .args_type  = "",
+        .mhandler.cmd_new = qmp_marshal_migrate_start_postcopy,
+    },
+
+SQMP
+migrate-start-postcopy
+----------------------
+
+Switch an in-progress migration to postcopy mode. Ignored after the end of
+migration (or once already in postcopy).
+
+Example:
+-> { "execute": "migrate-start-postcopy" }
+<- { "return": {} }
+
+EQMP
+
+    {
         .name       = "query-migrate-cache-size",
         .args_type  = "",
         .mhandler.cmd_new = qmp_marshal_query_migrate_cache_size,
@@ -1262,7 +1281,7 @@ EQMP
     },
     {
         .name       = "transaction",
-        .args_type  = "actions:q",
+        .args_type  = "actions:q,properties:q?",
         .mhandler.cmd_new = qmp_marshal_transaction,
     },
 
@@ -1471,6 +1490,44 @@ Example:
                                                          "snapshot-file":
                                                         "/some/place/my-image",
                                                         "format": "qcow2" } }
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "blockdev-snapshot",
+        .args_type  = "node:s,overlay:s",
+        .mhandler.cmd_new = qmp_marshal_blockdev_snapshot,
+    },
+
+SQMP
+blockdev-snapshot
+-----------------
+Since 2.5
+
+Create a snapshot, by installing 'node' as the backing image of
+'overlay'. Additionally, if 'node' is associated with a block
+device, the block device changes to using 'overlay' as its new active
+image.
+
+Arguments:
+
+- "node": device that will have a snapshot created (json-string)
+- "overlay": device that will have 'node' as its backing image (json-string)
+
+Example:
+
+-> { "execute": "blockdev-add",
+                "arguments": { "options": { "driver": "qcow2",
+                                            "node-name": "node1534",
+                                            "file": { "driver": "file",
+                                                      "filename": "hd1.qcow2" },
+                                            "backing": "" } } }
+
+<- { "return": {} }
+
+-> { "execute": "blockdev-snapshot", "arguments": { "node": "ide-hd0",
+                                                    "overlay": "node1534" } }
 <- { "return": {} }
 
 EQMP
@@ -2526,6 +2583,64 @@ Each json-object contain the following:
                    another request (json-int)
     - "wr_merged": number of write requests that have been merged into
                    another request (json-int)
+    - "idle_time_ns": time since the last I/O operation, in
+                      nanoseconds. If the field is absent it means
+                      that there haven't been any operations yet
+                      (json-int, optional)
+    - "failed_rd_operations": number of failed read operations
+                              (json-int)
+    - "failed_wr_operations": number of failed write operations
+                              (json-int)
+    - "failed_flush_operations": number of failed flush operations
+                               (json-int)
+    - "invalid_rd_operations": number of invalid read operations
+                               (json-int)
+    - "invalid_wr_operations": number of invalid write operations
+                               (json-int)
+    - "invalid_flush_operations": number of invalid flush operations
+                                  (json-int)
+    - "account_invalid": whether invalid operations are included in
+                         the last access statistics (json-bool)
+    - "account_failed": whether failed operations are included in the
+                         latency and last access statistics
+                         (json-bool)
+    - "timed_stats": A json-array containing statistics collected in
+                     specific intervals, with the following members:
+        - "interval_length": interval used for calculating the
+                             statistics, in seconds (json-int)
+        - "min_rd_latency_ns": minimum latency of read operations in
+                               the defined interval, in nanoseconds
+                               (json-int)
+        - "min_wr_latency_ns": minimum latency of write operations in
+                               the defined interval, in nanoseconds
+                               (json-int)
+        - "min_flush_latency_ns": minimum latency of flush operations
+                                  in the defined interval, in
+                                  nanoseconds (json-int)
+        - "max_rd_latency_ns": maximum latency of read operations in
+                               the defined interval, in nanoseconds
+                               (json-int)
+        - "max_wr_latency_ns": maximum latency of write operations in
+                               the defined interval, in nanoseconds
+                               (json-int)
+        - "max_flush_latency_ns": maximum latency of flush operations
+                                  in the defined interval, in
+                                  nanoseconds (json-int)
+        - "avg_rd_latency_ns": average latency of read operations in
+                               the defined interval, in nanoseconds
+                               (json-int)
+        - "avg_wr_latency_ns": average latency of write operations in
+                               the defined interval, in nanoseconds
+                               (json-int)
+        - "avg_flush_latency_ns": average latency of flush operations
+                                  in the defined interval, in
+                                  nanoseconds (json-int)
+        - "avg_rd_queue_depth": average number of pending read
+                                operations in the defined interval
+                                (json-number)
+        - "avg_wr_queue_depth": average number of pending write
+                                operations in the defined interval
+                                (json-number).
 - "parent": Contains recursively the statistics of the underlying
             protocol (e.g. the host file for a qcow2 image). If there is
             no underlying protocol, this field is omitted
@@ -2550,7 +2665,10 @@ Example:
                   "flush_total_times_ns":49653
                   "flush_operations":61,
                   "rd_merged":0,
-                  "wr_merged":0
+                  "wr_merged":0,
+                  "idle_time_ns":2953431879,
+                  "account_invalid":true,
+                  "account_failed":false
                }
             },
             "stats":{
@@ -2564,7 +2682,10 @@ Example:
                "rd_total_times_ns":3465673657
                "flush_total_times_ns":49653,
                "rd_merged":0,
-               "wr_merged":0
+               "wr_merged":0,
+               "idle_time_ns":2953431879,
+               "account_invalid":true,
+               "account_failed":false
             }
          },
          {
@@ -2580,7 +2701,9 @@ Example:
                "rd_total_times_ns":0
                "flush_total_times_ns":0,
                "rd_merged":0,
-               "wr_merged":0
+               "wr_merged":0,
+               "account_invalid":false,
+               "account_failed":false
             }
          },
          {
@@ -2596,7 +2719,9 @@ Example:
                "rd_total_times_ns":0
                "flush_total_times_ns":0,
                "rd_merged":0,
-               "wr_merged":0
+               "wr_merged":0,
+               "account_invalid":false,
+               "account_failed":false
             }
          },
          {
@@ -2612,7 +2737,9 @@ Example:
                "rd_total_times_ns":0
                "flush_total_times_ns":0,
                "rd_merged":0,
-               "wr_merged":0
+               "wr_merged":0,
+               "account_invalid":false,
+               "account_failed":false
             }
          }
       ]
@@ -3889,8 +4016,8 @@ blockdev-add
 Add a block device.
 
 This command is still a work in progress.  It doesn't support all
-block drivers, it lacks a matching blockdev-del, and more.  Stay away
-from it unless you want to help with its development.
+block drivers among other things.  Stay away from it unless you want
+to help with its development.
 
 Arguments:
 
@@ -3930,6 +4057,228 @@ Example (2):
          }
        }
      }
+
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "x-blockdev-del",
+        .args_type  = "id:s?,node-name:s?",
+        .mhandler.cmd_new = qmp_marshal_x_blockdev_del,
+    },
+
+SQMP
+x-blockdev-del
+------------
+Since 2.5
+
+Deletes a block device thas has been added using blockdev-add.
+The selected device can be either a block backend or a graph node.
+
+In the former case the backend will be destroyed, along with its
+inserted medium if there's any. The command will fail if the backend
+or its medium are in use.
+
+In the latter case the node will be destroyed. The command will fail
+if the node is attached to a block backend or is otherwise being
+used.
+
+One of "id" or "node-name" must be specified, but not both.
+
+This command is still a work in progress and is considered
+experimental. Stay away from it unless you want to help with its
+development.
+
+Arguments:
+
+- "id": Name of the block backend device to delete (json-string, optional)
+- "node-name": Name of the graph node to delete (json-string, optional)
+
+Example:
+
+-> { "execute": "blockdev-add",
+     "arguments": {
+         "options": {
+             "driver": "qcow2",
+             "id": "drive0",
+             "file": {
+                 "driver": "file",
+                 "filename": "test.qcow2"
+             }
+         }
+     }
+   }
+
+<- { "return": {} }
+
+-> { "execute": "x-blockdev-del",
+     "arguments": { "id": "drive0" }
+   }
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "blockdev-open-tray",
+        .args_type  = "device:s,force:b?",
+        .mhandler.cmd_new = qmp_marshal_blockdev_open_tray,
+    },
+
+SQMP
+blockdev-open-tray
+------------------
+
+Opens a block device's tray. If there is a block driver state tree inserted as a
+medium, it will become inaccessible to the guest (but it will remain associated
+to the block device, so closing the tray will make it accessible again).
+
+If the tray was already open before, this will be a no-op.
+
+Once the tray opens, a DEVICE_TRAY_MOVED event is emitted. There are cases in
+which no such event will be generated, these include:
+- if the guest has locked the tray, @force is false and the guest does not
+  respond to the eject request
+- if the BlockBackend denoted by @device does not have a guest device attached
+  to it
+- if the guest device does not have an actual tray and is empty, for instance
+  for floppy disk drives
+
+Arguments:
+
+- "device": block device name (json-string)
+- "force": if false (the default), an eject request will be sent to the guest if
+           it has locked the tray (and the tray will not be opened immediately);
+           if true, the tray will be opened regardless of whether it is locked
+           (json-bool, optional)
+
+Example:
+
+-> { "execute": "blockdev-open-tray",
+     "arguments": { "device": "ide1-cd0" } }
+
+<- { "timestamp": { "seconds": 1418751016,
+                    "microseconds": 716996 },
+     "event": "DEVICE_TRAY_MOVED",
+     "data": { "device": "ide1-cd0",
+               "tray-open": true } }
+
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "blockdev-close-tray",
+        .args_type  = "device:s",
+        .mhandler.cmd_new = qmp_marshal_blockdev_close_tray,
+    },
+
+SQMP
+blockdev-close-tray
+-------------------
+
+Closes a block device's tray. If there is a block driver state tree associated
+with the block device (which is currently ejected), that tree will be loaded as
+the medium.
+
+If the tray was already closed before, this will be a no-op.
+
+Arguments:
+
+- "device": block device name (json-string)
+
+Example:
+
+-> { "execute": "blockdev-close-tray",
+     "arguments": { "device": "ide1-cd0" } }
+
+<- { "timestamp": { "seconds": 1418751345,
+                    "microseconds": 272147 },
+     "event": "DEVICE_TRAY_MOVED",
+     "data": { "device": "ide1-cd0",
+               "tray-open": false } }
+
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "blockdev-remove-medium",
+        .args_type  = "device:s",
+        .mhandler.cmd_new = qmp_marshal_blockdev_remove_medium,
+    },
+
+SQMP
+blockdev-remove-medium
+----------------------
+
+Removes a medium (a block driver state tree) from a block device. That block
+device's tray must currently be open (unless there is no attached guest device).
+
+If the tray is open and there is no medium inserted, this will be a no-op.
+
+Arguments:
+
+- "device": block device name (json-string)
+
+Example:
+
+-> { "execute": "blockdev-remove-medium",
+     "arguments": { "device": "ide1-cd0" } }
+
+<- { "error": { "class": "GenericError",
+                "desc": "Tray of device 'ide1-cd0' is not open" } }
+
+-> { "execute": "blockdev-open-tray",
+     "arguments": { "device": "ide1-cd0" } }
+
+<- { "timestamp": { "seconds": 1418751627,
+                    "microseconds": 549958 },
+     "event": "DEVICE_TRAY_MOVED",
+     "data": { "device": "ide1-cd0",
+               "tray-open": true } }
+
+<- { "return": {} }
+
+-> { "execute": "blockdev-remove-medium",
+     "arguments": { "device": "ide1-cd0" } }
+
+<- { "return": {} }
+
+EQMP
+
+    {
+        .name       = "blockdev-insert-medium",
+        .args_type  = "device:s,node-name:s",
+        .mhandler.cmd_new = qmp_marshal_blockdev_insert_medium,
+    },
+
+SQMP
+blockdev-insert-medium
+----------------------
+
+Inserts a medium (a block driver state tree) into a block device. That block
+device's tray must currently be open (unless there is no attached guest device)
+and there must be no medium inserted already.
+
+Arguments:
+
+- "device": block device name (json-string)
+- "node-name": root node of the BDS tree to insert into the block device
+
+Example:
+
+-> { "execute": "blockdev-add",
+     "arguments": { "options": { "node-name": "node0",
+                                 "driver": "raw",
+                                 "file": { "driver": "file",
+                                           "filename": "fedora.iso" } } } }
+
+<- { "return": {} }
+
+-> { "execute": "blockdev-insert-medium",
+     "arguments": { "device": "ide1-cd0",
+                    "node-name": "node0" } }
 
 <- { "return": {} }
 
@@ -3994,6 +4343,59 @@ Example:
                           "virtual-size":2048000
                       }
                    } } ] }
+
+EQMP
+
+    {
+        .name       = "blockdev-change-medium",
+        .args_type  = "device:B,filename:F,format:s?,read-only-mode:s?",
+        .mhandler.cmd_new = qmp_marshal_blockdev_change_medium,
+    },
+
+SQMP
+blockdev-change-medium
+----------------------
+
+Changes the medium inserted into a block device by ejecting the current medium
+and loading a new image file which is inserted as the new medium.
+
+Arguments:
+
+- "device": device name (json-string)
+- "filename": filename of the new image (json-string)
+- "format": format of the new image (json-string, optional)
+- "read-only-mode": new read-only mode (json-string, optional)
+          - Possible values: "retain" (default), "read-only", "read-write"
+
+Examples:
+
+1. Change a removable medium
+
+-> { "execute": "blockdev-change-medium",
+             "arguments": { "device": "ide1-cd0",
+                            "filename": "/srv/images/Fedora-12-x86_64-DVD.iso",
+                            "format": "raw" } }
+<- { "return": {} }
+
+2. Load a read-only medium into a writable drive
+
+-> { "execute": "blockdev-change-medium",
+             "arguments": { "device": "isa-fd0",
+                            "filename": "/srv/images/ro.img",
+                            "format": "raw",
+                            "read-only-mode": "retain" } }
+
+<- { "error":
+     { "class": "GenericError",
+       "desc": "Could not open '/srv/images/ro.img': Permission denied" } }
+
+-> { "execute": "blockdev-change-medium",
+             "arguments": { "device": "isa-fd0",
+                            "filename": "/srv/images/ro.img",
+                            "format": "raw",
+                            "read-only-mode": "read-only" } }
+
+<- { "return": {} }
 
 EQMP
 

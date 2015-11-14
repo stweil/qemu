@@ -73,8 +73,7 @@ struct BdrvDirtyBitmap {
 
 #define NOT_DONE 0x7fffffff /* used while emulated sync operation in progress */
 
-static QTAILQ_HEAD(, BlockDriverState) bdrv_states =
-    QTAILQ_HEAD_INITIALIZER(bdrv_states);
+struct BdrvStates bdrv_states = QTAILQ_HEAD_INITIALIZER(bdrv_states);
 
 static QTAILQ_HEAD(, BlockDriverState) graph_bdrv_states =
     QTAILQ_HEAD_INITIALIZER(graph_bdrv_states);
@@ -1394,6 +1393,7 @@ static int bdrv_open_inherit(BlockDriverState **pbs, const char *filename,
     BlockDriverState *bs;
     BlockDriver *drv = NULL;
     const char *drvname;
+    const char *backing;
     Error *local_err = NULL;
     int snapshot_flags = 0;
 
@@ -1460,6 +1460,12 @@ static int bdrv_open_inherit(BlockDriverState **pbs, const char *filename,
     }
 
     assert(drvname || !(flags & BDRV_O_PROTOCOL));
+
+    backing = qdict_get_try_str(options, "backing");
+    if (backing && *backing == '\0') {
+        flags |= BDRV_O_NO_BACKING;
+        qdict_del(options, "backing");
+    }
 
     bs->open_flags = flags;
     bs->options = options;
@@ -1795,8 +1801,7 @@ int bdrv_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueue *queue,
 
     ret = bdrv_flush(reopen_state->bs);
     if (ret) {
-        error_set(errp, ERROR_CLASS_GENERIC_ERROR, "Error (%s) flushing drive",
-                  strerror(-ret));
+        error_setg_errno(errp, -ret, "Error flushing drive");
         goto error;
     }
 
@@ -1901,7 +1906,7 @@ void bdrv_close(BlockDriverState *bs)
     }
 
     /* Disable I/O limits and drain all pending throttled requests */
-    if (bs->io_limits_enabled) {
+    if (bs->throttle_state) {
         bdrv_io_limits_disable(bs);
     }
 
@@ -2683,12 +2688,12 @@ BlockDriverState *bdrv_lookup_bs(const char *device,
         blk = blk_by_name(device);
 
         if (blk) {
-            if (!blk_bs(blk)) {
+            bs = blk_bs(blk);
+            if (!bs) {
                 error_setg(errp, "Device '%s' has no medium", device);
-                return NULL;
             }
 
-            return blk_bs(blk);
+            return bs;
         }
     }
 
@@ -3399,10 +3404,25 @@ void bdrv_reset_dirty_bitmap(BdrvDirtyBitmap *bitmap,
     hbitmap_reset(bitmap->bitmap, cur_sector, nr_sectors);
 }
 
-void bdrv_clear_dirty_bitmap(BdrvDirtyBitmap *bitmap)
+void bdrv_clear_dirty_bitmap(BdrvDirtyBitmap *bitmap, HBitmap **out)
 {
     assert(bdrv_dirty_bitmap_enabled(bitmap));
-    hbitmap_reset_all(bitmap->bitmap);
+    if (!out) {
+        hbitmap_reset_all(bitmap->bitmap);
+    } else {
+        HBitmap *backup = bitmap->bitmap;
+        bitmap->bitmap = hbitmap_alloc(bitmap->size,
+                                       hbitmap_granularity(backup));
+        *out = backup;
+    }
+}
+
+void bdrv_undo_clear_dirty_bitmap(BdrvDirtyBitmap *bitmap, HBitmap *in)
+{
+    HBitmap *tmp = bitmap->bitmap;
+    assert(bdrv_dirty_bitmap_enabled(bitmap));
+    bitmap->bitmap = in;
+    hbitmap_free(tmp);
 }
 
 void bdrv_set_dirty(BlockDriverState *bs, int64_t cur_sector,
@@ -3706,7 +3726,7 @@ void bdrv_detach_aio_context(BlockDriverState *bs)
         baf->detach_aio_context(baf->opaque);
     }
 
-    if (bs->io_limits_enabled) {
+    if (bs->throttle_state) {
         throttle_timers_detach_aio_context(&bs->throttle_timers);
     }
     if (bs->drv->bdrv_detach_aio_context) {
@@ -3742,7 +3762,7 @@ void bdrv_attach_aio_context(BlockDriverState *bs,
     if (bs->drv->bdrv_attach_aio_context) {
         bs->drv->bdrv_attach_aio_context(bs, new_context);
     }
-    if (bs->io_limits_enabled) {
+    if (bs->throttle_state) {
         throttle_timers_attach_aio_context(&bs->throttle_timers, new_context);
     }
 

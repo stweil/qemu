@@ -1021,9 +1021,19 @@ static void spapr_alloc_htab(sPAPRMachineState *spapr)
      * RAM */
 
     shift = kvmppc_reset_htab(spapr->htab_shift);
-
-    if (shift > 0) {
-        /* Kernel handles htab, we don't need to allocate one */
+    if (shift < 0) {
+        /*
+         * For HV KVM, host kernel will return -ENOMEM when requested
+         * HTAB size can't be allocated.
+         */
+        error_setg(&error_abort, "Failed to allocate HTAB of requested size, try with smaller maxmem");
+    } else if (shift > 0) {
+        /*
+         * Kernel handles htab, we don't need to allocate one
+         *
+         * Older kernels can fall back to lower HTAB shift values,
+         * but we don't allow booting of such guests.
+         */
         if (shift != spapr->htab_shift) {
             error_setg(&error_abort, "Failed to allocate HTAB of requested size, try with smaller maxmem");
         }
@@ -1055,7 +1065,9 @@ static void spapr_reset_htab(sPAPRMachineState *spapr)
     int index;
 
     shift = kvmppc_reset_htab(spapr->htab_shift);
-    if (shift > 0) {
+    if (shift < 0) {
+        error_setg(&error_abort, "Failed to reset HTAB");
+    } else if (shift > 0) {
         if (shift != spapr->htab_shift) {
             error_setg(&error_abort, "Requested HTAB allocation failed during reset");
         }
@@ -1589,7 +1601,7 @@ static int htab_load(QEMUFile *f, void *opaque, int version_id)
 static SaveVMHandlers savevm_htab_handlers = {
     .save_live_setup = htab_save_setup,
     .save_live_iterate = htab_save_iterate,
-    .save_live_complete = htab_save_complete,
+    .save_live_complete_precopy = htab_save_complete,
     .load_state = htab_load,
 };
 

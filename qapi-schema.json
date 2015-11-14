@@ -430,6 +430,8 @@
 #
 # @active: in the process of doing migration.
 #
+# @postcopy-active: like active, but now in postcopy mode. (since 2.5)
+#
 # @completed: migration is finished.
 #
 # @failed: some error occurred during migration process.
@@ -439,7 +441,7 @@
 ##
 { 'enum': 'MigrationStatus',
   'data': [ 'none', 'setup', 'cancelling', 'cancelled',
-            'active', 'completed', 'failed' ] }
+            'active', 'postcopy-active', 'completed', 'failed' ] }
 
 ##
 # @MigrationInfo
@@ -540,11 +542,15 @@
 # @auto-converge: If enabled, QEMU will automatically throttle down the guest
 #          to speed up convergence of RAM migration. (since 1.6)
 #
+# @x-postcopy-ram: Start executing on the migration target before all of RAM has
+#          been migrated, pulling the remaining pages along as needed. NOTE: If
+#          the migration fails during postcopy the VM will fail.  (since 2.5)
+#
 # Since: 1.2
 ##
 { 'enum': 'MigrationCapability',
   'data': ['xbzrle', 'rdma-pin-all', 'auto-converge', 'zero-blocks',
-           'compress', 'events'] }
+           'compress', 'events', 'x-postcopy-ram'] }
 
 ##
 # @MigrationCapabilityStatus
@@ -696,6 +702,16 @@
 { 'command': 'client_migrate_info',
   'data': { 'protocol': 'str', 'hostname': 'str', '*port': 'int',
             '*tls-port': 'int', '*cert-subject': 'str' } }
+
+##
+# @migrate-start-postcopy
+#
+# Followup to a migration command to switch the migration to postcopy mode.
+# The x-postcopy-ram capability must be set before the original migration
+# command.
+#
+# Since: 2.5
+{ 'command': 'migrate-start-postcopy' }
 
 ##
 # @MouseInfo:
@@ -1520,6 +1536,26 @@
   'data': { } }
 
 ##
+# @ActionCompletionMode
+#
+# An enumeration of Transactional completion modes.
+#
+# @individual: Do not attempt to cancel any other Actions if any Actions fail
+#              after the Transaction request succeeds. All Actions that
+#              can complete successfully will do so without waiting on others.
+#              This is the default.
+#
+# @grouped: If any Action fails after the Transaction succeeds, cancel all
+#           Actions. Actions do not complete until all Actions are ready to
+#           complete. May be rejected by Actions that do not support this
+#           completion mode.
+#
+# Since: 2.5
+##
+{ 'enum': 'ActionCompletionMode',
+  'data': [ 'individual', 'grouped' ] }
+
+##
 # @TransactionAction
 #
 # A discriminated record of operations that can be performed with
@@ -1531,15 +1567,38 @@
 # abort since 1.6
 # blockdev-snapshot-internal-sync since 1.7
 # blockdev-backup since 2.3
+# blockdev-snapshot since 2.5
+# block-dirty-bitmap-add since 2.5
+# block-dirty-bitmap-clear since 2.5
 ##
 { 'union': 'TransactionAction',
   'data': {
-       'blockdev-snapshot-sync': 'BlockdevSnapshot',
+       'blockdev-snapshot': 'BlockdevSnapshot',
+       'blockdev-snapshot-sync': 'BlockdevSnapshotSync',
        'drive-backup': 'DriveBackup',
        'blockdev-backup': 'BlockdevBackup',
        'abort': 'Abort',
-       'blockdev-snapshot-internal-sync': 'BlockdevSnapshotInternal'
+       'blockdev-snapshot-internal-sync': 'BlockdevSnapshotInternal',
+       'block-dirty-bitmap-add': 'BlockDirtyBitmapAdd',
+       'block-dirty-bitmap-clear': 'BlockDirtyBitmap'
    } }
+
+##
+# @TransactionProperties
+#
+# Optional arguments to modify the behavior of a Transaction.
+#
+# @completion-mode: #optional Controls how jobs launched asynchronously by
+#                   Actions will complete or fail as a group.
+#                   See @ActionCompletionMode for details.
+#
+# Since: 2.5
+##
+{ 'struct': 'TransactionProperties',
+  'data': {
+       '*completion-mode': 'ActionCompletionMode'
+  }
+}
 
 ##
 # @transaction
@@ -1548,8 +1607,12 @@
 # operation fails, then the entire set of actions will be abandoned and the
 # appropriate error returned.
 #
-#  List of:
-#  @TransactionAction: information needed for the respective operation
+# @actions: List of @TransactionAction;
+#           information needed for the respective operations.
+#
+# @properties: #optional structure of additional options to control the
+#              execution of the transaction. See @TransactionProperties
+#              for additional detail.
 #
 # Returns: nothing on success
 #          Errors depend on the operations of the transaction
@@ -1561,7 +1624,10 @@
 # Since 1.1
 ##
 { 'command': 'transaction',
-  'data': { 'actions': [ 'TransactionAction' ] } }
+  'data': { 'actions': [ 'TransactionAction' ],
+            '*properties': 'TransactionProperties'
+          }
+}
 
 ##
 # @human-monitor-command:
@@ -1842,8 +1908,10 @@
 #          device's password.  The behavior of reads and writes to the block
 #          device between when these calls are executed is undefined.
 #
-# Notes:  It is strongly recommended that this interface is not used especially
-#         for changing block devices.
+# Notes:  This interface is deprecated, and it is strongly recommended that you
+#         avoid using it.  For changing block devices, use
+#         blockdev-change-medium; for changing VNC parameters, use
+#         change-vnc-password.
 #
 # Since: 0.14.0
 ##

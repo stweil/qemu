@@ -194,8 +194,8 @@ ETEXI
 
     {
         .name       = "change",
-        .args_type  = "device:B,target:F,arg:s?",
-        .params     = "device filename [format]",
+        .args_type  = "device:B,target:F,arg:s?,read-only-mode:s?",
+        .params     = "device filename [format [read-only-mode]]",
         .help       = "change a removable medium, optional format",
         .mhandler.cmd = hmp_change,
     },
@@ -206,7 +206,7 @@ STEXI
 Change the configuration of a device.
 
 @table @option
-@item change @var{diskdevice} @var{filename} [@var{format}]
+@item change @var{diskdevice} @var{filename} [@var{format} [@var{read-only-mode}]]
 Change the medium for a removable disk device to point to @var{filename}. eg
 
 @example
@@ -214,6 +214,20 @@ Change the medium for a removable disk device to point to @var{filename}. eg
 @end example
 
 @var{format} is optional.
+
+@var{read-only-mode} may be used to change the read-only status of the device.
+It accepts the following values:
+
+@table @var
+@item retain
+Retains the current status; this is the default.
+
+@item read-only
+Makes the device read-only.
+
+@item read-write
+Makes the device writable.
+@end table
 
 @item change vnc @var{display},@var{options}
 Change the configuration of the VNC server. The valid syntax for @var{display}
@@ -1005,6 +1019,23 @@ STEXI
 @item migrate_set_parameter @var{parameter} @var{value}
 @findex migrate_set_parameter
 Set the parameter @var{parameter} for migration.
+ETEXI
+
+    {
+        .name       = "migrate_start_postcopy",
+        .args_type  = "",
+        .params     = "",
+        .help       = "Followup to a migration command to switch the migration"
+                      " to postcopy mode. The x-postcopy-ram capability must "
+                      "be set before the original migration command.",
+        .mhandler.cmd = hmp_migrate_start_postcopy,
+    },
+
+STEXI
+@item migrate_start_postcopy
+@findex migrate_start_postcopy
+Switch in-progress migration to postcopy mode. Ignored after the end of
+migration (or once already in postcopy).
 ETEXI
 
     {
