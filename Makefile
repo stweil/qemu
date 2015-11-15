@@ -449,7 +449,12 @@ endif
 
 
 install-tools: tools
-	$(call install-prog,$(TOOLS),$(DESTDIR)$(bindir))
+	$(call install-prog,$(filter-out qemu-ga,$(TOOLS)),$(DESTDIR)$(bindir))
+	# qemu-ga is included in TOOLS, but we need special install rules for w32
+ifneq (,$(findstring qemu-ga,$(TOOLS)))
+	$(call install-prog,qemu-ga$(EXESUF),$(DESTDIR)$(bindir))
+endif
+
 
 install: all $(if $(BUILD_DOCS),install-doc) $(if $(BUILD_TOOLS),install-tools) \
 install-datadir install-localstatedir
