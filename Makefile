@@ -449,12 +449,10 @@ endif
 
 
 install-tools: tools
+	$(call install-prog,$(TOOLS),$(DESTDIR)$(bindir))
 
 install: all $(if $(BUILD_DOCS),install-doc) $(if $(BUILD_TOOLS),install-tools) \
 install-datadir install-localstatedir
-ifneq ($(TOOLS),)
-	$(call install-prog,$(TOOLS),$(DESTDIR)$(bindir))
-endif
 ifneq ($(CONFIG_MODULES),)
 	$(INSTALL_DIR) "$(DESTDIR)$(qemu_moddir)"
 	for s in $(modules-m:.mo=$(DSOSUF)); do \
