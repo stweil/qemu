@@ -1280,8 +1280,9 @@ static int loadvm_postcopy_handle_advise(MigrationIncomingState *mis)
          * handle dirtying to make sure we never end up sending part of
          * a hostpage on it's own.
          */
-        error_report("Postcopy needs matching host page sizes (s=%d d=%d)",
-                     (int)remote_hps, getpagesize());
+        error_report("Postcopy needs matching host page sizes "
+                     "(s=%" PRIu64 " d=%d)",
+                     remote_hps, getpagesize());
         return -1;
     }
 
