@@ -1539,12 +1539,14 @@ MachineInfoList *qmp_query_machines(Error **errp)
 static int machine_help_func(QemuOpts *opts, MachineState *machine)
 {
     ObjectProperty *prop;
+    ObjectPropertyIterator *iter;
 
     if (!qemu_opt_has_help_opt(opts)) {
         return 0;
     }
 
-    QTAILQ_FOREACH(prop, &OBJECT(machine)->properties, node) {
+    iter = object_property_iter_init(OBJECT(machine));
+    while ((prop = object_property_iter_next(iter))) {
         if (!prop->set) {
             continue;
         }
@@ -1557,6 +1559,7 @@ static int machine_help_func(QemuOpts *opts, MachineState *machine)
             error_printf("\n");
         }
     }
+    object_property_iter_free(iter);
 
     return 1;
 }
@@ -4337,14 +4340,23 @@ int main(int argc, char **argv)
     page_size_init();
     socket_init();
 
-    if (qemu_opts_foreach(qemu_find_opts("object"),
-                          object_create,
-                          object_create_initial, NULL)) {
+    if (qemu_opts_foreach(qemu_find_opts("chardev"),
+                          chardev_init_func, NULL, NULL)) {
         exit(1);
     }
 
-    if (qemu_opts_foreach(qemu_find_opts("chardev"),
-                          chardev_init_func, NULL, NULL)) {
+    if (qtest_chrdev) {
+        Error *local_err = NULL;
+        qtest_init(qtest_chrdev, qtest_log, &local_err);
+        if (local_err) {
+            error_report_err(local_err);
+            exit(1);
+        }
+    }
+
+    if (qemu_opts_foreach(qemu_find_opts("object"),
+                          object_create,
+                          object_create_initial, NULL)) {
         exit(1);
     }
 
@@ -4373,15 +4385,6 @@ int main(int argc, char **argv)
     }
 
     configure_accelerator(current_machine);
-
-    if (qtest_chrdev) {
-        Error *local_err = NULL;
-        qtest_init(qtest_chrdev, qtest_log, &local_err);
-        if (local_err) {
-            error_report_err(local_err);
-            exit(1);
-        }
-    }
 
     machine_opts = qemu_get_machine_opts();
     kernel_filename = qemu_opt_get(machine_opts, "kernel");
