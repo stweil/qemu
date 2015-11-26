@@ -538,6 +538,10 @@ void mips_cpu_do_interrupt(CPUState *cs)
  enter_debug_mode:
         if (env->insn_flags & ISA_MIPS3) {
             env->hflags |= MIPS_HFLAG_64;
+            if (!(env->insn_flags & ISA_MIPS64R6) ||
+                env->CP0_Status & (1 << CP0St_KX)) {
+                env->hflags &= ~MIPS_HFLAG_AWRAP;
+            }
         }
         env->hflags |= MIPS_HFLAG_DM | MIPS_HFLAG_CP0;
         env->hflags &= ~(MIPS_HFLAG_KSU);
@@ -562,6 +566,10 @@ void mips_cpu_do_interrupt(CPUState *cs)
         env->CP0_Status |= (1 << CP0St_ERL) | (1 << CP0St_BEV);
         if (env->insn_flags & ISA_MIPS3) {
             env->hflags |= MIPS_HFLAG_64;
+            if (!(env->insn_flags & ISA_MIPS64R6) ||
+                env->CP0_Status & (1 << CP0St_KX)) {
+                env->hflags &= ~MIPS_HFLAG_AWRAP;
+            }
         }
         env->hflags |= MIPS_HFLAG_CP0;
         env->hflags &= ~(MIPS_HFLAG_KSU);
@@ -739,6 +747,10 @@ void mips_cpu_do_interrupt(CPUState *cs)
             env->CP0_Status |= (1 << CP0St_EXL);
             if (env->insn_flags & ISA_MIPS3) {
                 env->hflags |= MIPS_HFLAG_64;
+                if (!(env->insn_flags & ISA_MIPS64R6) ||
+                    env->CP0_Status & (1 << CP0St_KX)) {
+                    env->hflags &= ~MIPS_HFLAG_AWRAP;
+                }
             }
             env->hflags |= MIPS_HFLAG_CP0;
             env->hflags &= ~(MIPS_HFLAG_KSU);

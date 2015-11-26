@@ -452,7 +452,7 @@ install-tools: tools
 	$(call install-prog,$(filter-out qemu-ga,$(TOOLS)),$(DESTDIR)$(bindir))
 	# qemu-ga is included in TOOLS, but we need special install rules for w32
 ifneq (,$(findstring qemu-ga,$(TOOLS)))
-	$(call install-prog,qemu-ga$(EXESUF),$(DESTDIR)$(bindir))
+	$(call install-prog,$(subst qemu-ga,qemu-ga$(EXESUF),$(TOOLS)),$(DESTDIR)$(bindir))
 endif
 
 
