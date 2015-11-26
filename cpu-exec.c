@@ -37,6 +37,7 @@
  * If this parameter is NULL, longjump does no stack unwinding.
  * That is what we need for QEMU. Passing the value of register rsp (default)
  * lets longjmp try a stack unwinding which will crash with generated code. */
+#undef sigsetjmp
 #define sigsetjmp(env, savesigs) _setjmp(env, NULL)
 #endif
 
