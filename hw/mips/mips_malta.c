@@ -69,8 +69,6 @@
 #define FPGA_ADDRESS  0x1f000000ULL
 #define RESET_ADDRESS 0x1fc00000ULL
 
-#define FLASH_SIZE    0x400000
-
 #define MAX_IDE_BUS 2
 
 //~ #define DEBUG
@@ -935,7 +933,7 @@ void mips_malta_init(MachineState *machine)
     MemoryRegion *ram_low_preio = g_new(MemoryRegion, 1);
     MemoryRegion *ram_low_postio;
     MemoryRegion *bios, *bios_copy = g_new(MemoryRegion, 1);
-    target_long bios_size = FLASH_SIZE;
+    target_long bios_size = BIOS_SIZE;
     const size_t smbus_eeprom_size = 8 * 256;
     uint8_t *smbus_eeprom_buf = g_malloc0(smbus_eeprom_size);
     int64_t kernel_entry, bootloader_run_addr;
