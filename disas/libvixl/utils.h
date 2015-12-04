@@ -36,7 +36,7 @@ namespace vixl {
 // Macros for compile-time format checking.
 #if defined(__GNUC__)
 #define PRINTF_CHECK(format_index, varargs_index) \
-  __attribute__((format(printf, format_index, varargs_index)))
+  __attribute__((format(gnu_printf, format_index, varargs_index)))
 #else
 #define PRINTF_CHECK(format_index, varargs_index)
 #endif
