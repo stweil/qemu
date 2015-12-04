@@ -3,10 +3,8 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
-#include "qemu/timer.h"
-#include "hw/sysbus.h"
-#include "hw/sd/sd.h"
 #include "sysemu/blockdev.h"
+#include "hw/sd/bcm2835_emmc.h"
 
 /*
  * Controller registers
@@ -136,6 +134,11 @@
         SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_DATA_CRC | \
         SDHCI_INT_DATA_END_BIT | SDHCI_INT_ADMA_ERROR)
 #define SDHCI_INT_ALL_MASK  ((unsigned int)-1)
+
+/* Per the BCM2835 ARM peripherals document (p76), some interrupts are
+ * not implemented (reserved) */
+#define BCM2835_DISABLED_INTS (SDHCI_INT_DMA_END | SDHCI_INT_CARD_INSERT \
+                               | SDHCI_INT_CARD_REMOVE)
 
 #define SDHCI_ACMD12_ERR    0x3C
 
@@ -289,66 +292,20 @@
 
 #define COMPLETION_DELAY (100000)
 
-#define TYPE_BCM2835_EMMC "bcm2835_emmc"
-#define BCM2835_EMMC(obj) \
-        OBJECT_CHECK(bcm2835_emmc_state, (obj), TYPE_BCM2835_EMMC)
-
-typedef struct {
-    SysBusDevice busdev;
-    MemoryRegion iomem;
-
-    SDState *card;
-
-    uint32_t arg2;
-    uint32_t blksizecnt;
-    uint32_t arg1;
-    uint32_t cmdtm;
-    uint32_t resp0;
-    uint32_t resp1;
-    uint32_t resp2;
-    uint32_t resp3;
-    uint32_t data;
-    uint32_t status;
-    uint32_t control0;
-    uint32_t control1;
-    uint32_t interrupt;
-    uint32_t irpt_mask;
-    uint32_t irpt_en;
-    uint32_t control2;
-    uint32_t force_irpt;
-    uint32_t spi_int_spt;
-    uint32_t slotisr_ver;
-    uint32_t caps;
-    uint32_t caps2;
-    uint32_t maxcurr;
-    uint32_t maxcurr2;
-
-    int acmd;
-    int write_op;
-
-    uint32_t bytecnt;
-
-    QEMUTimer *delay_timer;
-    qemu_irq irq;
-
-} bcm2835_emmc_state;
-
-static void bcm2835_emmc_set_irq(bcm2835_emmc_state *s)
+static void bcm2835_emmc_set_irq(BCM2835EmmcState *s)
 {
-    if (s->status & SDHCI_SPACE_AVAILABLE) {
-        s->interrupt |= SDHCI_INT_SPACE_AVAIL;
-    }
-    if (s->status & SDHCI_DATA_AVAILABLE) {
-        s->interrupt |= SDHCI_INT_DATA_AVAIL;
-    }
-    if (s->irpt_en & s->irpt_mask & s->interrupt) {
+    /* the error bit must be set iff there are any other errors */
+    assert(((s->interrupt & SDHCI_INT_ERROR) == 0)
+           == ((s->interrupt & SDHCI_INT_ERROR_MASK & ~SDHCI_INT_ERROR) == 0));
+
+    if (s->irpt_en & s->irpt_mask & s->interrupt & ~BCM2835_DISABLED_INTS) {
         qemu_set_irq(s->irq, 1);
     } else {
         qemu_set_irq(s->irq, 0);
     }
 }
 
-static void autocmd12(bcm2835_emmc_state *s)
+static void autocmd12(BCM2835EmmcState *s)
 {
     SDRequest request;
     uint8_t response[16];
@@ -363,7 +320,7 @@ static void autocmd12(bcm2835_emmc_state *s)
     sd_do_command(s->card, &request, response);
 }
 
-static void autocmd23(bcm2835_emmc_state *s)
+static void autocmd23(BCM2835EmmcState *s)
 {
     SDRequest request;
     uint8_t response[16];
@@ -380,7 +337,7 @@ static void autocmd23(bcm2835_emmc_state *s)
 
 static void delayed_completion(void *opaque)
 {
-    bcm2835_emmc_state *s = (bcm2835_emmc_state *)opaque;
+    BCM2835EmmcState *s = (BCM2835EmmcState *)opaque;
 
     s->interrupt |= SDHCI_INT_DATA_END;
     autocmd12(s);
@@ -392,7 +349,7 @@ static void delayed_completion(void *opaque)
 static uint64_t bcm2835_emmc_read(void *opaque, hwaddr offset,
     unsigned size)
 {
-    bcm2835_emmc_state *s = (bcm2835_emmc_state *)opaque;
+    BCM2835EmmcState *s = (BCM2835EmmcState *)opaque;
     uint32_t res = 0;
     uint8_t tmp = 0;
     int set_irq = 0;
@@ -475,6 +432,11 @@ static uint64_t bcm2835_emmc_read(void *opaque, hwaddr offset,
 
             s->interrupt |= SDHCI_INT_DATA_END;
         }
+
+        if (s->status & SDHCI_DATA_AVAILABLE) {
+            s->interrupt |= SDHCI_INT_DATA_AVAIL;
+        }
+
         set_irq = 1;
         res = s->data;
         break;
@@ -488,7 +450,7 @@ static uint64_t bcm2835_emmc_read(void *opaque, hwaddr offset,
         res = s->control1;
         break;
     case SDHCI_INT_STATUS:      /* INTERRUPT */
-        res = s->interrupt;
+        res = s->interrupt & s->irpt_mask;
         break;
     case SDHCI_INT_ENABLE:      /* IRPT_MASK */
         res = s->irpt_mask;
@@ -531,7 +493,7 @@ static uint64_t bcm2835_emmc_read(void *opaque, hwaddr offset,
 static void bcm2835_emmc_write(void *opaque, hwaddr offset,
                         uint64_t value, unsigned size)
 {
-    bcm2835_emmc_state *s = (bcm2835_emmc_state *)opaque;
+    BCM2835EmmcState *s = (BCM2835EmmcState *)opaque;
     uint8_t cmd;
     SDRequest request;
     uint8_t response[16];
@@ -578,6 +540,7 @@ static void bcm2835_emmc_write(void *opaque, hwaddr offset,
                     | (response[3] << 0);
                 if (!s->acmd && ((cmd == 24) || (cmd == 25))) {
                     s->status |= SDHCI_SPACE_AVAILABLE;
+                    s->interrupt |= SDHCI_INT_SPACE_AVAIL;
                 }
             } else if (resplen == 16) {
                 s->resp3 = 0
@@ -610,6 +573,9 @@ static void bcm2835_emmc_write(void *opaque, hwaddr offset,
             } else {
                 if (sd_data_ready(s->card)) {
                     s->status |= SDHCI_DATA_AVAILABLE;
+                    s->interrupt |= SDHCI_INT_DATA_AVAIL;
+                } else {
+                    s->interrupt |= SDHCI_INT_DATA_END;
                 }
             }
             bcm2835_emmc_set_irq(s);
@@ -673,6 +639,11 @@ static void bcm2835_emmc_write(void *opaque, hwaddr offset,
                 s->interrupt |= SDHCI_INT_DATA_END;
             }
         }
+
+        if (s->status & SDHCI_SPACE_AVAILABLE) {
+            s->interrupt |= SDHCI_INT_SPACE_AVAIL;
+        }
+
         bcm2835_emmc_set_irq(s);
         break;
     case SDHCI_HOST_CONTROL:    /* CONTROL0 */
@@ -687,6 +658,12 @@ static void bcm2835_emmc_write(void *opaque, hwaddr offset,
             | SDHCI_RESET_CMD
             | SDHCI_RESET_DATA) << 24)) {
             /* Reset */
+            /* TODO: implement proper reset logic. In the meantime,
+             * one observed side-effect of reset is clearing the card
+             * inserted bit. */
+            if (value & (SDHCI_RESET_ALL << 24)) {
+                s->interrupt &= ~SDHCI_INT_CARD_INSERT;
+            }
             value &= ~((SDHCI_RESET_ALL
                 | SDHCI_RESET_CMD
                 | SDHCI_RESET_DATA) << 24);
@@ -695,14 +672,20 @@ static void bcm2835_emmc_write(void *opaque, hwaddr offset,
         break;
     case SDHCI_INT_STATUS:      /* INTERRUPT */
         s->interrupt &= ~value;
+        /* clearing all error sources also clears the overall error status */
+        if ((s->interrupt & SDHCI_INT_ERROR_MASK) == SDHCI_INT_ERROR) {
+            s->interrupt &= ~SDHCI_INT_ERROR_MASK;
+        }
         bcm2835_emmc_set_irq(s);
         break;
 
     case SDHCI_INT_ENABLE:      /* IRPT_MASK */
         s->irpt_mask = value;
+        bcm2835_emmc_set_irq(s);
         break;
     case SDHCI_SIGNAL_ENABLE:   /* IRPT_EN */
         s->irpt_en = value;
+        bcm2835_emmc_set_irq(s);
         break;
     case SDHCI_ACMD12_ERR:      /* CONTROL2 */
         s->control2 &= ~0x00e7009f;
@@ -734,16 +717,25 @@ static const VMStateDescription vmstate_bcm2835_emmc = {
     }
 };
 
-static int bcm2835_emmc_init(SysBusDevice *sbd)
+static void bcm2835_emmc_init(Object *obj)
 {
+    BCM2835EmmcState *s = BCM2835_EMMC(obj);
+
+    memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_emmc_ops, s,
+                          TYPE_BCM2835_EMMC, 0x100000);
+    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
+    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
+}
+
+static void bcm2835_emmc_realize(DeviceState *dev, Error **errp)
+{
+    BCM2835EmmcState *s = BCM2835_EMMC(dev);
     DriveInfo *dinfo;
-    DeviceState *dev = DEVICE(sbd);
-    bcm2835_emmc_state *s = BCM2835_EMMC(dev);
 
     dinfo = drive_get(IF_SD, 0, 0);
     if (!dinfo) {
-        fprintf(stderr, "bcm2835_emmc: missing SD card\n");
-        exit(1);
+        error_setg(errp, "bcm2835_emmc: missing SD card");
+        return;
     }
     s->card = sd_init(blk_by_legacy_dinfo(dinfo), 0);
 
@@ -759,7 +751,14 @@ static int bcm2835_emmc_init(SysBusDevice *sbd)
     s->status = (0x1ff << 16);
     s->control0 = 0;
     s->control1 = SDHCI_CLOCK_INT_STABLE;
-    s->interrupt = 0;
+
+    /* Although the Broadcom doc says it is unimplemented/reserved, on
+     * real hardware the card inserted interrupt is actually set at
+     * boot, and is later cleared by a reset command (as observed on a
+     * Raspberry Pi 2). Moreover, EDK2/UEFI depend on seeing this bit
+     * set, so we set it here and later clear it in the reset. */
+    s->interrupt = SDHCI_INT_CARD_INSERT;
+
     s->irpt_mask = 0;
     s->irpt_en = 0;
     s->control2 = 0;
@@ -775,29 +774,22 @@ static int bcm2835_emmc_init(SysBusDevice *sbd)
     s->write_op = 0;
 
     s->delay_timer = timer_new_us(QEMU_CLOCK_VIRTUAL, delayed_completion, s);
-
-    memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_emmc_ops, s,
-        TYPE_BCM2835_EMMC, 0x100000);
-    sysbus_init_mmio(sbd, &s->iomem);
-    vmstate_register(dev, -1, &vmstate_bcm2835_emmc, s);
-
-    sysbus_init_irq(sbd, &s->irq);
-
-    return 0;
 }
 
 static void bcm2835_emmc_class_init(ObjectClass *klass, void *data)
 {
-    SysBusDeviceClass *sdc = SYS_BUS_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
-    sdc->init = bcm2835_emmc_init;
+    dc->realize = bcm2835_emmc_realize;
+    dc->vmsd = &vmstate_bcm2835_emmc;
 }
 
 static TypeInfo bcm2835_emmc_info = {
     .name          = TYPE_BCM2835_EMMC,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(bcm2835_emmc_state),
+    .instance_size = sizeof(BCM2835EmmcState),
     .class_init    = bcm2835_emmc_class_init,
+    .instance_init = bcm2835_emmc_init,
 };
 
 static void bcm2835_emmc_register_types(void)

@@ -3,28 +3,9 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
-#include "hw/sysbus.h"
+#include "hw/misc/bcm2835_mphi.h"
 
-#define TYPE_BCM2835_MPHI "bcm2835_mphi"
-#define BCM2835_MPHI(obj) \
-        OBJECT_CHECK(bcm2835_mphi_state, (obj), TYPE_BCM2835_MPHI)
-
-typedef struct {
-    SysBusDevice busdev;
-    MemoryRegion iomem;
-
-    uint32_t mphi_base;
-    uint32_t mphi_ctrl;
-    uint32_t mphi_outdda;
-    uint32_t mphi_outddb;
-    uint32_t mphi_intstat;
-
-    qemu_irq irq;
-
-} bcm2835_mphi_state;
-
-
-static void bcm2835_mphi_update_irq(bcm2835_mphi_state *s)
+static void bcm2835_mphi_update_irq(BCM2835MphiState *s)
 {
     if (s->mphi_intstat) {
         qemu_set_irq(s->irq, 1);
@@ -36,7 +17,7 @@ static void bcm2835_mphi_update_irq(bcm2835_mphi_state *s)
 static uint64_t bcm2835_mphi_read(void *opaque, hwaddr offset,
     unsigned size)
 {
-    bcm2835_mphi_state *s = (bcm2835_mphi_state *)opaque;
+    BCM2835MphiState *s = (BCM2835MphiState *)opaque;
     uint32_t res = 0;
 
     assert(size == 4);
@@ -71,7 +52,7 @@ static uint64_t bcm2835_mphi_read(void *opaque, hwaddr offset,
 static void bcm2835_mphi_write(void *opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
-    bcm2835_mphi_state *s = (bcm2835_mphi_state *)opaque;
+    BCM2835MphiState *s = (BCM2835MphiState *)opaque;
     int set_irq = 0;
 
     assert(size == 4);
@@ -133,39 +114,41 @@ static const VMStateDescription vmstate_bcm2835_mphi = {
     }
 };
 
-static int bcm2835_mphi_init(SysBusDevice *sbd)
+static void bcm2835_mphi_init(Object *obj)
 {
-    DeviceState *dev = DEVICE(sbd);
-    bcm2835_mphi_state *s = BCM2835_MPHI(dev);
+    BCM2835MphiState *s = BCM2835_MPHI(obj);
+
+    memory_region_init_io(&s->iomem, obj, &bcm2835_mphi_ops, s,
+                          TYPE_BCM2835_MPHI, 0x1000);
+    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
+    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
+}
+
+static void bcm2835_mphi_realize(DeviceState *dev, Error **errp)
+{
+    BCM2835MphiState *s = BCM2835_MPHI(dev);
 
     s->mphi_base = 0;
     s->mphi_ctrl = 0;
     s->mphi_outdda = 0;
     s->mphi_outddb = 0;
     s->mphi_intstat = 0;
-
-    memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_mphi_ops, s,
-        TYPE_BCM2835_MPHI, 0x1000);
-    sysbus_init_mmio(sbd, &s->iomem);
-    vmstate_register(dev, -1, &vmstate_bcm2835_mphi, s);
-
-    sysbus_init_irq(sbd, &s->irq);
-
-    return 0;
 }
 
 static void bcm2835_mphi_class_init(ObjectClass *klass, void *data)
 {
-    SysBusDeviceClass *sdc = SYS_BUS_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
-    sdc->init = bcm2835_mphi_init;
+    dc->realize = bcm2835_mphi_realize;
+    dc->vmsd = &vmstate_bcm2835_mphi;
 }
 
 static TypeInfo bcm2835_mphi_info = {
     .name          = TYPE_BCM2835_MPHI,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(bcm2835_mphi_state),
+    .instance_size = sizeof(BCM2835MphiState),
     .class_init    = bcm2835_mphi_class_init,
+    .instance_init = bcm2835_mphi_init,
 };
 
 static void bcm2835_mphi_register_types(void)

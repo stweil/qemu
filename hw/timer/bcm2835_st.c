@@ -5,23 +5,9 @@
 
 /* Based on several timers code found in various QEMU source files. */
 
-#include "qemu/timer.h"
-#include "hw/sysbus.h"
+#include "hw/timer/bcm2835_st.h"
 
-#define TYPE_BCM2835_ST "bcm2835_st"
-#define BCM2835_ST(obj) OBJECT_CHECK(bcm2835_st_state, (obj), TYPE_BCM2835_ST)
-
-typedef struct bcm2835_st_state {
-    SysBusDevice busdev;
-    MemoryRegion iomem;
-    QEMUTimer *timer;
-    uint32_t compare[4];
-    uint32_t match;
-    uint32_t next;
-    qemu_irq irq[4];
-} bcm2835_st_state;
-
-static void bcm2835_st_update(bcm2835_st_state *s)
+static void bcm2835_st_update(BCM2835StState *s)
 {
     int64_t now = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL);
     uint32_t clo = (uint32_t)now;
@@ -42,7 +28,7 @@ static void bcm2835_st_update(bcm2835_st_state *s)
 
 static void bcm2835_st_tick(void *opaque)
 {
-    bcm2835_st_state *s = (bcm2835_st_state *)opaque;
+    BCM2835StState *s = (BCM2835StState *)opaque;
     int i;
 
     /* Trigger irqs for current "next" value */
@@ -59,7 +45,7 @@ static void bcm2835_st_tick(void *opaque)
 static uint64_t bcm2835_st_read(void *opaque, hwaddr offset,
                            unsigned size)
 {
-    bcm2835_st_state *s = (bcm2835_st_state *)opaque;
+    BCM2835StState *s = (BCM2835StState *)opaque;
     uint32_t res = 0;
     int64_t now = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL);
 
@@ -103,7 +89,7 @@ static uint64_t bcm2835_st_read(void *opaque, hwaddr offset,
 static void bcm2835_st_write(void *opaque, hwaddr offset,
                         uint64_t value, unsigned size)
 {
-    bcm2835_st_state *s = (bcm2835_st_state *)opaque;
+    BCM2835StState *s = (BCM2835StState *)opaque;
     int i;
 
     assert(size == 4);
@@ -149,48 +135,54 @@ static const VMStateDescription vmstate_bcm2835_st = {
     .minimum_version_id = 1,
     .minimum_version_id_old = 1,
     .fields      = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(compare, bcm2835_st_state, 4),
-        VMSTATE_UINT32(match, bcm2835_st_state),
+        VMSTATE_UINT32_ARRAY(compare, BCM2835StState, 4),
+        VMSTATE_UINT32(match, BCM2835StState),
         VMSTATE_END_OF_LIST()
     }
 };
 
-static int bcm2835_st_init(SysBusDevice *sbd)
+static void bcm2835_st_init(Object *obj)
 {
+    BCM2835StState *s = BCM2835_ST(obj);
     int i;
-    DeviceState *dev = DEVICE(sbd);
-    bcm2835_st_state *s = BCM2835_ST(dev);
+
+    for (i = 0; i < 4; i++) {
+        sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq[i]);
+    }
+
+    memory_region_init_io(&s->iomem, obj, &bcm2835_st_ops, s,
+                          TYPE_BCM2835_ST, 0x1000);
+    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
+}
+
+static void bcm2835_st_realize(DeviceState *dev, Error **errp)
+{
+    BCM2835StState *s = BCM2835_ST(dev);
+    int i;
 
     for (i = 0; i < 4; i++) {
         s->compare[i] = 0;
-        sysbus_init_irq(sbd, &s->irq[i]);
     }
     s->match = 0;
-
     s->timer = timer_new_us(QEMU_CLOCK_VIRTUAL, bcm2835_st_tick, s);
 
     bcm2835_st_update(s);
-
-    memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_st_ops, s,
-        TYPE_BCM2835_ST, 0x1000);
-    sysbus_init_mmio(sbd, &s->iomem);
-    vmstate_register(dev, -1, &vmstate_bcm2835_st, s);
-
-    return 0;
 }
 
 static void bcm2835_st_class_init(ObjectClass *klass, void *data)
 {
-    SysBusDeviceClass *sdc = SYS_BUS_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
-    sdc->init = bcm2835_st_init;
+    dc->realize = bcm2835_st_realize;
+    dc->vmsd = &vmstate_bcm2835_st;
 }
 
 static TypeInfo bcm2835_st_info = {
     .name          = TYPE_BCM2835_ST,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(bcm2835_st_state),
+    .instance_size = sizeof(BCM2835StState),
     .class_init    = bcm2835_st_class_init,
+    .instance_init = bcm2835_st_init,
 };
 
 static void bcm2835_st_register_types(void)

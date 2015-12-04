@@ -3,23 +3,10 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
-#include "hw/sysbus.h"
-#include "exec/address-spaces.h"
-#include "hw/arm/bcm2835_common.h"
+#include "hw/misc/bcm2835_sbm.h"
+#include "hw/arm/bcm2835_arm_control.h"
 
-#define TYPE_BCM2835_SBM "bcm2835_sbm"
-#define BCM2835_SBM(obj) \
-        OBJECT_CHECK(bcm2835_sbm_state, (obj), TYPE_BCM2835_SBM)
-
-typedef struct {
-    uint32_t reg[MBOX_SIZE];
-    int count;
-    uint32_t status;
-    uint32_t config;
-} bcm2835_mbox;
-
-
-static void mbox_update_status(bcm2835_mbox *mb)
+static void mbox_update_status(BCM2835Mbox *mb)
 {
     if (mb->count == 0) {
         mb->status |= ARM_MS_EMPTY;
@@ -33,7 +20,7 @@ static void mbox_update_status(bcm2835_mbox *mb)
     }
 }
 
-static void mbox_init(bcm2835_mbox *mb)
+static void mbox_init(BCM2835Mbox *mb)
 {
     int n;
     mb->count = 0;
@@ -44,7 +31,7 @@ static void mbox_init(bcm2835_mbox *mb)
     mbox_update_status(mb);
 }
 
-static uint32_t mbox_pull(bcm2835_mbox *mb, int index)
+static uint32_t mbox_pull(BCM2835Mbox *mb, int index)
 {
     int n;
     uint32_t val;
@@ -64,27 +51,14 @@ static uint32_t mbox_pull(bcm2835_mbox *mb, int index)
     return val;
 }
 
-static void mbox_push(bcm2835_mbox *mb, uint32_t val)
+static void mbox_push(BCM2835Mbox *mb, uint32_t val)
 {
-
     assert(mb->count < MBOX_SIZE);
-
     mb->reg[mb->count++] = val;
-
     mbox_update_status(mb);
 }
 
-typedef struct {
-    SysBusDevice busdev;
-    MemoryRegion iomem;
-    int mbox_irq_disabled;
-    qemu_irq arm_irq;
-    int available[MBOX_CHAN_COUNT];
-    bcm2835_mbox mbox[2];
-
-} bcm2835_sbm_state;
-
-static void bcm2835_sbm_update(bcm2835_sbm_state *s)
+static void bcm2835_sbm_update(BCM2835SbmState *s)
 {
     int set;
     int done, n;
@@ -102,8 +76,7 @@ static void bcm2835_sbm_update(bcm2835_sbm_state *s)
         } else {
             for (n = 0; n < MBOX_CHAN_COUNT; n++) {
                 if (s->available[n]) {
-                    value = ldl_phys(&address_space_memory,
-                                     ARMCTRL_0_SBM_BASE + 0x400 + (n<<4));
+                    value = ldl_phys(&s->mbox_as, n<<4);
                     if (value != MBOX_INVALID_DATA) {
                         mbox_push(&s->mbox[0], value);
                     } else {
@@ -124,8 +97,11 @@ static void bcm2835_sbm_update(bcm2835_sbm_state *s)
 
     /* Update ARM IRQ status */
     set = 0;
-    if (s->mbox[0].config & ARM_MC_IHAVEDATAIRQEN) {
-        if (!(s->mbox[0].status & ARM_MS_EMPTY)) {
+    if (s->mbox[0].status & ARM_MS_EMPTY) {
+        s->mbox[0].config &= ~ARM_MC_IHAVEDATAIRQPEND;
+    } else {
+        s->mbox[0].config |= ARM_MC_IHAVEDATAIRQPEND;
+        if (s->mbox[0].config & ARM_MC_IHAVEDATAIRQEN) {
             set = 1;
         }
     }
@@ -134,7 +110,7 @@ static void bcm2835_sbm_update(bcm2835_sbm_state *s)
 
 static void bcm2835_sbm_set_irq(void *opaque, int irq, int level)
 {
-    bcm2835_sbm_state *s = (bcm2835_sbm_state *)opaque;
+    BCM2835SbmState *s = (BCM2835SbmState *)opaque;
     s->available[irq] = level;
     if (!s->mbox_irq_disabled) {
         bcm2835_sbm_update(s);
@@ -144,7 +120,7 @@ static void bcm2835_sbm_set_irq(void *opaque, int irq, int level)
 static uint64_t bcm2835_sbm_read(void *opaque, hwaddr offset,
                            unsigned size)
 {
-    bcm2835_sbm_state *s = (bcm2835_sbm_state *)opaque;
+    BCM2835SbmState *s = (BCM2835SbmState *)opaque;
     uint32_t res = 0;
 
     offset &= 0xff;
@@ -171,6 +147,9 @@ static uint64_t bcm2835_sbm_read(void *opaque, hwaddr offset,
     case 0x9c:  /* MAIL0_CONFIG */
         res = s->mbox[0].config;
         break;
+    case 0xb8:  /* MAIL1_STATUS */
+        res = s->mbox[1].status;
+        break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
             "bcm2835_sbm_read: Bad offset %x\n", (int)offset);
@@ -187,7 +166,7 @@ static void bcm2835_sbm_write(void *opaque, hwaddr offset,
 {
     int ch;
 
-    bcm2835_sbm_state *s = (bcm2835_sbm_state *)opaque;
+    BCM2835SbmState *s = (BCM2835SbmState *)opaque;
 
     offset &= 0xff;
 
@@ -195,7 +174,8 @@ static void bcm2835_sbm_write(void *opaque, hwaddr offset,
     case 0x94:  /* MAIL0_SENDER */
         break;
     case 0x9c:  /* MAIL0_CONFIG */
-        s->mbox[0].config = value & ARM_MC_IHAVEDATAIRQEN;
+        s->mbox[0].config &= ~ARM_MC_IHAVEDATAIRQEN;
+        s->mbox[0].config |= value & ARM_MC_IHAVEDATAIRQEN;
         break;
     case 0xa0:
     case 0xa4:
@@ -206,13 +186,11 @@ static void bcm2835_sbm_write(void *opaque, hwaddr offset,
         } else {
             ch = value & 0xf;
             if (ch < MBOX_CHAN_COUNT) {
-                if (ldl_phys(&address_space_memory,
-                             ARMCTRL_0_SBM_BASE + 0x400 + (ch<<4) + 4)) {
+                if (ldl_phys(&s->mbox_as, (ch<<4) + 4)) {
                     /* Push delayed, push it in the arm->vc mbox */
                     mbox_push(&s->mbox[1], value);
                 } else {
-                    stl_phys(&address_space_memory,
-                             ARMCTRL_0_SBM_BASE + 0x400 + (ch<<4), value);
+                    stl_phys(&s->mbox_as, ch<<4, value);
                 }
             } else {
                 /* Invalid channel number */
@@ -244,11 +222,31 @@ static const VMStateDescription vmstate_bcm2835_sbm = {
     }
 };
 
-static int bcm2835_sbm_init(SysBusDevice *sbd)
+static void bcm2835_sbm_init(Object *obj)
+{
+    BCM2835SbmState *s = BCM2835_SBM(obj);
+    memory_region_init_io(&s->iomem, obj, &bcm2835_sbm_ops, s,
+                          TYPE_BCM2835_SBM, 0x400);
+    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
+    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->arm_irq);
+    qdev_init_gpio_in(DEVICE(s), bcm2835_sbm_set_irq, MBOX_CHAN_COUNT);
+}
+
+static void bcm2835_sbm_realize(DeviceState *dev, Error **errp)
 {
     int n;
-    DeviceState *dev = DEVICE(sbd);
-    bcm2835_sbm_state *s = BCM2835_SBM(dev);
+    BCM2835SbmState *s = BCM2835_SBM(dev);
+    Object *obj;
+    Error *err = NULL;
+
+    obj = object_property_get_link(OBJECT(dev), "mbox_mr", &err);
+    if (err || obj == NULL) {
+        error_setg(errp, "bcm2835_sbm: required mbox_mr link not found");
+        return;
+    }
+
+    s->mbox_mr = MEMORY_REGION(obj);
+    address_space_init(&s->mbox_as, s->mbox_mr, NULL);
 
     mbox_init(&s->mbox[0]);
     mbox_init(&s->mbox[1]);
@@ -256,30 +254,22 @@ static int bcm2835_sbm_init(SysBusDevice *sbd)
     for (n = 0; n < MBOX_CHAN_COUNT; n++) {
         s->available[n] = 0;
     }
-
-    sysbus_init_irq(sbd, &s->arm_irq);
-    qdev_init_gpio_in(dev, bcm2835_sbm_set_irq, MBOX_CHAN_COUNT);
-
-    memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_sbm_ops, s,
-        TYPE_BCM2835_SBM, 0x400);
-    sysbus_init_mmio(sbd, &s->iomem);
-    vmstate_register(dev, -1, &vmstate_bcm2835_sbm, s);
-
-    return 0;
 }
 
 static void bcm2835_sbm_class_init(ObjectClass *klass, void *data)
 {
-    SysBusDeviceClass *sdc = SYS_BUS_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
-    sdc->init = bcm2835_sbm_init;
+    dc->realize = bcm2835_sbm_realize;
+    dc->vmsd = &vmstate_bcm2835_sbm;
 }
 
 static TypeInfo bcm2835_sbm_info = {
     .name          = TYPE_BCM2835_SBM,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(bcm2835_sbm_state),
+    .instance_size = sizeof(BCM2835SbmState),
     .class_init    = bcm2835_sbm_class_init,
+    .instance_init = bcm2835_sbm_init,
 };
 
 static void bcm2835_sbm_register_types(void)

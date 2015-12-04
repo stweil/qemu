@@ -3,25 +3,13 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
-#include "hw/sysbus.h"
-
-#include "hw/arm/bcm2835_common.h"
-
-#define TYPE_BCM2835_VCHIQ "bcm2835_vchiq"
-#define BCM2835_VCHIQ(obj) \
-        OBJECT_CHECK(bcm2835_vchiq_state, (obj), TYPE_BCM2835_VCHIQ)
-
-typedef struct {
-    SysBusDevice busdev;
-    MemoryRegion iomem;
-    int pending;
-    qemu_irq mbox_irq;
-} bcm2835_vchiq_state;
+#include "hw/misc/bcm2835_vchiq.h"
+#include "hw/arm/bcm2835_mbox.h"
 
 static uint64_t bcm2835_vchiq_read(void *opaque, hwaddr offset,
     unsigned size)
 {
-    bcm2835_vchiq_state *s = (bcm2835_vchiq_state *)opaque;
+    BCM2835VchiqState *s = (BCM2835VchiqState *)opaque;
     uint32_t res = 0;
 
     switch (offset) {
@@ -40,10 +28,11 @@ static uint64_t bcm2835_vchiq_read(void *opaque, hwaddr offset,
     }
     return res;
 }
+
 static void bcm2835_vchiq_write(void *opaque, hwaddr offset,
     uint64_t value, unsigned size)
 {
-    bcm2835_vchiq_state *s = (bcm2835_vchiq_state *)opaque;
+    BCM2835VchiqState *s = (BCM2835VchiqState *)opaque;
     switch (offset) {
     case 0:
         s->pending = 1;
@@ -57,13 +46,11 @@ static void bcm2835_vchiq_write(void *opaque, hwaddr offset,
 
 }
 
-
 static const MemoryRegionOps bcm2835_vchiq_ops = {
     .read = bcm2835_vchiq_read,
     .write = bcm2835_vchiq_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
 };
-
 
 static const VMStateDescription vmstate_bcm2835_vchiq = {
     .name = TYPE_BCM2835_VCHIQ,
@@ -75,34 +62,37 @@ static const VMStateDescription vmstate_bcm2835_vchiq = {
     }
 };
 
-static int bcm2835_vchiq_init(SysBusDevice *sbd)
+static void bcm2835_vchiq_init(Object *obj)
 {
-    DeviceState *dev = DEVICE(sbd);
-    bcm2835_vchiq_state *s = BCM2835_VCHIQ(dev);
+    BCM2835VchiqState *s = BCM2835_VCHIQ(obj);
+
+    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->mbox_irq);
+    memory_region_init_io(&s->iomem, obj, &bcm2835_vchiq_ops, s,
+                          TYPE_BCM2835_VCHIQ, 0x10);
+    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
+}
+
+static void bcm2835_vchiq_realize(DeviceState *dev, Error **errp)
+{
+    BCM2835VchiqState *s = BCM2835_VCHIQ(dev);
 
     s->pending = 0;
-
-    sysbus_init_irq(sbd, &s->mbox_irq);
-    memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_vchiq_ops, s,
-        TYPE_BCM2835_VCHIQ, 0x10);
-    sysbus_init_mmio(sbd, &s->iomem);
-    vmstate_register(dev, -1, &vmstate_bcm2835_vchiq, s);
-
-    return 0;
 }
 
 static void bcm2835_vchiq_class_init(ObjectClass *klass, void *data)
 {
-    SysBusDeviceClass *sdc = SYS_BUS_DEVICE_CLASS(klass);
+    DeviceClass *dc = DEVICE_CLASS(klass);
 
-    sdc->init = bcm2835_vchiq_init;
+    dc->realize = bcm2835_vchiq_realize;
+    dc->vmsd = &vmstate_bcm2835_vchiq;
 }
 
 static TypeInfo bcm2835_vchiq_info = {
     .name          = TYPE_BCM2835_VCHIQ,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(bcm2835_vchiq_state),
+    .instance_size = sizeof(BCM2835VchiqState),
     .class_init    = bcm2835_vchiq_class_init,
+    .instance_init = bcm2835_vchiq_init,
 };
 
 static void bcm2835_vchiq_register_types(void)

@@ -18,8 +18,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef __BCM2708_ARM_CONTROL_H
-#define __BCM2708_ARM_CONTROL_H
+#ifndef BCM2708_ARM_CONTROL_H_
+#define BCM2708_ARM_CONTROL_H_
 
 /*
  * Definitions and addresses for the ARM CONTROL logic
