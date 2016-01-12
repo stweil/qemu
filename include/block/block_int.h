@@ -121,6 +121,7 @@ struct BlockDriver {
                                BlockReopenQueue *queue, Error **errp);
     void (*bdrv_reopen_commit)(BDRVReopenState *reopen_state);
     void (*bdrv_reopen_abort)(BDRVReopenState *reopen_state);
+    void (*bdrv_join_options)(QDict *options, QDict *old_options);
 
     int (*bdrv_open)(BlockDriverState *bs, QDict *options, int flags,
                      Error **errp);
@@ -135,7 +136,7 @@ struct BlockDriver {
     int (*bdrv_set_key)(BlockDriverState *bs, const char *key);
     int (*bdrv_make_empty)(BlockDriverState *bs);
 
-    void (*bdrv_refresh_filename)(BlockDriverState *bs);
+    void (*bdrv_refresh_filename)(BlockDriverState *bs, QDict *options);
 
     /* aio */
     BlockAIOCB *(*bdrv_aio_readv)(BlockDriverState *bs,
@@ -243,9 +244,10 @@ struct BlockDriver {
         BdrvCheckMode fix);
 
     int (*bdrv_amend_options)(BlockDriverState *bs, QemuOpts *opts,
-                              BlockDriverAmendStatusCB *status_cb);
+                              BlockDriverAmendStatusCB *status_cb,
+                              void *cb_opaque);
 
-    void (*bdrv_debug_event)(BlockDriverState *bs, BlkDebugEvent event);
+    void (*bdrv_debug_event)(BlockDriverState *bs, BlkdebugEvent event);
 
     /* TODO Better pass a option string/QDict/QemuOpts to add any rule? */
     int (*bdrv_debug_breakpoint)(BlockDriverState *bs, const char *event,
@@ -329,6 +331,9 @@ typedef struct BlockLimits {
 
     /* memory alignment for bounce buffer */
     size_t opt_mem_alignment;
+
+    /* maximum number of iovec elements */
+    int max_iov;
 } BlockLimits;
 
 typedef struct BdrvOpBlocker BdrvOpBlocker;
@@ -343,7 +348,8 @@ typedef struct BdrvAioNotifier {
 } BdrvAioNotifier;
 
 struct BdrvChildRole {
-    int (*inherit_flags)(int parent_flags);
+    void (*inherit_options)(int *child_flags, QDict *child_options,
+                            int parent_flags, QDict *parent_options);
 };
 
 extern const BdrvChildRole child_file;
@@ -351,6 +357,7 @@ extern const BdrvChildRole child_format;
 
 struct BdrvChild {
     BlockDriverState *bs;
+    char *name;
     const BdrvChildRole *role;
     QLIST_ENTRY(BdrvChild) next;
     QLIST_ENTRY(BdrvChild) next_parent;
@@ -457,6 +464,7 @@ struct BlockDriverState {
     QLIST_HEAD(, BdrvChild) parents;
 
     QDict *options;
+    QDict *explicit_options;
     BlockdevDetectZeroesOptions detect_zeroes;
 
     /* The error object in use for blocking operations on backing_hd */
