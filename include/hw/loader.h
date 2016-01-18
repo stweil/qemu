@@ -44,6 +44,9 @@ const char *load_elf_strerror(int error);
  * @elf_machine: Expected ELF machine type
  * @clear_lsb: Set to mask off LSB of addresses (Some arch's use this
                for non-address data)
+ * @data_swab: Set to order of byte swapping for data. 0 for no swap, 1
+ *             for swapping bytes within halfwords, 2 for bytes within
+ *             words and 3 for within doublewords.
  *
  * Load an ELF file's contents to the emulated systems address space.
  * Clients may optionally specify a callback to perform address
@@ -58,7 +61,7 @@ const char *load_elf_strerror(int error);
 int load_elf(const char *filename, uint64_t (*translate_fn)(void *, uint64_t),
              void *translate_opaque, uint64_t *pentry, uint64_t *lowaddr,
              uint64_t *highaddr, int big_endian, int elf_machine,
-             int clear_lsb);
+             int clear_lsb, int data_swab);
 
 /** load_elf_hdr:
  * @filename: Path of ELF file
