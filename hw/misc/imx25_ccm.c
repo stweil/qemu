@@ -11,6 +11,7 @@
  * the CCM.
  */
 
+#include "qemu/osdep.h"
 #include "hw/misc/imx25_ccm.h"
 
 #ifndef DEBUG_IMX25_CCM
@@ -249,7 +250,7 @@ static void imx25_ccm_reset(DeviceState *dev)
 
 static uint64_t imx25_ccm_read(void *opaque, hwaddr offset, unsigned size)
 {
-    uint32 value = 0;
+    uint32_t value = 0;
     IMX25CCMState *s = (IMX25CCMState *)opaque;
 
     if (offset < 0x70) {

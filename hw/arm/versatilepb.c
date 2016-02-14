@@ -7,6 +7,7 @@
  * This code is licensed under the GPL.
  */
 
+#include "qemu/osdep.h"
 #include "hw/sysbus.h"
 #include "hw/arm/arm.h"
 #include "hw/devices.h"
@@ -192,7 +193,6 @@ static void versatile_init(MachineState *machine, int board_id)
     int n;
     int done_smc = 0;
     DriveInfo *dinfo;
-    Error *err = NULL;
 
     if (!machine->cpu_model) {
         machine->cpu_model = "arm926";
@@ -211,18 +211,10 @@ static void versatile_init(MachineState *machine, int board_id)
      * realization.
      */
     if (object_property_find(cpuobj, "has_el3", NULL)) {
-        object_property_set_bool(cpuobj, false, "has_el3", &err);
-        if (err) {
-            error_report_err(err);
-            exit(1);
-        }
+        object_property_set_bool(cpuobj, false, "has_el3", &error_fatal);
     }
 
-    object_property_set_bool(cpuobj, true, "realized", &err);
-    if (err) {
-        error_report_err(err);
-        exit(1);
-    }
+    object_property_set_bool(cpuobj, true, "realized", &error_fatal);
 
     cpu = ARM_CPU(cpuobj);
 

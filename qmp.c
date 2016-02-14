@@ -13,6 +13,7 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "monitor/monitor.h"
 #include "sysemu/sysemu.h"
@@ -192,6 +193,18 @@ void qmp_cont(Error **errp)
         }
     }
 
+    /* Continuing after completed migration. Images have been inactivated to
+     * allow the destination to take control. Need to get control back now. */
+    if (runstate_check(RUN_STATE_FINISH_MIGRATE) ||
+        runstate_check(RUN_STATE_POSTMIGRATE))
+    {
+        bdrv_invalidate_cache_all(&local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
+    }
+
     if (runstate_check(RUN_STATE_INMIGRATE)) {
         autostart = 1;
     } else {
@@ -210,7 +223,7 @@ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
     bool ambiguous = false;
     ObjectPropertyInfoList *props = NULL;
     ObjectProperty *prop;
-    ObjectPropertyIterator *iter;
+    ObjectPropertyIterator iter;
 
     obj = object_resolve_path(path, &ambiguous);
     if (obj == NULL) {
@@ -223,8 +236,8 @@ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
         return NULL;
     }
 
-    iter = object_property_iter_init(obj);
-    while ((prop = object_property_iter_next(iter))) {
+    object_property_iter_init(&iter, obj);
+    while ((prop = object_property_iter_next(&iter))) {
         ObjectPropertyInfoList *entry = g_malloc0(sizeof(*entry));
 
         entry->value = g_malloc0(sizeof(ObjectPropertyInfo));
@@ -234,7 +247,6 @@ ObjectPropertyInfoList *qmp_qom_list(const char *path, Error **errp)
         entry->value->name = g_strdup(prop->name);
         entry->value->type = g_strdup(prop->type);
     }
-    object_property_iter_free(iter);
 
     return props;
 }
@@ -506,7 +518,7 @@ DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
     ObjectClass *klass;
     Object *obj;
     ObjectProperty *prop;
-    ObjectPropertyIterator *iter;
+    ObjectPropertyIterator iter;
     DevicePropertyInfoList *prop_list = NULL;
 
     klass = object_class_by_name(typename);
@@ -535,8 +547,8 @@ DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
 
     obj = object_new(typename);
 
-    iter = object_property_iter_init(obj);
-    while ((prop = object_property_iter_next(iter))) {
+    object_property_iter_init(&iter, obj);
+    while ((prop = object_property_iter_next(&iter))) {
         DevicePropertyInfo *info;
         DevicePropertyInfoList *entry;
 
@@ -567,7 +579,6 @@ DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
         entry->next = prop_list;
         prop_list = entry;
     }
-    object_property_iter_free(iter);
 
     object_unref(obj);
 

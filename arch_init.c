@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <stdint.h>
+#include "qemu/osdep.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/arch_init.h"
 #include "hw/pci/pci.h"
@@ -258,9 +258,7 @@ void do_acpitable_option(const QemuOpts *opts)
 
     acpi_table_add(opts, &err);
     if (err) {
-        error_report("Wrong acpi table provided: %s",
-                     error_get_pretty(err));
-        error_free(err);
+        error_reportf_err(err, "Wrong acpi table provided: ");
         exit(1);
     }
 #endif

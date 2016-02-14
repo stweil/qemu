@@ -10,6 +10,7 @@
  * directory.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "sysemu/block-backend.h"
 #include "sysemu/blockdev.h"
@@ -1177,7 +1178,8 @@ static void virtio_ccw_notify(DeviceState *d, uint16_t vector)
     SubchDev *sch = dev->sch;
     uint64_t indicators;
 
-    if (vector >= 128) {
+    /* queue indicators + secondary indicators */
+    if (vector >= VIRTIO_CCW_QUEUE_MAX + 64) {
         return;
     }
 

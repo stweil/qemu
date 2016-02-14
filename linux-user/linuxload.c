@@ -1,9 +1,7 @@
 /* Code for loading Linux executables.  Mostly linux kernel code.  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
+#include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "qemu.h"
 
 #if !defined(O_BINARY)

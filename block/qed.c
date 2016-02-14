@@ -12,6 +12,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "qemu/timer.h"
 #include "trace.h"
 #include "qed.h"
@@ -477,7 +478,7 @@ static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
      * feature is no longer valid.
      */
     if ((s->header.autoclear_features & ~QED_AUTOCLEAR_FEATURE_MASK) != 0 &&
-        !bdrv_is_read_only(bs->file->bs) && !(flags & BDRV_O_INCOMING)) {
+        !bdrv_is_read_only(bs->file->bs) && !(flags & BDRV_O_INACTIVE)) {
         s->header.autoclear_features &= QED_AUTOCLEAR_FEATURE_MASK;
 
         ret = qed_write_header_sync(s);
@@ -505,7 +506,7 @@ static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
          * aid data recovery from an otherwise inconsistent image.
          */
         if (!bdrv_is_read_only(bs->file->bs) &&
-            !(flags & BDRV_O_INCOMING)) {
+            !(flags & BDRV_O_INACTIVE)) {
             BdrvCheckResult result = {0};
 
             ret = qed_check(s, &result, true);
@@ -692,6 +693,7 @@ typedef struct {
     uint64_t pos;
     int64_t status;
     int *pnum;
+    BlockDriverState **file;
 } QEDIsAllocatedCB;
 
 static void qed_is_allocated_cb(void *opaque, int ret, uint64_t offset, size_t len)
@@ -703,6 +705,7 @@ static void qed_is_allocated_cb(void *opaque, int ret, uint64_t offset, size_t l
     case QED_CLUSTER_FOUND:
         offset |= qed_offset_into_cluster(s, cb->pos);
         cb->status = BDRV_BLOCK_DATA | BDRV_BLOCK_OFFSET_VALID | offset;
+        *cb->file = cb->bs->file->bs;
         break;
     case QED_CLUSTER_ZERO:
         cb->status = BDRV_BLOCK_ZERO;
@@ -724,7 +727,8 @@ static void qed_is_allocated_cb(void *opaque, int ret, uint64_t offset, size_t l
 
 static int64_t coroutine_fn bdrv_qed_co_get_block_status(BlockDriverState *bs,
                                                  int64_t sector_num,
-                                                 int nb_sectors, int *pnum)
+                                                 int nb_sectors, int *pnum,
+                                                 BlockDriverState **file)
 {
     BDRVQEDState *s = bs->opaque;
     size_t len = (size_t)nb_sectors * BDRV_SECTOR_SIZE;
@@ -733,6 +737,7 @@ static int64_t coroutine_fn bdrv_qed_co_get_block_status(BlockDriverState *bs,
         .pos = (uint64_t)sector_num * BDRV_SECTOR_SIZE,
         .status = BDRV_BLOCK_OFFSET_MASK,
         .pnum = pnum,
+        .file = file,
     };
     QEDRequest request = { .l2_table = NULL };
 
@@ -1611,9 +1616,8 @@ static void bdrv_qed_invalidate_cache(BlockDriverState *bs, Error **errp)
     memset(s, 0, sizeof(BDRVQEDState));
     ret = bdrv_qed_open(bs, NULL, bs->open_flags, &local_err);
     if (local_err) {
-        error_setg(errp, "Could not reopen qed layer: %s",
-                   error_get_pretty(local_err));
-        error_free(local_err);
+        error_propagate(errp, local_err);
+        error_prepend(errp, "Could not reopen qed layer: ");
         return;
     } else if (ret < 0) {
         error_setg_errno(errp, -ret, "Could not reopen qed layer");

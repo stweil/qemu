@@ -9,6 +9,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "sysemu/replay.h"
 #include "replay-internal.h"
@@ -291,8 +292,7 @@ void replay_start(void)
     }
 
     if (replay_blockers) {
-        error_report("Record/replay: %s",
-                     error_get_pretty(replay_blockers->data));
+        error_reportf_err(replay_blockers->data, "Record/replay: ");
         exit(1);
     }
     if (!use_icount) {

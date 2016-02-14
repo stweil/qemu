@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
 #include "hw/pci-host/apb.h"
@@ -98,29 +99,7 @@ typedef struct EbusState {
     MemoryRegion bar1;
 } EbusState;
 
-int DMA_get_channel_mode (int nchan)
-{
-    return 0;
-}
-int DMA_read_memory (int nchan, void *buf, int pos, int size)
-{
-    return 0;
-}
-int DMA_write_memory (int nchan, void *buf, int pos, int size)
-{
-    return 0;
-}
-void DMA_hold_DREQ (int nchan) {}
-void DMA_release_DREQ (int nchan) {}
-void DMA_schedule(void) {}
-
-void DMA_init(int high_page_enable)
-{
-}
-
-void DMA_register_channel (int nchan,
-                           DMA_transfer_handler transfer_handler,
-                           void *opaque)
+void DMA_init(ISABus *bus, int high_page_enable)
 {
 }
 
@@ -358,30 +337,6 @@ typedef struct ResetData {
     uint64_t prom_addr;
 } ResetData;
 
-void cpu_put_timer(QEMUFile *f, CPUTimer *s)
-{
-    qemu_put_be32s(f, &s->frequency);
-    qemu_put_be32s(f, &s->disabled);
-    qemu_put_be64s(f, &s->disabled_mask);
-    qemu_put_be32s(f, &s->npt);
-    qemu_put_be64s(f, &s->npt_mask);
-    qemu_put_sbe64s(f, &s->clock_offset);
-
-    timer_put(f, s->qtimer);
-}
-
-void cpu_get_timer(QEMUFile *f, CPUTimer *s)
-{
-    qemu_get_be32s(f, &s->frequency);
-    qemu_get_be32s(f, &s->disabled);
-    qemu_get_be64s(f, &s->disabled_mask);
-    qemu_get_be32s(f, &s->npt);
-    qemu_get_be64s(f, &s->npt_mask);
-    qemu_get_sbe64s(f, &s->clock_offset);
-
-    timer_get(f, s->qtimer);
-}
-
 static CPUTimer *cpu_timer_create(const char *name, SPARCCPU *cpu,
                                   QEMUBHFunc *cb, uint32_t frequency,
                                   uint64_t disabled_mask, uint64_t npt_mask)
@@ -600,13 +555,14 @@ pci_ebus_init(PCIBus *bus, int devfn, qemu_irq *irqs)
     return isa_bus;
 }
 
-static int
-pci_ebus_init1(PCIDevice *pci_dev)
+static void pci_ebus_realize(PCIDevice *pci_dev, Error **errp)
 {
     EbusState *s = DO_UPCAST(EbusState, pci_dev, pci_dev);
 
-    isa_bus_new(DEVICE(pci_dev), get_system_memory(),
-                pci_address_space_io(pci_dev));
+    if (!isa_bus_new(DEVICE(pci_dev), get_system_memory(),
+                     pci_address_space_io(pci_dev), errp)) {
+        return;
+    }
 
     pci_dev->config[0x04] = 0x06; // command = bus master, pci mem
     pci_dev->config[0x05] = 0x00;
@@ -621,14 +577,13 @@ pci_ebus_init1(PCIDevice *pci_dev)
     memory_region_init_alias(&s->bar1, OBJECT(s), "bar1", get_system_io(),
                              0, 0x4000);
     pci_register_bar(pci_dev, 1, PCI_BASE_ADDRESS_SPACE_IO, &s->bar1);
-    return 0;
 }
 
 static void ebus_class_init(ObjectClass *klass, void *data)
 {
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
-    k->init = pci_ebus_init1;
+    k->realize = pci_ebus_realize;
     k->vendor_id = PCI_VENDOR_ID_SUN;
     k->device_id = PCI_DEVICE_ID_SUN_EBUS;
     k->revision = 0x01;
@@ -839,6 +794,7 @@ static void sun4uv_init(MemoryRegion *address_space_mem,
     qemu_irq *ivec_irqs, *pbm_irqs;
     DriveInfo *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
     DriveInfo *fd[MAX_FD];
+    DeviceState *dev;
     FWCfgState *fw_cfg;
 
     /* init CPUs */
@@ -875,10 +831,22 @@ static void sun4uv_init(MemoryRegion *address_space_mem,
     pci_cmd646_ide_init(pci_bus, hd, 1);
 
     isa_create_simple(isa_bus, "i8042");
+
+    /* Floppy */
     for(i = 0; i < MAX_FD; i++) {
         fd[i] = drive_get(IF_FLOPPY, 0, i);
     }
-    fdctrl_init_isa(isa_bus, fd);
+    dev = DEVICE(isa_create(isa_bus, TYPE_ISA_FDC));
+    if (fd[0]) {
+        qdev_prop_set_drive(dev, "driveA", blk_by_legacy_dinfo(fd[0]),
+                            &error_abort);
+    }
+    if (fd[1]) {
+        qdev_prop_set_drive(dev, "driveB", blk_by_legacy_dinfo(fd[1]),
+                            &error_abort);
+    }
+    qdev_prop_set_uint32(dev, "dma", -1);
+    qdev_init_nofail(dev);
 
     /* Map NVRAM into I/O (ebus) space */
     nvram = m48t59_init(NULL, 0, 0, NVRAM_SIZE, 1968, 59);

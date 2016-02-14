@@ -1,11 +1,9 @@
 /*
  * Raspberry Pi emulation (c) 2012 Gregory Estrade
+ * Refactoring for Pi2 Copyright (c) 2015, Microsoft. Written by Andrew Baumann.
  * This code is licensed under the GNU GPLv2 and later.
- */
-
-/* Heavily based on pl190.c, copyright terms below. */
-
-/*
+ * Heavily based on pl190.c, copyright terms below:
+ *
  * Arm PrimeCell PL190 Vector Interrupt Controller
  *
  * Copyright (c) 2006 CodeSourcery.
@@ -16,146 +14,149 @@
 
 #include "hw/intc/bcm2835_ic.h"
 
-#define IR_B 2
-#define IR_1 0
-#define IR_2 1
+#define GPU_IRQS 64
+#define ARM_IRQS 8
+
+#define IRQ_PENDING_BASIC       0x00 /* IRQ basic pending */
+#define IRQ_PENDING_1           0x04 /* IRQ pending 1 */
+#define IRQ_PENDING_2           0x08 /* IRQ pending 2 */
+#define FIQ_CONTROL             0x0C /* FIQ register */
+#define IRQ_ENABLE_1            0x10 /* Interrupt enable register 1 */
+#define IRQ_ENABLE_2            0x14 /* Interrupt enable register 2 */
+#define IRQ_ENABLE_BASIC        0x18 /* Base interrupt enable register */
+#define IRQ_DISABLE_1           0x1C /* Interrupt disable register 1 */
+#define IRQ_DISABLE_2           0x20 /* Interrupt disable register 2 */
+#define IRQ_DISABLE_BASIC       0x24 /* Base interrupt disable register */
 
 /* Update interrupts.  */
-static void bcm2835_ic_update(BCM2835IcState *s)
+static void bcm2835_ic_update(BCM2835ICState *s)
 {
-    int set;
-    int i;
+    bool set = false;
 
-    set = 0;
     if (s->fiq_enable) {
-        set = s->level[s->fiq_select >> 5] & (1u << (s->fiq_select & 0x1f));
+        if (s->fiq_select >= GPU_IRQS) {
+            /* ARM IRQ */
+            set = extract32(s->arm_irq_level, s->fiq_select - GPU_IRQS, 1);
+        } else {
+            set = extract64(s->gpu_irq_level, s->fiq_select, 1);
+        }
     }
     qemu_set_irq(s->fiq, set);
 
-    set = 0;
-    for (i = 0; i < 3; i++) {
-        set |= (s->level[i] & s->irq_enable[i]);
-    }
+    set = (s->gpu_irq_level & s->gpu_irq_enable)
+        || (s->arm_irq_level & s->arm_irq_enable);
     qemu_set_irq(s->irq, set);
 
 }
 
-static void bcm2835_ic_set_irq(void *opaque, int irq, int level)
+static void bcm2835_ic_set_gpu_irq(void *opaque, int irq, int level)
 {
-    BCM2835IcState *s = (BCM2835IcState *)opaque;
+    BCM2835ICState *s = opaque;
 
-    if (irq >= 0 && irq <= 71) {
-        if (level) {
-                s->level[irq >> 5] |= 1u << (irq & 0x1f);
-        } else {
-                s->level[irq >> 5] &= ~(1u << (irq & 0x1f));
-        }
-    } else {
-        qemu_log_mask(LOG_GUEST_ERROR,
-            "bcm2835_ic_set_irq: Bad irq %d\n", irq);
-    }
-
+    assert(irq >= 0 && irq < 64);
+    s->gpu_irq_level = deposit64(s->gpu_irq_level, irq, 1, level != 0);
     bcm2835_ic_update(s);
 }
 
-static const int irq_dups[] = { 7, 9, 10, 18, 19, 53, 54, 55, 56, 57, 62, -1 };
-
-static uint64_t bcm2835_ic_read(void *opaque, hwaddr offset,
-    unsigned size)
+static void bcm2835_ic_set_arm_irq(void *opaque, int irq, int level)
 {
-    BCM2835IcState *s = (BCM2835IcState *)opaque;
-    int i;
-    int p = 0;
+    BCM2835ICState *s = opaque;
+
+    assert(irq >= 0 && irq < 8);
+    s->arm_irq_level = deposit32(s->arm_irq_level, irq, 1, level != 0);
+    bcm2835_ic_update(s);
+}
+
+static const int irq_dups[] = { 7, 9, 10, 18, 19, 53, 54, 55, 56, 57, 62 };
+
+static uint64_t bcm2835_ic_read(void *opaque, hwaddr offset, unsigned size)
+{
+    BCM2835ICState *s = opaque;
     uint32_t res = 0;
+    uint64_t gpu_pending = s->gpu_irq_level & s->gpu_irq_enable;
+    int i;
 
     switch (offset) {
-    case 0x00:  /* IRQ basic pending */
-        /* bits 0-7 - ARM irqs */
-        res = (s->level[IR_B] & s->irq_enable[IR_B]) & 0xff;
-        for (i = 0; i < 64; i++) {
-            if (i == irq_dups[p]) {
-                /* bits 10-20 - selected GPU irqs */
-                if (s->level[i >> 5] & s->irq_enable[i >> 5]
-                    & (1u << (i & 0x1f))) {
-                    res |= (1u << (10 + p));
-                }
-                p++;
-            } else {
-                /* bits 8-9 - one or more bits set in pending registers 1-2 */
-                if (s->level[i >> 5] & s->irq_enable[i >> 5]
-                    & (1u << (i & 0x1f))) {
-                    res |= (1u << (8 + (i >> 5)));
-                }
-            }
+    case IRQ_PENDING_BASIC:
+        /* bits 0-7: ARM irqs */
+        res = s->arm_irq_level & s->arm_irq_enable;
+
+        /* bits 8 & 9: pending registers 1 & 2 */
+        res |= (((uint32_t)gpu_pending) != 0) << 8;
+        res |= ((gpu_pending >> 32) != 0) << 9;
+
+        /* bits 10-20: selected GPU IRQs */
+        for (i = 0; i < ARRAY_SIZE(irq_dups); i++) {
+            res |= extract64(gpu_pending, irq_dups[i], 1) << (i + 10);
         }
         break;
-    case 0x04:  /* IRQ pending 1 */
-        res = s->level[IR_1] & s->irq_enable[IR_1];
+    case IRQ_PENDING_1:
+        res = gpu_pending;
         break;
-    case 0x08:  /* IRQ pending 2 */
-        res = s->level[IR_2] & s->irq_enable[IR_2];
+    case IRQ_PENDING_2:
+        res = gpu_pending >> 32;
         break;
-    case 0x0C:  /* FIQ register */
+    case FIQ_CONTROL:
         res = (s->fiq_enable << 7) | s->fiq_select;
         break;
-    case 0x10:  /* Interrupt enable register 1 */
-        res = s->irq_enable[IR_1];
+    case IRQ_ENABLE_1:
+        res = s->gpu_irq_enable;
         break;
-    case 0x14:  /* Interrupt enable register 2 */
-        res = s->irq_enable[IR_2];
+    case IRQ_ENABLE_2:
+        res = s->gpu_irq_enable >> 32;
         break;
-    case 0x18:  /* Base interrupt enable register */
-        res = s->irq_enable[IR_B];
+    case IRQ_ENABLE_BASIC:
+        res = s->arm_irq_enable;
         break;
-    case 0x1C:  /* Interrupt disable register 1 */
-        res = ~s->irq_enable[IR_1];
+    case IRQ_DISABLE_1:
+        res = ~s->gpu_irq_enable;
         break;
-    case 0x20:  /* Interrupt disable register 2 */
-        res = ~s->irq_enable[IR_2];
+    case IRQ_DISABLE_2:
+        res = ~s->gpu_irq_enable >> 32;
         break;
-    case 0x24:  /* Base interrupt disable register */
-        res = ~s->irq_enable[IR_B];
+    case IRQ_DISABLE_BASIC:
+        res = ~s->arm_irq_enable;
         break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-            "bcm2835_ic_read: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset %"HWADDR_PRIx"\n",
+                      __func__, offset);
         return 0;
     }
 
     return res;
 }
 
-static void bcm2835_ic_write(void *opaque, hwaddr offset,
-    uint64_t val, unsigned size)
+static void bcm2835_ic_write(void *opaque, hwaddr offset, uint64_t val,
+                             unsigned size)
 {
-    BCM2835IcState *s = (BCM2835IcState *)opaque;
+    BCM2835ICState *s = opaque;
 
     switch (offset) {
-    case 0x0C:  /* FIQ register */
-        s->fiq_select = (val & 0x7f);
-        s->fiq_enable = (val >> 7) & 0x1;
+    case FIQ_CONTROL:
+        s->fiq_select = extract32(val, 0, 7);
+        s->fiq_enable = extract32(val, 7, 1);
         break;
-    case 0x10:  /* Interrupt enable register 1 */
-        s->irq_enable[IR_1] |= val;
+    case IRQ_ENABLE_1:
+        s->gpu_irq_enable |= val;
         break;
-    case 0x14:  /* Interrupt enable register 2 */
-        s->irq_enable[IR_2] |= val;
+    case IRQ_ENABLE_2:
+        s->gpu_irq_enable |= val << 32;
         break;
-    case 0x18:  /* Base interrupt enable register */
-        s->irq_enable[IR_B] |= (val & 0xff);
+    case IRQ_ENABLE_BASIC:
+        s->arm_irq_enable |= val & 0xff;
         break;
-    case 0x1C:  /* Interrupt disable register 1 */
-        s->irq_enable[IR_1] &= ~val;
+    case IRQ_DISABLE_1:
+        s->gpu_irq_enable &= ~val;
         break;
-    case 0x20:  /* Interrupt disable register 2 */
-        s->irq_enable[IR_2] &= ~val;
+    case IRQ_DISABLE_2:
+        s->gpu_irq_enable &= ~(val << 32);
         break;
-    case 0x24:  /* Base interrupt disable register */
-        s->irq_enable[IR_B] &= (~val & 0xff);
+    case IRQ_DISABLE_BASIC:
+        s->arm_irq_enable &= ~val & 0xff;
         break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-            "bcm2835_ic_write: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset %"HWADDR_PRIx"\n",
+                      __func__, offset);
         return;
     }
     bcm2835_ic_update(s);
@@ -165,35 +166,35 @@ static const MemoryRegionOps bcm2835_ic_ops = {
     .read = bcm2835_ic_read,
     .write = bcm2835_ic_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
 };
 
 static void bcm2835_ic_reset(DeviceState *d)
 {
-    BCM2835IcState *s = BCM2835_IC(d);
-    int i;
+    BCM2835ICState *s = BCM2835_IC(d);
 
-    for (i = 0; i < 3; i++) {
-        s->irq_enable[i] = 0;
-    }
-    s->fiq_enable = 0;
+    s->gpu_irq_enable = 0;
+    s->arm_irq_enable = 0;
+    s->fiq_enable = false;
     s->fiq_select = 0;
 }
 
 static void bcm2835_ic_init(Object *obj)
 {
-    BCM2835IcState *s = BCM2835_IC(obj);
+    BCM2835ICState *s = BCM2835_IC(obj);
 
     memory_region_init_io(&s->iomem, obj, &bcm2835_ic_ops, s, TYPE_BCM2835_IC,
                           0x200);
     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
 
-    qdev_init_gpio_in(DEVICE(s), bcm2835_ic_set_irq, 72);
+    qdev_init_gpio_in_named(DEVICE(s), bcm2835_ic_set_gpu_irq,
+                            BCM2835_IC_GPU_IRQ, GPU_IRQS);
+    qdev_init_gpio_in_named(DEVICE(s), bcm2835_ic_set_arm_irq,
+                            BCM2835_IC_ARM_IRQ, ARM_IRQS);
+
     sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
     sysbus_init_irq(SYS_BUS_DEVICE(s), &s->fiq);
-}
-
-static void bcm2835_ic_realize(DeviceState *dev, Error **errp)
-{
 }
 
 static const VMStateDescription vmstate_bcm2835_ic = {
@@ -201,10 +202,12 @@ static const VMStateDescription vmstate_bcm2835_ic = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(level, BCM2835IcState, 3),
-        VMSTATE_UINT32_ARRAY(irq_enable, BCM2835IcState, 3),
-        VMSTATE_INT32(fiq_enable, BCM2835IcState),
-        VMSTATE_INT32(fiq_select, BCM2835IcState),
+        VMSTATE_UINT64(gpu_irq_level, BCM2835ICState),
+        VMSTATE_UINT64(gpu_irq_enable, BCM2835ICState),
+        VMSTATE_UINT8(arm_irq_level, BCM2835ICState),
+        VMSTATE_UINT8(arm_irq_enable, BCM2835ICState),
+        VMSTATE_BOOL(fiq_enable, BCM2835ICState),
+        VMSTATE_UINT8(fiq_select, BCM2835ICState),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -213,7 +216,6 @@ static void bcm2835_ic_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
-    dc->realize = bcm2835_ic_realize;
     dc->reset = bcm2835_ic_reset;
     dc->vmsd = &vmstate_bcm2835_ic;
 }
@@ -221,7 +223,7 @@ static void bcm2835_ic_class_init(ObjectClass *klass, void *data)
 static TypeInfo bcm2835_ic_info = {
     .name          = TYPE_BCM2835_IC,
     .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(BCM2835IcState),
+    .instance_size = sizeof(BCM2835ICState),
     .class_init    = bcm2835_ic_class_init,
     .instance_init = bcm2835_ic_init,
 };

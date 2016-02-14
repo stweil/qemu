@@ -29,6 +29,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "sysemu/block-backend.h"
 #include "hw/sd/sd.h"
@@ -689,8 +690,10 @@ static sd_rsp_type_t sd_normal_command(SDState *sd,
     /* Not interpreting this as an app command */
     sd->card_status &= ~APP_CMD;
 
-    if (sd_cmd_type[req.cmd] == sd_ac || sd_cmd_type[req.cmd] == sd_adtc)
+    if (sd_cmd_type[req.cmd & 0x3F] == sd_ac
+        || sd_cmd_type[req.cmd & 0x3F] == sd_adtc) {
         rca = req.arg >> 16;
+    }
 
     /* CMD23 (set block count) must be immediately followed by CMD18 or CMD25
      * if not, its effects are cancelled */
@@ -1386,7 +1389,8 @@ static int cmd_valid_while_locked(SDState *sd, SDRequest *req)
     if (req->cmd == 16 || req->cmd == 55) {
         return 1;
     }
-    return sd_cmd_class[req->cmd] == 0 || sd_cmd_class[req->cmd] == 7;
+    return sd_cmd_class[req->cmd & 0x3F] == 0
+            || sd_cmd_class[req->cmd & 0x3F] == 7;
 }
 
 int sd_do_command(SDState *sd, SDRequest *req,

@@ -16,16 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <sys/types.h>
 #include <sys/mman.h>
 #endif
-
-#include "qemu-common.h"
-#include "config.h"
+#include "qemu/osdep.h"
 
 #include "qemu-common.h"
 #define NO_CPU_IO_DEFS
@@ -43,7 +39,6 @@
 #if __FreeBSD_version >= 700104
 #define HAVE_KINFO_GETVMMAP
 #define sigqueue sigqueue_freebsd  /* avoid redefinition */
-#include <sys/time.h>
 #include <sys/proc.h>
 #include <machine/profile.h>
 #define _KERNEL
@@ -62,6 +57,7 @@
 #include "translate-all.h"
 #include "qemu/bitmap.h"
 #include "qemu/timer.h"
+#include "exec/log.h"
 
 //#define DEBUG_TB_INVALIDATE
 //#define DEBUG_FLUSH

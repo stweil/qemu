@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-
+#include "qemu/osdep.h"
 #include "cpu.h"
 #include "exec/helper-proto.h"
 #include "internals.h"
@@ -151,7 +151,7 @@ void arm_cpu_do_unaligned_access(CPUState *cs, vaddr vaddr, int is_write,
     /* the DFSR for an alignment fault depends on whether we're using
      * the LPAE long descriptor format, or the short descriptor format
      */
-    if (arm_regime_using_lpae_format(env, cpu_mmu_index(env, false))) {
+    if (arm_s1_regime_using_lpae_format(env, cpu_mmu_index(env, false))) {
         env->exception.fsr = 0x21;
     } else {
         env->exception.fsr = 0x1;
@@ -459,7 +459,8 @@ void HELPER(set_user_reg)(CPUARMState *env, uint32_t regno, uint32_t val)
     }
 }
 
-void HELPER(access_check_cp_reg)(CPUARMState *env, void *rip, uint32_t syndrome)
+void HELPER(access_check_cp_reg)(CPUARMState *env, void *rip, uint32_t syndrome,
+                                 uint32_t isread)
 {
     const ARMCPRegInfo *ri = rip;
     int target_el;
@@ -473,7 +474,7 @@ void HELPER(access_check_cp_reg)(CPUARMState *env, void *rip, uint32_t syndrome)
         return;
     }
 
-    switch (ri->accessfn(env, ri)) {
+    switch (ri->accessfn(env, ri, isread)) {
     case CP_ACCESS_OK:
         return;
     case CP_ACCESS_TRAP:
@@ -643,12 +644,51 @@ void HELPER(pre_smc)(CPUARMState *env, uint32_t syndrome)
     }
 }
 
+static int el_from_spsr(uint32_t spsr)
+{
+    /* Return the exception level that this SPSR is requesting a return to,
+     * or -1 if it is invalid (an illegal return)
+     */
+    if (spsr & PSTATE_nRW) {
+        switch (spsr & CPSR_M) {
+        case ARM_CPU_MODE_USR:
+            return 0;
+        case ARM_CPU_MODE_HYP:
+            return 2;
+        case ARM_CPU_MODE_FIQ:
+        case ARM_CPU_MODE_IRQ:
+        case ARM_CPU_MODE_SVC:
+        case ARM_CPU_MODE_ABT:
+        case ARM_CPU_MODE_UND:
+        case ARM_CPU_MODE_SYS:
+            return 1;
+        case ARM_CPU_MODE_MON:
+            /* Returning to Mon from AArch64 is never possible,
+             * so this is an illegal return.
+             */
+        default:
+            return -1;
+        }
+    } else {
+        if (extract32(spsr, 1, 1)) {
+            /* Return with reserved M[1] bit set */
+            return -1;
+        }
+        if (extract32(spsr, 0, 4) == 1) {
+            /* return to EL0 with M[0] bit set */
+            return -1;
+        }
+        return extract32(spsr, 2, 2);
+    }
+}
+
 void HELPER(exception_return)(CPUARMState *env)
 {
     int cur_el = arm_current_el(env);
     unsigned int spsr_idx = aarch64_banked_spsr_index(cur_el);
     uint32_t spsr = env->banked_spsr[spsr_idx];
     int new_el;
+    bool return_to_aa64 = (spsr & PSTATE_nRW) == 0;
 
     aarch64_save_sp(env, cur_el);
 
@@ -665,35 +705,48 @@ void HELPER(exception_return)(CPUARMState *env)
         spsr &= ~PSTATE_SS;
     }
 
-    if (spsr & PSTATE_nRW) {
-        /* TODO: We currently assume EL1/2/3 are running in AArch64.  */
+    new_el = el_from_spsr(spsr);
+    if (new_el == -1) {
+        goto illegal_return;
+    }
+    if (new_el > cur_el
+        || (new_el == 2 && !arm_feature(env, ARM_FEATURE_EL2))) {
+        /* Disallow return to an EL which is unimplemented or higher
+         * than the current one.
+         */
+        goto illegal_return;
+    }
+
+    if (new_el != 0 && arm_el_is_aa64(env, new_el) != return_to_aa64) {
+        /* Return to an EL which is configured for a different register width */
+        goto illegal_return;
+    }
+
+    if (new_el == 2 && arm_is_secure_below_el3(env)) {
+        /* Return to the non-existent secure-EL2 */
+        goto illegal_return;
+    }
+
+    if (new_el == 1 && (env->cp15.hcr_el2 & HCR_TGE)
+        && !arm_is_secure_below_el3(env)) {
+        goto illegal_return;
+    }
+
+    if (!return_to_aa64) {
         env->aarch64 = 0;
-        new_el = 0;
-        env->uncached_cpsr = 0x10;
+        env->uncached_cpsr = spsr & CPSR_M;
         cpsr_write(env, spsr, ~0);
         if (!arm_singlestep_active(env)) {
             env->uncached_cpsr &= ~PSTATE_SS;
         }
         aarch64_sync_64_to_32(env);
 
-        env->regs[15] = env->elr_el[1] & ~0x1;
+        if (spsr & CPSR_T) {
+            env->regs[15] = env->elr_el[cur_el] & ~0x1;
+        } else {
+            env->regs[15] = env->elr_el[cur_el] & ~0x3;
+        }
     } else {
-        new_el = extract32(spsr, 2, 2);
-        if (new_el > cur_el
-            || (new_el == 2 && !arm_feature(env, ARM_FEATURE_EL2))) {
-            /* Disallow return to an EL which is unimplemented or higher
-             * than the current one.
-             */
-            goto illegal_return;
-        }
-        if (extract32(spsr, 1, 1)) {
-            /* Return with reserved M[1] bit set */
-            goto illegal_return;
-        }
-        if (new_el == 0 && (spsr & PSTATE_SP)) {
-            /* Return to EL0 with M[0] bit set */
-            goto illegal_return;
-        }
         env->aarch64 = 1;
         pstate_write(env, spsr);
         if (!arm_singlestep_active(env)) {
@@ -925,6 +978,16 @@ void HELPER(check_breakpoints)(CPUARMState *env)
     }
 }
 
+bool arm_debug_check_watchpoint(CPUState *cs, CPUWatchpoint *wp)
+{
+    /* Called by core code when a CPU watchpoint fires; need to check if this
+     * is also an architectural watchpoint match.
+     */
+    ARMCPU *cpu = ARM_CPU(cs);
+
+    return check_watchpoints(cpu);
+}
+
 void arm_debug_excp_handler(CPUState *cs)
 {
     /* Called by core code when a watchpoint or breakpoint fires;
@@ -936,23 +999,20 @@ void arm_debug_excp_handler(CPUState *cs)
 
     if (wp_hit) {
         if (wp_hit->flags & BP_CPU) {
-            cs->watchpoint_hit = NULL;
-            if (check_watchpoints(cpu)) {
-                bool wnr = (wp_hit->flags & BP_WATCHPOINT_HIT_WRITE) != 0;
-                bool same_el = arm_debug_target_el(env) == arm_current_el(env);
+            bool wnr = (wp_hit->flags & BP_WATCHPOINT_HIT_WRITE) != 0;
+            bool same_el = arm_debug_target_el(env) == arm_current_el(env);
 
-                if (extended_addresses_enabled(env)) {
-                    env->exception.fsr = (1 << 9) | 0x22;
-                } else {
-                    env->exception.fsr = 0x2;
-                }
-                env->exception.vaddress = wp_hit->hitaddr;
-                raise_exception(env, EXCP_DATA_ABORT,
-                                syn_watchpoint(same_el, 0, wnr),
-                                arm_debug_target_el(env));
+            cs->watchpoint_hit = NULL;
+
+            if (extended_addresses_enabled(env)) {
+                env->exception.fsr = (1 << 9) | 0x22;
             } else {
-                cpu_resume_from_signal(cs, NULL);
+                env->exception.fsr = 0x2;
             }
+            env->exception.vaddress = wp_hit->hitaddr;
+            raise_exception(env, EXCP_DATA_ABORT,
+                    syn_watchpoint(same_el, 0, wnr),
+                    arm_debug_target_el(env));
         }
     } else {
         uint64_t pc = is_a64(env) ? env->pc : env->regs[15];

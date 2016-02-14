@@ -30,6 +30,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "sysemu/block-backend.h"
 #include "sysemu/blockdev.h"
 #include "hw/block/block.h"
@@ -49,6 +50,9 @@
 #include "qmp-commands.h"
 #include "trace.h"
 #include "sysemu/arch_init.h"
+
+static QTAILQ_HEAD(, BlockDriverState) monitor_bdrv_states =
+    QTAILQ_HEAD_INITIALIZER(monitor_bdrv_states);
 
 static const char *const if_name[IF_COUNT] = {
     [IF_NONE] = "none",
@@ -348,7 +352,8 @@ static bool check_throttle_config(ThrottleConfig *cfg, Error **errp)
     }
 
     if (!throttle_is_valid(cfg)) {
-        error_setg(errp, "bps/iops/maxs values must be 0 or greater");
+        error_setg(errp, "bps/iops/max values must be within [0, %lld]",
+                   THROTTLE_VALUE_MAX);
         return false;
     }
 
@@ -699,6 +704,19 @@ fail:
     qemu_opts_del(opts);
     QDECREF(bs_opts);
     return NULL;
+}
+
+void blockdev_close_all_bdrv_states(void)
+{
+    BlockDriverState *bs, *next_bs;
+
+    QTAILQ_FOREACH_SAFE(bs, &monitor_bdrv_states, monitor_list, next_bs) {
+        AioContext *ctx = bdrv_get_aio_context(bs);
+
+        aio_context_acquire(ctx);
+        bdrv_unref(bs);
+        aio_context_release(ctx);
+    }
 }
 
 static void qemu_opt_rename(QemuOpts *opts, const char *from, const char *to,
@@ -1582,13 +1600,11 @@ static void internal_snapshot_abort(BlkActionState *common)
     }
 
     if (bdrv_snapshot_delete(bs, sn->id_str, sn->name, &local_error) < 0) {
-        error_report("Failed to delete snapshot with id '%s' and name '%s' on "
-                     "device '%s' in abort: %s",
-                     sn->id_str,
-                     sn->name,
-                     bdrv_get_device_name(bs),
-                     error_get_pretty(local_error));
-        error_free(local_error);
+        error_reportf_err(local_error,
+                          "Failed to delete snapshot with id '%s' and "
+                          "name '%s' on device '%s' in abort: ",
+                          sn->id_str, sn->name,
+                          bdrv_get_device_name(bs));
     }
 }
 
@@ -2305,6 +2321,11 @@ void qmp_blockdev_open_tray(const char *device, bool has_force, bool force,
         return;
     }
 
+    if (!blk_dev_has_tray(blk)) {
+        /* Ignore this command on tray-less devices */
+        return;
+    }
+
     if (blk_dev_is_tray_open(blk)) {
         return;
     }
@@ -2332,6 +2353,11 @@ void qmp_blockdev_close_tray(const char *device, Error **errp)
 
     if (!blk_dev_has_removable_media(blk)) {
         error_setg(errp, "Device '%s' is not removable", device);
+        return;
+    }
+
+    if (!blk_dev_has_tray(blk)) {
+        /* Ignore this command on tray-less devices */
         return;
     }
 
@@ -2364,7 +2390,7 @@ void qmp_x_blockdev_remove_medium(const char *device, Error **errp)
         return;
     }
 
-    if (has_device && !blk_dev_is_tray_open(blk)) {
+    if (has_device && blk_dev_has_tray(blk) && !blk_dev_is_tray_open(blk)) {
         error_setg(errp, "Tray of device '%s' is not open", device);
         return;
     }
@@ -2383,11 +2409,18 @@ void qmp_x_blockdev_remove_medium(const char *device, Error **errp)
 
     /* This follows the convention established by bdrv_make_anon() */
     if (bs->device_list.tqe_prev) {
-        QTAILQ_REMOVE(&bdrv_states, bs, device_list);
-        bs->device_list.tqe_prev = NULL;
+        bdrv_device_remove(bs);
     }
 
     blk_remove_bs(blk);
+
+    if (!blk_dev_has_tray(blk)) {
+        /* For tray-less devices, blockdev-open-tray is a no-op (or may not be
+         * called at all); therefore, the medium needs to be ejected here.
+         * Do it after blk_remove_bs() so blk_is_inserted(blk) returns the @load
+         * value passed here (i.e. false). */
+        blk_dev_change_media_cb(blk, false);
+    }
 
 out:
     aio_context_release(aio_context);
@@ -2414,7 +2447,7 @@ static void qmp_blockdev_insert_anon_medium(const char *device,
         return;
     }
 
-    if (has_device && !blk_dev_is_tray_open(blk)) {
+    if (has_device && blk_dev_has_tray(blk) && !blk_dev_is_tray_open(blk)) {
         error_setg(errp, "Tray of device '%s' is not open", device);
         return;
     }
@@ -2427,6 +2460,15 @@ static void qmp_blockdev_insert_anon_medium(const char *device,
     blk_insert_bs(blk, bs);
 
     QTAILQ_INSERT_TAIL(&bdrv_states, bs, device_list);
+
+    if (!blk_dev_has_tray(blk)) {
+        /* For tray-less devices, blockdev-close-tray is a no-op (or may not be
+         * called at all); therefore, the medium needs to be pushed into the
+         * slot here.
+         * Do it after blk_insert_bs() so blk_is_inserted(blk) returns the @load
+         * value passed here (i.e. true). */
+        blk_dev_change_media_cb(blk, true);
+    }
 }
 
 void qmp_x_blockdev_insert_medium(const char *device, const char *node_name,
@@ -2766,7 +2808,7 @@ void hmp_drive_del(Monitor *mon, const QDict *qdict)
             return;
         }
 
-        bdrv_close(bs);
+        blk_remove_bs(blk);
     }
 
     /* if we have a device attached to this BlockDriverState
@@ -3818,8 +3860,8 @@ void qmp_blockdev_add(BlockdevOptions *options, Error **errp)
         }
     }
 
-    visit_type_BlockdevOptions(qmp_output_get_visitor(ov),
-                               &options, NULL, &local_err);
+    visit_type_BlockdevOptions(qmp_output_get_visitor(ov), NULL, &options,
+                               &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         goto fail;
@@ -3849,12 +3891,15 @@ void qmp_blockdev_add(BlockdevOptions *options, Error **errp)
         if (!bs) {
             goto fail;
         }
+
+        QTAILQ_INSERT_TAIL(&monitor_bdrv_states, bs, monitor_list);
     }
 
     if (bs && bdrv_key_required(bs)) {
         if (blk) {
             blk_unref(blk);
         } else {
+            QTAILQ_REMOVE(&monitor_bdrv_states, bs, monitor_list);
             bdrv_unref(bs);
         }
         error_setg(errp, "blockdev-add doesn't support encrypted devices");
@@ -3914,7 +3959,13 @@ void qmp_x_blockdev_del(bool has_id, const char *id,
             goto out;
         }
 
-        if (bs->refcnt > 1 || !QLIST_EMPTY(&bs->parents)) {
+        if (!blk && !bs->monitor_list.tqe_prev) {
+            error_setg(errp, "Node %s is not owned by the monitor",
+                       bs->node_name);
+            goto out;
+        }
+
+        if (bs->refcnt > 1) {
             error_setg(errp, "Block device %s is in use",
                        bdrv_get_device_or_node_name(bs));
             goto out;
@@ -3924,6 +3975,7 @@ void qmp_x_blockdev_del(bool has_id, const char *id,
     if (blk) {
         blk_unref(blk);
     } else {
+        QTAILQ_REMOVE(&monitor_bdrv_states, bs, monitor_list);
         bdrv_unref(bs);
     }
 

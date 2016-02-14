@@ -24,6 +24,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "vnc.h"
 #include "vnc-jobs.h"
 #include "trace.h"
@@ -37,7 +38,6 @@
 #include "qapi/qmp/qerror.h"
 #include "qapi/qmp/types.h"
 #include "qmp-commands.h"
-#include "qemu/osdep.h"
 #include "ui/input.h"
 #include "qapi-event.h"
 #include "crypto/hash.h"
@@ -3134,6 +3134,7 @@ static void vnc_display_close(VncDisplay *vs)
     vs->subauth = VNC_AUTH_INVALID;
     if (vs->tlscreds) {
         object_unparent(OBJECT(vs->tlscreds));
+        vs->tlscreds = NULL;
     }
     g_free(vs->tlsaclname);
     vs->tlsaclname = NULL;
@@ -3501,8 +3502,10 @@ void vnc_display_open(const char *id, Error **errp)
 
         const char *websocket = qemu_opt_get(opts, "websocket");
         int to = qemu_opt_get_number(opts, "to", 0);
-        bool has_ipv4 = qemu_opt_get_bool(opts, "ipv4", false);
-        bool has_ipv6 = qemu_opt_get_bool(opts, "ipv6", false);
+        bool has_ipv4 = qemu_opt_get(opts, "ipv4");
+        bool has_ipv6 = qemu_opt_get(opts, "ipv6");
+        bool ipv4 = qemu_opt_get_bool(opts, "ipv4", false);
+        bool ipv6 = qemu_opt_get_bool(opts, "ipv6", false);
 
         saddr = g_new0(SocketAddress, 1);
         if (websocket) {
@@ -3550,8 +3553,10 @@ void vnc_display_open(const char *id, Error **errp)
                 saddr->u.inet->has_to = true;
                 saddr->u.inet->to = to + 5900;
             }
-            saddr->u.inet->ipv4 = saddr->u.inet->has_ipv4 = has_ipv4;
-            saddr->u.inet->ipv6 = saddr->u.inet->has_ipv6 = has_ipv6;
+            saddr->u.inet->ipv4 = ipv4;
+            saddr->u.inet->has_ipv4 = has_ipv4;
+            saddr->u.inet->ipv6 = ipv6;
+            saddr->u.inet->has_ipv6 = has_ipv6;
 
             if (vs->ws_enabled) {
                 wsaddr->type = SOCKET_ADDRESS_KIND_INET;
@@ -3563,8 +3568,10 @@ void vnc_display_open(const char *id, Error **errp)
                     wsaddr->u.inet->has_to = true;
                     wsaddr->u.inet->to = to;
                 }
-                wsaddr->u.inet->ipv4 = wsaddr->u.inet->has_ipv4 = has_ipv4;
-                wsaddr->u.inet->ipv6 = wsaddr->u.inet->has_ipv6 = has_ipv6;
+                wsaddr->u.inet->ipv4 = ipv4;
+                wsaddr->u.inet->has_ipv4 = has_ipv4;
+                wsaddr->u.inet->ipv6 = ipv6;
+                wsaddr->u.inet->has_ipv6 = has_ipv6;
             }
         }
     } else {
@@ -3605,7 +3612,7 @@ void vnc_display_open(const char *id, Error **errp)
             qemu_opt_get(opts, "x509") ||
             qemu_opt_get(opts, "x509verify")) {
             error_setg(errp,
-                       "'credid' parameter is mutually exclusive with "
+                       "'tls-creds' parameter is mutually exclusive with "
                        "'tls', 'x509' and 'x509verify' parameters");
             goto fail;
         }
@@ -3861,9 +3868,7 @@ int vnc_init_func(void *opaque, QemuOpts *opts, Error **errp)
     vnc_display_init(id);
     vnc_display_open(id, &local_err);
     if (local_err != NULL) {
-        error_report("Failed to start VNC server: %s",
-                     error_get_pretty(local_err));
-        error_free(local_err);
+        error_reportf_err(local_err, "Failed to start VNC server: ");
         exit(1);
     }
     return 0;

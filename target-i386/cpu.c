@@ -260,6 +260,17 @@ static const char *cpuid_7_0_ebx_feature_name[] = {
     "clwb", NULL, "avx512pf", "avx512er", "avx512cd", NULL, NULL, NULL,
 };
 
+static const char *cpuid_7_0_ecx_feature_name[] = {
+    NULL, NULL, NULL, "pku",
+    "ospke", NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL, NULL,
+};
+
 static const char *cpuid_apm_edx_feature_name[] = {
     NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL,
@@ -349,6 +360,7 @@ static const char *cpuid_6_feature_name[] = {
           CPUID_7_0_EBX_FSGSBASE, CPUID_7_0_EBX_HLE, CPUID_7_0_EBX_AVX2,
           CPUID_7_0_EBX_ERMS, CPUID_7_0_EBX_INVPCID, CPUID_7_0_EBX_RTM,
           CPUID_7_0_EBX_RDSEED */
+#define TCG_7_0_ECX_FEATURES 0
 #define TCG_APM_FEATURES 0
 #define TCG_6_EAX_FEATURES CPUID_6_EAX_ARAT
 
@@ -405,6 +417,13 @@ static FeatureWordInfo feature_word_info[FEATURE_WORDS] = {
         .cpuid_needs_ecx = true, .cpuid_ecx = 0,
         .cpuid_reg = R_EBX,
         .tcg_features = TCG_7_0_EBX_FEATURES,
+    },
+    [FEAT_7_0_ECX] = {
+        .feat_names = cpuid_7_0_ecx_feature_name,
+        .cpuid_eax = 7,
+        .cpuid_needs_ecx = true, .cpuid_ecx = 0,
+        .cpuid_reg = R_ECX,
+        .tcg_features = TCG_7_0_ECX_FEATURES,
     },
     [FEAT_8000_0007_EDX] = {
         .feat_names = cpuid_apm_edx_feature_name,
@@ -466,6 +485,8 @@ static const ExtSaveArea ext_save_areas[] = {
             .offset = 0x480, .size = 0x200 },
     [7] = { .feature = FEAT_7_0_EBX, .bits = CPUID_7_0_EBX_AVX512F,
             .offset = 0x680, .size = 0x400 },
+    [9] = { .feature = FEAT_7_0_ECX, .bits = CPUID_7_0_ECX_PKU,
+            .offset = 0xA80, .size = 0x8 },
 };
 
 const char *get_register_name_32(unsigned int reg)
@@ -1506,8 +1527,9 @@ static void report_unavailable_features(FeatureWord w, uint32_t mask)
     }
 }
 
-static void x86_cpuid_version_get_family(Object *obj, Visitor *v, void *opaque,
-                                         const char *name, Error **errp)
+static void x86_cpuid_version_get_family(Object *obj, Visitor *v,
+                                         const char *name, void *opaque,
+                                         Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     CPUX86State *env = &cpu->env;
@@ -1517,11 +1539,12 @@ static void x86_cpuid_version_get_family(Object *obj, Visitor *v, void *opaque,
     if (value == 0xf) {
         value += (env->cpuid_version >> 20) & 0xff;
     }
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
-static void x86_cpuid_version_set_family(Object *obj, Visitor *v, void *opaque,
-                                         const char *name, Error **errp)
+static void x86_cpuid_version_set_family(Object *obj, Visitor *v,
+                                         const char *name, void *opaque,
+                                         Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     CPUX86State *env = &cpu->env;
@@ -1530,7 +1553,7 @@ static void x86_cpuid_version_set_family(Object *obj, Visitor *v, void *opaque,
     Error *local_err = NULL;
     int64_t value;
 
-    visit_type_int(v, &value, name, &local_err);
+    visit_type_int(v, name, &value, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1549,8 +1572,9 @@ static void x86_cpuid_version_set_family(Object *obj, Visitor *v, void *opaque,
     }
 }
 
-static void x86_cpuid_version_get_model(Object *obj, Visitor *v, void *opaque,
-                                        const char *name, Error **errp)
+static void x86_cpuid_version_get_model(Object *obj, Visitor *v,
+                                        const char *name, void *opaque,
+                                        Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     CPUX86State *env = &cpu->env;
@@ -1558,11 +1582,12 @@ static void x86_cpuid_version_get_model(Object *obj, Visitor *v, void *opaque,
 
     value = (env->cpuid_version >> 4) & 0xf;
     value |= ((env->cpuid_version >> 16) & 0xf) << 4;
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
-static void x86_cpuid_version_set_model(Object *obj, Visitor *v, void *opaque,
-                                        const char *name, Error **errp)
+static void x86_cpuid_version_set_model(Object *obj, Visitor *v,
+                                        const char *name, void *opaque,
+                                        Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     CPUX86State *env = &cpu->env;
@@ -1571,7 +1596,7 @@ static void x86_cpuid_version_set_model(Object *obj, Visitor *v, void *opaque,
     Error *local_err = NULL;
     int64_t value;
 
-    visit_type_int(v, &value, name, &local_err);
+    visit_type_int(v, name, &value, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1587,7 +1612,7 @@ static void x86_cpuid_version_set_model(Object *obj, Visitor *v, void *opaque,
 }
 
 static void x86_cpuid_version_get_stepping(Object *obj, Visitor *v,
-                                           void *opaque, const char *name,
+                                           const char *name, void *opaque,
                                            Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
@@ -1595,11 +1620,11 @@ static void x86_cpuid_version_get_stepping(Object *obj, Visitor *v,
     int64_t value;
 
     value = env->cpuid_version & 0xf;
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
 static void x86_cpuid_version_set_stepping(Object *obj, Visitor *v,
-                                           void *opaque, const char *name,
+                                           const char *name, void *opaque,
                                            Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
@@ -1609,7 +1634,7 @@ static void x86_cpuid_version_set_stepping(Object *obj, Visitor *v,
     Error *local_err = NULL;
     int64_t value;
 
-    visit_type_int(v, &value, name, &local_err);
+    visit_type_int(v, name, &value, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1695,18 +1720,18 @@ static void x86_cpuid_set_model_id(Object *obj, const char *model_id,
     }
 }
 
-static void x86_cpuid_get_tsc_freq(Object *obj, Visitor *v, void *opaque,
-                                   const char *name, Error **errp)
+static void x86_cpuid_get_tsc_freq(Object *obj, Visitor *v, const char *name,
+                                   void *opaque, Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     int64_t value;
 
     value = cpu->env.tsc_khz * 1000;
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
-static void x86_cpuid_set_tsc_freq(Object *obj, Visitor *v, void *opaque,
-                                   const char *name, Error **errp)
+static void x86_cpuid_set_tsc_freq(Object *obj, Visitor *v, const char *name,
+                                   void *opaque, Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     const int64_t min = 0;
@@ -1714,7 +1739,7 @@ static void x86_cpuid_set_tsc_freq(Object *obj, Visitor *v, void *opaque,
     Error *local_err = NULL;
     int64_t value;
 
-    visit_type_int(v, &value, name, &local_err);
+    visit_type_int(v, name, &value, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1725,20 +1750,20 @@ static void x86_cpuid_set_tsc_freq(Object *obj, Visitor *v, void *opaque,
         return;
     }
 
-    cpu->env.tsc_khz = value / 1000;
+    cpu->env.tsc_khz = cpu->env.user_tsc_khz = value / 1000;
 }
 
-static void x86_cpuid_get_apic_id(Object *obj, Visitor *v, void *opaque,
-                                  const char *name, Error **errp)
+static void x86_cpuid_get_apic_id(Object *obj, Visitor *v, const char *name,
+                                  void *opaque, Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     int64_t value = cpu->apic_id;
 
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
-static void x86_cpuid_set_apic_id(Object *obj, Visitor *v, void *opaque,
-                                  const char *name, Error **errp)
+static void x86_cpuid_set_apic_id(Object *obj, Visitor *v, const char *name,
+                                  void *opaque, Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     DeviceState *dev = DEVICE(obj);
@@ -1753,7 +1778,7 @@ static void x86_cpuid_set_apic_id(Object *obj, Visitor *v, void *opaque,
         return;
     }
 
-    visit_type_int(v, &value, name, &error);
+    visit_type_int(v, name, &value, &error);
     if (error) {
         error_propagate(errp, error);
         return;
@@ -1773,8 +1798,9 @@ static void x86_cpuid_set_apic_id(Object *obj, Visitor *v, void *opaque,
 }
 
 /* Generic getter for "feature-words" and "filtered-features" properties */
-static void x86_cpu_get_feature_words(Object *obj, Visitor *v, void *opaque,
-                                      const char *name, Error **errp)
+static void x86_cpu_get_feature_words(Object *obj, Visitor *v,
+                                      const char *name, void *opaque,
+                                      Error **errp)
 {
     uint32_t *array = (uint32_t *)opaque;
     FeatureWord w;
@@ -1798,21 +1824,21 @@ static void x86_cpu_get_feature_words(Object *obj, Visitor *v, void *opaque,
         list = &list_entries[w];
     }
 
-    visit_type_X86CPUFeatureWordInfoList(v, &list, "feature-words", &err);
+    visit_type_X86CPUFeatureWordInfoList(v, "feature-words", &list, &err);
     error_propagate(errp, err);
 }
 
-static void x86_get_hv_spinlocks(Object *obj, Visitor *v, void *opaque,
-                                 const char *name, Error **errp)
+static void x86_get_hv_spinlocks(Object *obj, Visitor *v, const char *name,
+                                 void *opaque, Error **errp)
 {
     X86CPU *cpu = X86_CPU(obj);
     int64_t value = cpu->hyperv_spinlock_attempts;
 
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
-static void x86_set_hv_spinlocks(Object *obj, Visitor *v, void *opaque,
-                                 const char *name, Error **errp)
+static void x86_set_hv_spinlocks(Object *obj, Visitor *v, const char *name,
+                                 void *opaque, Error **errp)
 {
     const int64_t min = 0xFFF;
     const int64_t max = UINT_MAX;
@@ -1820,7 +1846,7 @@ static void x86_set_hv_spinlocks(Object *obj, Visitor *v, void *opaque,
     Error *err = NULL;
     int64_t value;
 
-    visit_type_int(v, &value, name, &err);
+    visit_type_int(v, name, &value, &err);
     if (err) {
         error_propagate(errp, err);
         return;
@@ -2387,7 +2413,7 @@ void cpu_x86_cpuid(CPUX86State *env, uint32_t index, uint32_t count,
         if (count == 0) {
             *eax = 0; /* Maximum ECX value for sub-leaves */
             *ebx = env->features[FEAT_7_0_EBX]; /* Feature flags */
-            *ecx = 0; /* Reserved */
+            *ecx = env->features[FEAT_7_0_ECX]; /* Feature flags */
             *edx = 0; /* Reserved */
         } else {
             *eax = 0;
@@ -2858,9 +2884,10 @@ static void x86_cpu_realizefn(DeviceState *dev, Error **errp)
 
 #ifndef CONFIG_USER_ONLY
     if (tcg_enabled()) {
+        AddressSpace *newas = g_new(AddressSpace, 1);
+
         cpu->cpu_as_mem = g_new(MemoryRegion, 1);
         cpu->cpu_as_root = g_new(MemoryRegion, 1);
-        cs->as = g_new(AddressSpace, 1);
 
         /* Outer container... */
         memory_region_init(cpu->cpu_as_root, OBJECT(cpu), "memory", ~0ull);
@@ -2873,7 +2900,9 @@ static void x86_cpu_realizefn(DeviceState *dev, Error **errp)
                                  get_system_memory(), 0, ~0ull);
         memory_region_add_subregion_overlap(cpu->cpu_as_root, 0, cpu->cpu_as_mem, 0);
         memory_region_set_enabled(cpu->cpu_as_mem, true);
-        address_space_init(cs->as, cpu->cpu_as_root, "CPU");
+        address_space_init(newas, cpu->cpu_as_root, "CPU");
+        cs->num_ases = 1;
+        cpu_address_space_init(cs, newas, 0);
 
         /* ... SMRAM with higher priority, linked from /machine/smram.  */
         cpu->machine_done.notify = x86_cpu_machine_done;
@@ -2917,22 +2946,16 @@ typedef struct BitProperty {
     uint32_t mask;
 } BitProperty;
 
-static void x86_cpu_get_bit_prop(Object *obj,
-                                 struct Visitor *v,
-                                 void *opaque,
-                                 const char *name,
-                                 Error **errp)
+static void x86_cpu_get_bit_prop(Object *obj, Visitor *v, const char *name,
+                                 void *opaque, Error **errp)
 {
     BitProperty *fp = opaque;
     bool value = (*fp->ptr & fp->mask) == fp->mask;
-    visit_type_bool(v, &value, name, errp);
+    visit_type_bool(v, name, &value, errp);
 }
 
-static void x86_cpu_set_bit_prop(Object *obj,
-                                 struct Visitor *v,
-                                 void *opaque,
-                                 const char *name,
-                                 Error **errp)
+static void x86_cpu_set_bit_prop(Object *obj, Visitor *v, const char *name,
+                                 void *opaque, Error **errp)
 {
     DeviceState *dev = DEVICE(obj);
     BitProperty *fp = opaque;
@@ -2944,7 +2967,7 @@ static void x86_cpu_set_bit_prop(Object *obj,
         return;
     }
 
-    visit_type_bool(v, &value, name, &local_err);
+    visit_type_bool(v, name, &value, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -3085,7 +3108,7 @@ static void x86_cpu_initfn(Object *obj)
     /* init various static tables used in TCG mode */
     if (tcg_enabled() && !inited) {
         inited = 1;
-        optimize_flags_init();
+        tcg_x86_init();
     }
 }
 

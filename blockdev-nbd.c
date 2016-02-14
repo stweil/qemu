@@ -9,6 +9,7 @@
  * later.  See the COPYING file in the top-level directory.
  */
 
+#include "qemu/osdep.h"
 #include "sysemu/blockdev.h"
 #include "sysemu/block-backend.h"
 #include "hw/block/block.h"
@@ -27,9 +28,8 @@ static void nbd_accept(void *opaque)
     socklen_t addr_len = sizeof(addr);
 
     int fd = accept(server_fd, (struct sockaddr *)&addr, &addr_len);
-    if (fd >= 0 && !nbd_client_new(NULL, fd, nbd_client_put)) {
-        shutdown(fd, 2);
-        close(fd);
+    if (fd >= 0) {
+        nbd_client_new(NULL, fd, nbd_client_put);
     }
 }
 
@@ -46,37 +46,11 @@ void qmp_nbd_server_start(SocketAddress *addr, Error **errp)
     }
 }
 
-/*
- * Hook into the BlockBackend notifiers to close the export when the
- * backend is closed.
- */
-typedef struct NBDCloseNotifier {
-    Notifier n;
-    NBDExport *exp;
-    QTAILQ_ENTRY(NBDCloseNotifier) next;
-} NBDCloseNotifier;
-
-static QTAILQ_HEAD(, NBDCloseNotifier) close_notifiers =
-    QTAILQ_HEAD_INITIALIZER(close_notifiers);
-
-static void nbd_close_notifier(Notifier *n, void *data)
-{
-    NBDCloseNotifier *cn = DO_UPCAST(NBDCloseNotifier, n, n);
-
-    notifier_remove(&cn->n);
-    QTAILQ_REMOVE(&close_notifiers, cn, next);
-
-    nbd_export_close(cn->exp);
-    nbd_export_put(cn->exp);
-    g_free(cn);
-}
-
 void qmp_nbd_server_add(const char *device, bool has_writable, bool writable,
                         Error **errp)
 {
     BlockBackend *blk;
     NBDExport *exp;
-    NBDCloseNotifier *n;
 
     if (server_fd == -1) {
         error_setg(errp, "NBD server not running");
@@ -114,19 +88,15 @@ void qmp_nbd_server_add(const char *device, bool has_writable, bool writable,
 
     nbd_export_set_name(exp, device);
 
-    n = g_new0(NBDCloseNotifier, 1);
-    n->n.notify = nbd_close_notifier;
-    n->exp = exp;
-    blk_add_close_notifier(blk, &n->n);
-    QTAILQ_INSERT_TAIL(&close_notifiers, n, next);
+    /* The list of named exports has a strong reference to this export now and
+     * our only way of accessing it is through nbd_export_find(), so we can drop
+     * the strong reference that is @exp. */
+    nbd_export_put(exp);
 }
 
 void qmp_nbd_server_stop(Error **errp)
 {
-    while (!QTAILQ_EMPTY(&close_notifiers)) {
-        NBDCloseNotifier *cn = QTAILQ_FIRST(&close_notifiers);
-        nbd_close_notifier(&cn->n, nbd_export_get_blockdev(cn->exp));
-    }
+    nbd_export_close_all();
 
     if (server_fd != -1) {
         qemu_set_fd_handler(server_fd, NULL, NULL, NULL);

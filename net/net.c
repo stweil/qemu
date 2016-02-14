@@ -21,7 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "config-host.h"
+#include "qemu/osdep.h"
 
 #include "net/net.h"
 #include "clients.h"
@@ -45,6 +45,7 @@
 #include "qapi/dealloc-visitor.h"
 #include "sysemu/sysemu.h"
 #include "net/filter.h"
+#include "qapi/string-output-visitor.h"
 
 /* Net bridge is currently not supported for W32. */
 #if !defined(_WIN32)
@@ -580,11 +581,21 @@ static ssize_t filter_receive_iov(NetClientState *nc,
     ssize_t ret = 0;
     NetFilterState *nf = NULL;
 
-    QTAILQ_FOREACH(nf, &nc->filters, next) {
-        ret = qemu_netfilter_receive(nf, direction, sender, flags, iov,
-                                     iovcnt, sent_cb);
-        if (ret) {
-            return ret;
+    if (direction == NET_FILTER_DIRECTION_TX) {
+        QTAILQ_FOREACH(nf, &nc->filters, next) {
+            ret = qemu_netfilter_receive(nf, direction, sender, flags, iov,
+                                         iovcnt, sent_cb);
+            if (ret) {
+                return ret;
+            }
+        }
+    } else {
+        QTAILQ_FOREACH_REVERSE(nf, &nc->filters, NetFilterHead, next) {
+            ret = qemu_netfilter_receive(nf, direction, sender, flags, iov,
+                                         iovcnt, sent_cb);
+            if (ret) {
+                return ret;
+            }
         }
     }
 
@@ -1035,9 +1046,9 @@ static int net_client_init1(const void *object, int is_netdev, Error **errp)
 static void net_visit(Visitor *v, int is_netdev, void **object, Error **errp)
 {
     if (is_netdev) {
-        visit_type_Netdev(v, (Netdev **)object, NULL, errp);
+        visit_type_Netdev(v, NULL, (Netdev **)object, errp);
     } else {
-        visit_type_NetLegacy(v, (NetLegacy **)object, NULL, errp);
+        visit_type_NetLegacy(v, NULL, (NetLegacy **)object, errp);
     }
 }
 
@@ -1185,6 +1196,30 @@ void qmp_netdev_del(const char *id, Error **errp)
     qemu_opts_del(opts);
 }
 
+static void netfilter_print_info(Monitor *mon, NetFilterState *nf)
+{
+    char *str;
+    ObjectProperty *prop;
+    ObjectPropertyIterator iter;
+    StringOutputVisitor *ov;
+
+    /* generate info str */
+    object_property_iter_init(&iter, OBJECT(nf));
+    while ((prop = object_property_iter_next(&iter))) {
+        if (!strcmp(prop->name, "type")) {
+            continue;
+        }
+        ov = string_output_visitor_new(false);
+        object_property_get(OBJECT(nf), string_output_get_visitor(ov),
+                            prop->name, NULL);
+        str = string_output_get_string(ov);
+        string_output_visitor_cleanup(ov);
+        monitor_printf(mon, ",%s=%s", prop->name, str);
+        g_free(str);
+    }
+    monitor_printf(mon, "\n");
+}
+
 void print_net_client(Monitor *mon, NetClientState *nc)
 {
     NetFilterState *nf;
@@ -1198,9 +1233,10 @@ void print_net_client(Monitor *mon, NetClientState *nc)
     }
     QTAILQ_FOREACH(nf, &nc->filters, next) {
         char *path = object_get_canonical_path_component(OBJECT(nf));
-        monitor_printf(mon, "  - %s: type=%s%s\n", path,
-                       object_get_typename(OBJECT(nf)),
-                       nf->info_str);
+
+        monitor_printf(mon, "  - %s: type=%s", path,
+                       object_get_typename(OBJECT(nf)));
+        netfilter_print_info(mon, nf);
         g_free(path);
     }
 }

@@ -18,10 +18,8 @@
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
+#include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "cpu.h"
 #include "exec/semihost.h"
 #ifdef CONFIG_USER_ONLY
@@ -29,6 +27,7 @@
 
 #define ARM_ANGEL_HEAP_SIZE (128 * 1024 * 1024)
 #else
+#include "qemu-common.h"
 #include "exec/gdbstub.h"
 #include "hw/arm/arm.h"
 #endif

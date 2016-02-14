@@ -14,7 +14,7 @@
  * (at your option) any later version.
  */
 
-#include "config.h"
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "e500.h"
 #include "e500-ccsr.h"
@@ -751,8 +751,8 @@ static qemu_irq *ppce500_init_mpic(MachineState *machine, PPCE500Params *params,
             dev = ppce500_init_mpic_kvm(params, irqs, &err);
         }
         if (machine_kernel_irqchip_required(machine) && !dev) {
-            error_report("kernel_irqchip requested but unavailable: %s",
-                         error_get_pretty(err));
+            error_reportf_err(err,
+                              "kernel_irqchip requested but unavailable: ");
             exit(1);
         }
     }

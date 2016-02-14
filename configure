@@ -117,38 +117,6 @@ compile_prog() {
   do_cc $QEMU_CFLAGS $local_cflags -o $TMPE $TMPC $LDFLAGS $local_ldflags
 }
 
-do_libtool() {
-    local mode=$1
-    shift
-    # Run the compiler, capturing its output to the log.
-    echo $libtool $mode --tag=CC $cc "$@" >> config.log
-    $libtool $mode --tag=CC $cc "$@" >> config.log 2>&1 || return $?
-    # Test passed. If this is an --enable-werror build, rerun
-    # the test with -Werror and bail out if it fails. This
-    # makes warning-generating-errors in configure test code
-    # obvious to developers.
-    if test "$werror" != "yes"; then
-        return 0
-    fi
-    # Don't bother rerunning the compile if we were already using -Werror
-    case "$*" in
-        *-Werror*)
-           return 0
-        ;;
-    esac
-    echo $libtool $mode --tag=CC $cc -Werror "$@" >> config.log
-    $libtool $mode --tag=CC $cc -Werror "$@" >> config.log 2>&1 && return $?
-    error_exit "configure test passed without -Werror but failed with -Werror." \
-        "This is probably a bug in the configure script. The failing command" \
-        "will be at the bottom of config.log." \
-        "You can run configure with --disable-werror to bypass this check."
-}
-
-libtool_prog() {
-    do_libtool --mode=compile $QEMU_CFLAGS -c -fPIE -DPIE -o $TMPO $TMPC || return $?
-    do_libtool --mode=link $LDFLAGS -o $TMPA $TMPL -rpath /usr/local/lib
-}
-
 # symbolically link $1 to $2.  Portable version of "ln -sf".
 symlink() {
   rm -rf "$2"
@@ -251,6 +219,7 @@ vnc_jpeg=""
 vnc_png=""
 xen=""
 xen_ctrl_version=""
+xen_pv_domain_build="no"
 xen_pci_passthrough=""
 linux_aio=""
 cap_ng=""
@@ -304,7 +273,7 @@ pkgversion=""
 pie=""
 zero_malloc=""
 qom_cast_debug="yes"
-trace_backends="nop"
+trace_backends="log"
 trace_file="trace"
 spice=""
 rbd=""
@@ -399,7 +368,6 @@ as="${AS-${cross_prefix}as}"
 cpp="${CPP-$cc -E}"
 objcopy="${OBJCOPY-${cross_prefix}objcopy}"
 ld="${LD-${cross_prefix}ld}"
-libtool="${LIBTOOL-${cross_prefix}libtool}"
 nm="${NM-${cross_prefix}nm}"
 strip="${STRIP-${cross_prefix}strip}"
 windres="${WINDRES-${cross_prefix}windres}"
@@ -952,6 +920,10 @@ for opt do
   --disable-xen-pci-passthrough) xen_pci_passthrough="no"
   ;;
   --enable-xen-pci-passthrough) xen_pci_passthrough="yes"
+  ;;
+  --disable-xen-pv-domain-build) xen_pv_domain_build="no"
+  ;;
+  --enable-xen-pv-domain-build) xen_pv_domain_build="yes"
   ;;
   --disable-brlapi) brlapi="no"
   ;;
@@ -1539,7 +1511,6 @@ EOF
     if do_cc $QEMU_CFLAGS -Werror $flag -c -o $TMPO $TMPC &&
        compile_prog "-Werror $flag" ""; then
       QEMU_CFLAGS="$QEMU_CFLAGS $flag"
-      LIBTOOLFLAGS="$LIBTOOLFLAGS -Wc,$flag"
       sp_on=1
       break
     fi
@@ -1631,32 +1602,6 @@ EOF
   if compile_prog "-Werror -fno-pie" "-nopie"; then
     CFLAGS_NOPIE="-fno-pie"
     LDFLAGS_NOPIE="-nopie"
-  fi
-fi
-
-# check for broken gcc and libtool in RHEL5
-if test -n "$libtool" -a "$pie" != "no" ; then
-  cat > $TMPC <<EOF
-
-void *f(unsigned char *buf, int len);
-void *g(unsigned char *buf, int len);
-
-void *
-f(unsigned char *buf, int len)
-{
-    return (void*)0L;
-}
-
-void *
-g(unsigned char *buf, int len)
-{
-    return f(buf, len);
-}
-
-EOF
-  if ! libtool_prog; then
-    echo "Disabling libtool due to broken toolchain support"
-    libtool=
   fi
 fi
 
@@ -1968,6 +1913,7 @@ fi
 
 if test "$xen" != "no" ; then
   xen_libs="-lxenstore -lxenctrl -lxenguest"
+  xen_stable_libs="-lxenforeignmemory -lxengnttab -lxenevtchn"
 
   # First we test whether Xen headers and libraries are available.
   # If no, we are done and there is no Xen support.
@@ -1988,6 +1934,57 @@ EOF
     xen=no
 
   # Xen unstable
+  elif
+      cat > $TMPC <<EOF &&
+/*
+ * If we have stable libs the we don't want the libxc compat
+ * layers, regardless of what CFLAGS we may have been given.
+ */
+#undef XC_WANT_COMPAT_EVTCHN_API
+#undef XC_WANT_COMPAT_GNTTAB_API
+#undef XC_WANT_COMPAT_MAP_FOREIGN_API
+#include <xenctrl.h>
+#include <xenstore.h>
+#include <xenevtchn.h>
+#include <xengnttab.h>
+#include <xenforeignmemory.h>
+#include <stdint.h>
+#include <xen/hvm/hvm_info_table.h>
+#if !defined(HVM_MAX_VCPUS)
+# error HVM_MAX_VCPUS not defined
+#endif
+int main(void) {
+  xc_interface *xc = NULL;
+  xenforeignmemory_handle *xfmem;
+  xenevtchn_handle *xe;
+  xengnttab_handle *xg;
+  xen_domain_handle_t handle;
+
+  xs_daemon_open();
+
+  xc = xc_interface_open(0, 0, 0);
+  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
+  xc_domain_add_to_physmap(0, 0, XENMAPSPACE_gmfn, 0, 0);
+  xc_hvm_inject_msi(xc, 0, 0xf0000000, 0x00000000);
+  xc_hvm_create_ioreq_server(xc, 0, HVM_IOREQSRV_BUFIOREQ_ATOMIC, NULL);
+  xc_domain_create(xc, 0, handle, 0, NULL, NULL);
+
+  xfmem = xenforeignmemory_open(0, 0);
+  xenforeignmemory_map(xfmem, 0, 0, 0, 0, 0);
+
+  xe = xenevtchn_open(0, 0);
+  xenevtchn_fd(xe);
+
+  xg = xengnttab_open(0, 0);
+  xengnttab_map_grant_ref(xg, 0, 0, 0);
+
+  return 0;
+}
+EOF
+      compile_prog "" "$xen_libs $xen_stable_libs"
+    then
+    xen_ctrl_version=471
+    xen=yes
   elif
       cat > $TMPC <<EOF &&
 #include <xenctrl.h>
@@ -2084,119 +2081,27 @@ EOF
     xen_ctrl_version=420
     xen=yes
 
-  elif
-      cat > $TMPC <<EOF &&
-#include <xenctrl.h>
-#include <xs.h>
-#include <stdint.h>
-#include <xen/hvm/hvm_info_table.h>
-#if !defined(HVM_MAX_VCPUS)
-# error HVM_MAX_VCPUS not defined
-#endif
-int main(void) {
-  xs_daemon_open();
-  xc_interface_open(0, 0, 0);
-  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
-  xc_gnttab_open(NULL, 0);
-  xc_domain_add_to_physmap(0, 0, XENMAPSPACE_gmfn, 0, 0);
-  return 0;
-}
-EOF
-      compile_prog "" "$xen_libs"
-    then
-    xen_ctrl_version=410
-    xen=yes
-
-  # Xen 4.0.0
-  elif
-      cat > $TMPC <<EOF &&
-#include <xenctrl.h>
-#include <xs.h>
-#include <stdint.h>
-#include <xen/hvm/hvm_info_table.h>
-#if !defined(HVM_MAX_VCPUS)
-# error HVM_MAX_VCPUS not defined
-#endif
-int main(void) {
-  struct xen_add_to_physmap xatp = {
-    .domid = 0, .space = XENMAPSPACE_gmfn, .idx = 0, .gpfn = 0,
-  };
-  xs_daemon_open();
-  xc_interface_open();
-  xc_gnttab_open();
-  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
-  xc_memory_op(0, XENMEM_add_to_physmap, &xatp);
-  return 0;
-}
-EOF
-      compile_prog "" "$xen_libs"
-    then
-    xen_ctrl_version=400
-    xen=yes
-
-  # Xen 3.4.0
-  elif
-      cat > $TMPC <<EOF &&
-#include <xenctrl.h>
-#include <xs.h>
-int main(void) {
-  struct xen_add_to_physmap xatp = {
-    .domid = 0, .space = XENMAPSPACE_gmfn, .idx = 0, .gpfn = 0,
-  };
-  xs_daemon_open();
-  xc_interface_open();
-  xc_gnttab_open();
-  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
-  xc_memory_op(0, XENMEM_add_to_physmap, &xatp);
-  return 0;
-}
-EOF
-      compile_prog "" "$xen_libs"
-    then
-    xen_ctrl_version=340
-    xen=yes
-
-  # Xen 3.3.0
-  elif
-      cat > $TMPC <<EOF &&
-#include <xenctrl.h>
-#include <xs.h>
-int main(void) {
-  xs_daemon_open();
-  xc_interface_open();
-  xc_gnttab_open();
-  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
-  return 0;
-}
-EOF
-      compile_prog "" "$xen_libs"
-    then
-    xen_ctrl_version=330
-    xen=yes
-
-  # Xen version unsupported
   else
     if test "$xen" = "yes" ; then
-      feature_not_found "xen (unsupported version)" "Install supported xen (e.g. 4.0, 3.4, 3.3)"
+      feature_not_found "xen (unsupported version)" \
+                        "Install a supported xen (xen 4.2 or newer)"
     fi
     xen=no
   fi
 
   if test "$xen" = yes; then
+    if test $xen_ctrl_version -ge 471  ; then
+      libs_softmmu="$xen_stable_libs $libs_softmmu"
+    fi
     libs_softmmu="$xen_libs $libs_softmmu"
   fi
 fi
 
 if test "$xen_pci_passthrough" != "no"; then
-  if test "$xen" = "yes" && test "$linux" = "yes" &&
-    test "$xen_ctrl_version" -ge 340; then
+  if test "$xen" = "yes" && test "$linux" = "yes"; then
     xen_pci_passthrough=yes
   else
     if test "$xen_pci_passthrough" = "yes"; then
-      if test "$xen_ctrl_version" -lt 340; then
-        error_exit "User requested feature Xen PCI Passthrough" \
-            "This feature does not work with Xen 3.3"
-      fi
       error_exit "User requested feature Xen PCI Passthrough" \
           " but this feature requires /sys from Linux"
     fi
@@ -2204,19 +2109,10 @@ if test "$xen_pci_passthrough" != "no"; then
   fi
 fi
 
-##########################################
-# libtool probe
-
-if ! has $libtool; then
-    libtool=
-fi
-
-# MacOSX ships with a libtool which isn't the GNU one; weed this
-# out by checking whether libtool supports the --version switch
-if test -n "$libtool"; then
-  if ! "$libtool" --version >/dev/null 2>&1; then
-    libtool=
-  fi
+if test "$xen_pv_domain_build" = "yes" &&
+   test "$xen" != "yes"; then
+    error_exit "User requested Xen PV domain builder support" \
+	       "which requires Xen support."
 fi
 
 ##########################################
@@ -3026,6 +2922,30 @@ for i in $glib_modules; do
         error_exit "glib-$glib_req_ver $i is required to compile QEMU"
     fi
 done
+
+# Sanity check that the current size_t matches the
+# size that glib thinks it should be. This catches
+# problems on multi-arch where people try to build
+# 32-bit QEMU while pointing at 64-bit glib headers
+cat > $TMPC <<EOF
+#include <glib.h>
+#include <unistd.h>
+
+#define QEMU_BUILD_BUG_ON(x) \
+  typedef char qemu_build_bug_on[(x)?-1:1] __attribute__((unused));
+
+int main(void) {
+   QEMU_BUILD_BUG_ON(sizeof(size_t) != GLIB_SIZEOF_SIZE_T);
+   return 0;
+}
+EOF
+
+if ! compile_prog "-Werror $CFLAGS" "$LIBS" ; then
+    error_exit "sizeof(size_t) doesn't match GLIB_SIZEOF_SIZE_T."\
+               "You probably need to set PKG_CONFIG_LIBDIR"\
+	       "to point to the right pkg-config files for your"\
+	       "build target"
+fi
 
 # g_test_trap_subprocess added in 2.38. Used by some tests.
 glib_subprocess=yes
@@ -4831,6 +4751,7 @@ fi
 echo "xen support       $xen"
 if test "$xen" = "yes" ; then
   echo "xen ctrl version  $xen_ctrl_version"
+  echo "pv dom build      $xen_pv_domain_build"
 fi
 echo "brlapi support    $brlapi"
 echo "bluez  support    $bluez"
@@ -5207,6 +5128,9 @@ fi
 if test "$xen" = "yes" ; then
   echo "CONFIG_XEN_BACKEND=y" >> $config_host_mak
   echo "CONFIG_XEN_CTRL_INTERFACE_VERSION=$xen_ctrl_version" >> $config_host_mak
+  if test "$xen_pv_domain_build" = "yes" ; then
+    echo "CONFIG_XEN_PV_DOMAIN_BUILD=y" >> $config_host_mak
+  fi
 fi
 if test "$linux_aio" = "yes" ; then
   echo "CONFIG_LINUX_AIO=y" >> $config_host_mak
@@ -5418,8 +5342,8 @@ if have_backend "simple"; then
   # Set the appropriate trace file.
   trace_file="\"$trace_file-\" FMT_pid"
 fi
-if have_backend "stderr"; then
-  echo "CONFIG_TRACE_STDERR=y" >> $config_host_mak
+if have_backend "log"; then
+  echo "CONFIG_TRACE_LOG=y" >> $config_host_mak
 fi
 if have_backend "ust"; then
   echo "CONFIG_TRACE_UST=y" >> $config_host_mak
@@ -5474,13 +5398,8 @@ echo "MAKE=$make" >> $config_host_mak
 echo "INSTALL=$install" >> $config_host_mak
 echo "INSTALL_DIR=$install -d -m 0755" >> $config_host_mak
 echo "INSTALL_DATA=$install -c -m 0644" >> $config_host_mak
-if test -n "$libtool"; then
-  echo "INSTALL_PROG=\$(LIBTOOL) --mode=install $install -c -m 0755" >> $config_host_mak
-  echo "INSTALL_LIB=\$(LIBTOOL) --mode=install $install -c -m 0644" >> $config_host_mak
-else
-  echo "INSTALL_PROG=$install -c -m 0755" >> $config_host_mak
-  echo "INSTALL_LIB=$install -c -m 0644" >> $config_host_mak
-fi
+echo "INSTALL_PROG=$install -c -m 0755" >> $config_host_mak
+echo "INSTALL_LIB=$install -c -m 0644" >> $config_host_mak
 echo "PYTHON=$python" >> $config_host_mak
 echo "CC=$cc" >> $config_host_mak
 if $iasl -h > /dev/null 2>&1; then
@@ -5498,7 +5417,6 @@ echo "OBJCOPY=$objcopy" >> $config_host_mak
 echo "LD=$ld" >> $config_host_mak
 echo "NM=$nm" >> $config_host_mak
 echo "WINDRES=$windres" >> $config_host_mak
-echo "LIBTOOL=$libtool" >> $config_host_mak
 echo "CFLAGS=$CFLAGS" >> $config_host_mak
 echo "CFLAGS_NOPIE=$CFLAGS_NOPIE" >> $config_host_mak
 echo "QEMU_CFLAGS=$QEMU_CFLAGS" >> $config_host_mak
@@ -5517,7 +5435,6 @@ else
 fi
 echo "LDFLAGS=$LDFLAGS" >> $config_host_mak
 echo "LDFLAGS_NOPIE=$LDFLAGS_NOPIE" >> $config_host_mak
-echo "LIBTOOLFLAGS=$LIBTOOLFLAGS" >> $config_host_mak
 echo "LIBS+=$LIBS" >> $config_host_mak
 echo "LIBS_TOOLS+=$libs_tools" >> $config_host_mak
 echo "EXESUF=$EXESUF" >> $config_host_mak
@@ -5675,20 +5592,20 @@ case "$target_name" in
   ppc64)
     TARGET_BASE_ARCH=ppc
     TARGET_ABI_DIR=ppc
-    gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml"
+    gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml power-vsx.xml"
   ;;
   ppc64le)
     TARGET_ARCH=ppc64
     TARGET_BASE_ARCH=ppc
     TARGET_ABI_DIR=ppc
-    gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml"
+    gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml power-vsx.xml"
   ;;
   ppc64abi32)
     TARGET_ARCH=ppc64
     TARGET_BASE_ARCH=ppc
     TARGET_ABI_DIR=ppc
     echo "TARGET_ABI32=y" >> $config_target_mak
-    gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml"
+    gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml power-vsx.xml"
   ;;
   sh4|sh4eb)
     TARGET_ARCH=sh4

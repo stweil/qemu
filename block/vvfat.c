@@ -22,7 +22,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <sys/stat.h>
+#include "qemu/osdep.h"
 #include <dirent.h>
 #include "qemu-common.h"
 #include "block/block_int.h"
@@ -2884,7 +2884,7 @@ static coroutine_fn int vvfat_co_write(BlockDriverState *bs, int64_t sector_num,
 }
 
 static int64_t coroutine_fn vvfat_co_get_block_status(BlockDriverState *bs,
-	int64_t sector_num, int nb_sectors, int* n)
+	int64_t sector_num, int nb_sectors, int *n, BlockDriverState **file)
 {
     BDRVVVFATState* s = bs->opaque;
     *n = s->sector_count - sector_num;

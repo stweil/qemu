@@ -11,6 +11,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "hw/virtio/virtio-scsi.h"
 #include "qemu/error-report.h"
 #include "sysemu/block-backend.h"
@@ -80,15 +81,16 @@ fail_vring:
 VirtIOSCSIReq *virtio_scsi_pop_req_vring(VirtIOSCSI *s,
                                          VirtIOSCSIVring *vring)
 {
-    VirtIOSCSIReq *req = virtio_scsi_init_req(s, NULL);
-    int r;
+    VirtIOSCSICommon *vs = (VirtIOSCSICommon *)s;
+    VirtIOSCSIReq *req;
 
-    req->vring = vring;
-    r = vring_pop((VirtIODevice *)s, &vring->vring, &req->elem);
-    if (r < 0) {
-        virtio_scsi_free_req(req);
-        req = NULL;
+    req = vring_pop((VirtIODevice *)s, &vring->vring,
+                    sizeof(VirtIOSCSIReq) + vs->cdb_size);
+    if (!req) {
+        return NULL;
     }
+    virtio_scsi_init_req(s, NULL, req);
+    req->vring = vring;
     return req;
 }
 

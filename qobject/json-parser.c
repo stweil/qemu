@@ -11,7 +11,7 @@
  *
  */
 
-#include <stdarg.h>
+#include "qemu/osdep.h"
 
 #include "qemu-common.h"
 #include "qapi/qmp/qstring.h"
@@ -518,7 +518,9 @@ static QObject *parse_literal(JSONParserContext *ctxt)
         /* fall through to JSON_FLOAT */
     }
     case JSON_FLOAT:
-        /* FIXME dependent on locale */
+        /* FIXME dependent on locale; a pervasive issue in QEMU */
+        /* FIXME our lexer matches RFC 7159 in forbidding Inf or NaN,
+         * but those might be useful extensions beyond JSON */
         return QOBJECT(qfloat_from_double(strtod(token->str, NULL)));
     default:
         abort();

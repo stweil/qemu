@@ -27,6 +27,7 @@
  *  GNU GPL, version 2 or (at your option) any later version.
  */
 
+#include "qemu/osdep.h"
 #include "hw/boards.h"
 #include "hw/sysbus.h"
 #include "strongarm.h"
@@ -34,7 +35,7 @@
 #include "hw/arm/arm.h"
 #include "sysemu/char.h"
 #include "sysemu/sysemu.h"
-#include "hw/ssi.h"
+#include "hw/ssi/ssi.h"
 
 //#define DEBUG
 

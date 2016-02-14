@@ -18,6 +18,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "cpu.h"
 #include "exec/gdbstub.h"
 #include "qemu/timer.h"
@@ -133,7 +134,7 @@ int s390_cpu_handle_mmu_fault(CPUState *cs, vaddr orig_vaddr,
     }
 
     /* check out of RAM access */
-    if (raddr > (ram_size + virtio_size)) {
+    if (raddr > ram_size) {
         DPRINTF("%s: raddr %" PRIx64 " > ram_size %" PRIx64 "\n", __func__,
                 (uint64_t)raddr, (uint64_t)ram_size);
         trigger_pgm_exception(env, PGM_ADDRESSING, ILEN_LATER);
@@ -162,8 +163,9 @@ hwaddr s390_cpu_get_phys_page_debug(CPUState *cs, vaddr vaddr)
         vaddr &= 0x7fffffff;
     }
 
-    mmu_translate(env, vaddr, MMU_INST_FETCH, asc, &raddr, &prot, false);
-
+    if (mmu_translate(env, vaddr, MMU_INST_FETCH, asc, &raddr, &prot, false)) {
+        return -1;
+    }
     return raddr;
 }
 

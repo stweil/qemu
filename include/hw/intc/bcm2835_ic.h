@@ -8,19 +8,26 @@
 
 #include "hw/sysbus.h"
 
-#define TYPE_BCM2835_IC "bcm2835_ic"
-#define BCM2835_IC(obj) OBJECT_CHECK(BCM2835IcState, (obj), TYPE_BCM2835_IC)
+#define TYPE_BCM2835_IC "bcm2835-ic"
+#define BCM2835_IC(obj) OBJECT_CHECK(BCM2835ICState, (obj), TYPE_BCM2835_IC)
 
-typedef struct BCM2835IcState {
+#define BCM2835_IC_GPU_IRQ "gpu-irq"
+#define BCM2835_IC_ARM_IRQ "arm-irq"
+
+typedef struct BCM2835ICState {
+    /*< private >*/
     SysBusDevice busdev;
-    MemoryRegion iomem;
+    /*< public >*/
 
-    uint32_t level[3];
-    uint32_t irq_enable[3];
-    int fiq_enable;
-    int fiq_select;
+    MemoryRegion iomem;
     qemu_irq irq;
     qemu_irq fiq;
-} BCM2835IcState;
+
+    /* 64 GPU IRQs + 8 ARM IRQs = 72 total (GPU first) */
+    uint64_t gpu_irq_level, gpu_irq_enable;
+    uint8_t arm_irq_level, arm_irq_enable;
+    bool fiq_enable;
+    uint8_t fiq_select;
+} BCM2835ICState;
 
 #endif

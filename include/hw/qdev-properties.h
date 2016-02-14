@@ -20,6 +20,7 @@ extern PropertyInfo qdev_prop_ptr;
 extern PropertyInfo qdev_prop_macaddr;
 extern PropertyInfo qdev_prop_losttickpolicy;
 extern PropertyInfo qdev_prop_bios_chs_trans;
+extern PropertyInfo qdev_prop_fdc_drive_type;
 extern PropertyInfo qdev_prop_drive;
 extern PropertyInfo qdev_prop_netdev;
 extern PropertyInfo qdev_prop_vlan;
@@ -180,8 +181,6 @@ void qdev_prop_set_chr(DeviceState *dev, const char *name, CharDriverState *valu
 void qdev_prop_set_netdev(DeviceState *dev, const char *name, NetClientState *value);
 void qdev_prop_set_drive(DeviceState *dev, const char *name,
                          BlockBackend *value, Error **errp);
-void qdev_prop_set_drive_nofail(DeviceState *dev, const char *name,
-                                BlockBackend *value);
 void qdev_prop_set_macaddr(DeviceState *dev, const char *name, uint8_t *value);
 void qdev_prop_set_enum(DeviceState *dev, const char *name, int value);
 /* FIXME: Remove opaque pointer properties.  */

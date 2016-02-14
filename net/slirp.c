@@ -21,9 +21,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "net/slirp.h"
 
-#include "config-host.h"
 
 #ifndef _WIN32
 #include <pwd.h>
@@ -783,6 +783,9 @@ int net_slirp_parse_legacy(QemuOptsList *opts_list, const char *optarg, int *ret
         strncmp(optarg, "channel,", strlen("channel,")) != 0) {
         return 0;
     }
+
+    error_report("The '-net channel' option is deprecated. "
+                 "Please use '-netdev user,guestfwd=...' instead.");
 
     /* handle legacy -net channel,port:chr */
     optarg += strlen("channel,");

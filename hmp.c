@@ -13,6 +13,7 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 
+#include "qemu/osdep.h"
 #include "hmp.h"
 #include "net/net.h"
 #include "net/eth.h"
@@ -41,8 +42,7 @@ static void hmp_handle_error(Monitor *mon, Error **errp)
 {
     assert(errp);
     if (*errp) {
-        monitor_printf(mon, "%s\n", error_get_pretty(*errp));
-        error_free(*errp);
+        error_report_err(*errp);
     }
 }
 
@@ -319,11 +319,13 @@ void hmp_info_cpus(Monitor *mon, const QDict *qdict)
             monitor_printf(mon, " nip=0x%016" PRIx64, cpu->value->u.ppc->nip);
             break;
         case CPU_INFO_ARCH_SPARC:
-            monitor_printf(mon, " pc=0x%016" PRIx64, cpu->value->u.sparc->pc);
-            monitor_printf(mon, " npc=0x%016" PRIx64, cpu->value->u.sparc->npc);
+            monitor_printf(mon, " pc=0x%016" PRIx64,
+                           cpu->value->u.q_sparc->pc);
+            monitor_printf(mon, " npc=0x%016" PRIx64,
+                           cpu->value->u.q_sparc->npc);
             break;
         case CPU_INFO_ARCH_MIPS:
-            monitor_printf(mon, " PC=0x%016" PRIx64, cpu->value->u.mips->PC);
+            monitor_printf(mon, " PC=0x%016" PRIx64, cpu->value->u.q_mips->PC);
             break;
         case CPU_INFO_ARCH_TRICORE:
             monitor_printf(mon, " PC=0x%016" PRIx64, cpu->value->u.tricore->PC);
@@ -556,8 +558,7 @@ void hmp_info_vnc(Monitor *mon, const QDict *qdict)
 
     info = qmp_query_vnc(&err);
     if (err) {
-        monitor_printf(mon, "%s\n", error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
         return;
     }
 
@@ -679,8 +680,7 @@ void hmp_info_balloon(Monitor *mon, const QDict *qdict)
 
     info = qmp_query_balloon(&err);
     if (err) {
-        monitor_printf(mon, "%s\n", error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
         return;
     }
 
@@ -948,8 +948,7 @@ void hmp_ringbuf_read(Monitor *mon, const QDict *qdict)
 
     data = qmp_ringbuf_read(chardev, size, false, 0, &err);
     if (err) {
-        monitor_printf(mon, "%s\n", error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
         return;
     }
 
@@ -1042,8 +1041,7 @@ void hmp_balloon(Monitor *mon, const QDict *qdict)
 
     qmp_balloon(value, &err);
     if (err) {
-        monitor_printf(mon, "balloon: %s\n", error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
     }
 }
 
@@ -1191,8 +1189,7 @@ void hmp_migrate_set_cache_size(Monitor *mon, const QDict *qdict)
 
     qmp_migrate_set_cache_size(value, &err);
     if (err) {
-        monitor_printf(mon, "%s\n", error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
         return;
     }
 }
@@ -1229,9 +1226,7 @@ void hmp_migrate_set_capability(Monitor *mon, const QDict *qdict)
     qapi_free_MigrationCapabilityStatusList(caps);
 
     if (err) {
-        monitor_printf(mon, "migrate_set_capability: %s\n",
-                       error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
     }
 }
 
@@ -1281,9 +1276,7 @@ void hmp_migrate_set_parameter(Monitor *mon, const QDict *qdict)
     }
 
     if (err) {
-        monitor_printf(mon, "migrate_set_parameter: %s\n",
-                       error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
     }
 }
 
@@ -1544,8 +1537,7 @@ void hmp_migrate(Monitor *mon, const QDict *qdict)
 
     qmp_migrate(uri, !!blk, blk, !!inc, inc, false, false, &err);
     if (err) {
-        monitor_printf(mon, "migrate: %s\n", error_get_pretty(err));
-        error_free(err);
+        error_report_err(err);
         return;
     }
 
@@ -1667,9 +1659,9 @@ void hmp_object_add(Monitor *mon, const QDict *qdict)
     QemuOpts *opts;
     char *type = NULL;
     char *id = NULL;
-    void *dummy = NULL;
     OptsVisitor *ov;
     QDict *pdict;
+    Visitor *v;
 
     opts = qemu_opts_from_qdict(qemu_find_opts("object"), qdict, &err);
     if (err) {
@@ -1678,28 +1670,29 @@ void hmp_object_add(Monitor *mon, const QDict *qdict)
 
     ov = opts_visitor_new(opts);
     pdict = qdict_clone_shallow(qdict);
+    v = opts_get_visitor(ov);
 
-    visit_start_struct(opts_get_visitor(ov), &dummy, NULL, NULL, 0, &err);
+    visit_start_struct(v, NULL, NULL, 0, &err);
     if (err) {
         goto out_clean;
     }
 
     qdict_del(pdict, "qom-type");
-    visit_type_str(opts_get_visitor(ov), &type, "qom-type", &err);
+    visit_type_str(v, "qom-type", &type, &err);
     if (err) {
         goto out_end;
     }
 
     qdict_del(pdict, "id");
-    visit_type_str(opts_get_visitor(ov), &id, "id", &err);
+    visit_type_str(v, "id", &id, &err);
     if (err) {
         goto out_end;
     }
 
-    object_add(type, id, pdict, opts_get_visitor(ov), &err);
+    object_add(type, id, pdict, v, &err);
 
 out_end:
-    visit_end_struct(opts_get_visitor(ov), &err_end);
+    visit_end_struct(v, &err_end);
     if (!err && err_end) {
         qmp_object_del(id, NULL);
     }
@@ -1711,7 +1704,6 @@ out_clean:
     qemu_opts_del(opts);
     g_free(id);
     g_free(type);
-    g_free(dummy);
 
 out:
     hmp_handle_error(mon, &err);
@@ -1742,21 +1734,18 @@ void hmp_sendkey(Monitor *mon, const QDict *qdict)
     int has_hold_time = qdict_haskey(qdict, "hold-time");
     int hold_time = qdict_get_try_int(qdict, "hold-time", -1);
     Error *err = NULL;
-    char keyname_buf[16];
     char *separator;
     int keyname_len;
 
     while (1) {
         separator = strchr(keys, '-');
         keyname_len = separator ? separator - keys : strlen(keys);
-        pstrcpy(keyname_buf, sizeof(keyname_buf), keys);
 
         /* Be compatible with old interface, convert user inputted "<" */
-        if (!strncmp(keyname_buf, "<", 1) && keyname_len == 1) {
-            pstrcpy(keyname_buf, sizeof(keyname_buf), "less");
+        if (keys[0] == '<' && keyname_len == 1) {
+            keys = "less";
             keyname_len = 4;
         }
-        keyname_buf[keyname_len] = 0;
 
         keylist = g_malloc0(sizeof(*keylist));
         keylist->value = g_malloc0(sizeof(*keylist->value));
@@ -1769,16 +1758,17 @@ void hmp_sendkey(Monitor *mon, const QDict *qdict)
         }
         tmp = keylist;
 
-        if (strstart(keyname_buf, "0x", NULL)) {
+        if (strstart(keys, "0x", NULL)) {
             char *endp;
-            int value = strtoul(keyname_buf, &endp, 0);
-            if (*endp != '\0') {
+            int value = strtoul(keys, &endp, 0);
+            assert(endp <= keys + keyname_len);
+            if (endp != keys + keyname_len) {
                 goto err_out;
             }
             keylist->value->type = KEY_VALUE_KIND_NUMBER;
             keylist->value->u.number = value;
         } else {
-            int idx = index_from_key(keyname_buf);
+            int idx = index_from_key(keys, keyname_len);
             if (idx == Q_KEY_CODE__MAX) {
                 goto err_out;
             }
@@ -1800,7 +1790,7 @@ out:
     return;
 
 err_out:
-    monitor_printf(mon, "invalid parameter: %s\n", keyname_buf);
+    monitor_printf(mon, "invalid parameter: %.*s\n", keyname_len, keys);
     goto out;
 }
 
@@ -1960,8 +1950,8 @@ void hmp_info_memdev(Monitor *mon, const QDict *qdict)
 
     while (m) {
         ov = string_output_visitor_new(false);
-        visit_type_uint16List(string_output_get_visitor(ov),
-                              &m->value->host_nodes, NULL, NULL);
+        visit_type_uint16List(string_output_get_visitor(ov), NULL,
+                              &m->value->host_nodes, NULL);
         monitor_printf(mon, "memory backend: %d\n", i);
         monitor_printf(mon, "  size:  %" PRId64 "\n", m->value->size);
         monitor_printf(mon, "  merge: %s\n",
@@ -2089,11 +2079,11 @@ void hmp_rocker(Monitor *mon, const QDict *qdict)
 {
     const char *name = qdict_get_str(qdict, "name");
     RockerSwitch *rocker;
-    Error *errp = NULL;
+    Error *err = NULL;
 
-    rocker = qmp_query_rocker(name, &errp);
-    if (errp != NULL) {
-        hmp_handle_error(mon, &errp);
+    rocker = qmp_query_rocker(name, &err);
+    if (err != NULL) {
+        hmp_handle_error(mon, &err);
         return;
     }
 
@@ -2108,11 +2098,11 @@ void hmp_rocker_ports(Monitor *mon, const QDict *qdict)
 {
     RockerPortList *list, *port;
     const char *name = qdict_get_str(qdict, "name");
-    Error *errp = NULL;
+    Error *err = NULL;
 
-    list = qmp_query_rocker_ports(name, &errp);
-    if (errp != NULL) {
-        hmp_handle_error(mon, &errp);
+    list = qmp_query_rocker_ports(name, &err);
+    if (err != NULL) {
+        hmp_handle_error(mon, &err);
         return;
     }
 
@@ -2137,11 +2127,11 @@ void hmp_rocker_of_dpa_flows(Monitor *mon, const QDict *qdict)
     RockerOfDpaFlowList *list, *info;
     const char *name = qdict_get_str(qdict, "name");
     uint32_t tbl_id = qdict_get_try_int(qdict, "tbl_id", -1);
-    Error *errp = NULL;
+    Error *err = NULL;
 
-    list = qmp_query_rocker_of_dpa_flows(name, tbl_id != -1, tbl_id, &errp);
-    if (errp != NULL) {
-        hmp_handle_error(mon, &errp);
+    list = qmp_query_rocker_of_dpa_flows(name, tbl_id != -1, tbl_id, &err);
+    if (err != NULL) {
+        hmp_handle_error(mon, &err);
         return;
     }
 
@@ -2287,12 +2277,12 @@ void hmp_rocker_of_dpa_groups(Monitor *mon, const QDict *qdict)
     RockerOfDpaGroupList *list, *g;
     const char *name = qdict_get_str(qdict, "name");
     uint8_t type = qdict_get_try_int(qdict, "type", 9);
-    Error *errp = NULL;
+    Error *err = NULL;
     bool set = false;
 
-    list = qmp_query_rocker_of_dpa_groups(name, type != 9, type, &errp);
-    if (errp != NULL) {
-        hmp_handle_error(mon, &errp);
+    list = qmp_query_rocker_of_dpa_groups(name, type != 9, type, &err);
+    if (err != NULL) {
+        hmp_handle_error(mon, &err);
         return;
     }
 

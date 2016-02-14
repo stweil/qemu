@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/ipmi/ipmi.h"
 #include "hw/isa/isa.h"
@@ -405,7 +406,7 @@ static void ipmi_bt_class_init(IPMIInterfaceClass *iic)
 
 typedef struct ISAIPMIBTDevice {
     ISADevice dev;
-    int32 isairq;
+    int32_t isairq;
     IPMIBT bt;
     IPMIFwInfo fwinfo;
 } ISAIPMIBTDevice;

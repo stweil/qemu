@@ -18,6 +18,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "disas/bfd.h"
 #include "exec/gdbstub.h"
 #include <sysemu/kvm.h>
@@ -8034,8 +8035,8 @@ POWERPC_FAMILY(POWER5P)(ObjectClass *oc, void *data)
     pcc->l1_icache_size = 0x10000;
 }
 
-static void powerpc_get_compat(Object *obj, Visitor *v,
-                               void *opaque, const char *name, Error **errp)
+static void powerpc_get_compat(Object *obj, Visitor *v, const char *name,
+                               void *opaque, Error **errp)
 {
     char *value = (char *)"";
     Property *prop = opaque;
@@ -8059,18 +8060,18 @@ static void powerpc_get_compat(Object *obj, Visitor *v,
         break;
     }
 
-    visit_type_str(v, &value, name, errp);
+    visit_type_str(v, name, &value, errp);
 }
 
-static void powerpc_set_compat(Object *obj, Visitor *v,
-                               void *opaque, const char *name, Error **errp)
+static void powerpc_set_compat(Object *obj, Visitor *v, const char *name,
+                               void *opaque, Error **errp)
 {
     Error *error = NULL;
     char *value = NULL;
     Property *prop = opaque;
     uint32_t *max_compat = qdev_get_prop_ptr(DEVICE(obj), prop);
 
-    visit_type_str(v, &value, name, &error);
+    visit_type_str(v, name, &value, &error);
     if (error) {
         error_propagate(errp, error);
         return;
@@ -8103,6 +8104,36 @@ static Property powerpc_servercpu_properties[] = {
     DEFINE_PROP_POWERPC_COMPAT("compat", PowerPCCPU, max_compat),
     DEFINE_PROP_END_OF_LIST(),
 };
+
+#ifdef CONFIG_SOFTMMU
+static const struct ppc_segment_page_sizes POWER7_POWER8_sps = {
+    .sps = {
+        {
+            .page_shift = 12, /* 4K */
+            .slb_enc = 0,
+            .enc = { { .page_shift = 12, .pte_enc = 0 },
+                     { .page_shift = 16, .pte_enc = 0x7 },
+                     { .page_shift = 24, .pte_enc = 0x38 }, },
+        },
+        {
+            .page_shift = 16, /* 64K */
+            .slb_enc = SLB_VSID_64K,
+            .enc = { { .page_shift = 16, .pte_enc = 0x1 },
+                     { .page_shift = 24, .pte_enc = 0x8 }, },
+        },
+        {
+            .page_shift = 24, /* 16M */
+            .slb_enc = SLB_VSID_16M,
+            .enc = { { .page_shift = 24, .pte_enc = 0 }, },
+        },
+        {
+            .page_shift = 34, /* 16G */
+            .slb_enc = SLB_VSID_16G,
+            .enc = { { .page_shift = 34, .pte_enc = 0x3 }, },
+        },
+    }
+};
+#endif /* CONFIG_SOFTMMU */
 
 static void init_proc_POWER7 (CPUPPCState *env)
 {
@@ -8167,6 +8198,7 @@ POWERPC_FAMILY(POWER7)(ObjectClass *oc, void *data)
     pcc->mmu_model = POWERPC_MMU_2_06;
 #if defined(CONFIG_SOFTMMU)
     pcc->handle_mmu_fault = ppc_hash64_handle_mmu_fault;
+    pcc->sps = &POWER7_POWER8_sps;
 #endif
     pcc->excp_model = POWERPC_EXCP_POWER7;
     pcc->bus_model = PPC_FLAGS_INPUT_POWER7;
@@ -8247,6 +8279,7 @@ POWERPC_FAMILY(POWER8)(ObjectClass *oc, void *data)
     pcc->mmu_model = POWERPC_MMU_2_07;
 #if defined(CONFIG_SOFTMMU)
     pcc->handle_mmu_fault = ppc_hash64_handle_mmu_fault;
+    pcc->sps = &POWER7_POWER8_sps;
 #endif
     pcc->excp_model = POWERPC_EXCP_POWER7;
     pcc->bus_model = PPC_FLAGS_INPUT_POWER7;
@@ -8471,8 +8504,6 @@ static void dump_ppc_sprs (CPUPPCState *env)
 #endif
 
 /*****************************************************************************/
-#include <stdlib.h>
-#include <string.h>
 
 /* Opcode types */
 enum {
@@ -8751,14 +8782,25 @@ static void dump_ppc_insns (CPUPPCState *env)
 }
 #endif
 
+static bool avr_need_swap(CPUPPCState *env)
+{
+#ifdef HOST_WORDS_BIGENDIAN
+    return msr_le;
+#else
+    return !msr_le;
+#endif
+}
+
 static int gdb_get_float_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 {
     if (n < 32) {
         stfq_p(mem_buf, env->fpr[n]);
+        ppc_maybe_bswap_register(env, mem_buf, 8);
         return 8;
     }
     if (n == 32) {
         stl_p(mem_buf, env->fpscr);
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         return 4;
     }
     return 0;
@@ -8767,10 +8809,12 @@ static int gdb_get_float_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 static int gdb_set_float_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 {
     if (n < 32) {
+        ppc_maybe_bswap_register(env, mem_buf, 8);
         env->fpr[n] = ldfq_p(mem_buf);
         return 8;
     }
     if (n == 32) {
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         helper_store_fpscr(env, ldl_p(mem_buf), 0xffffffff);
         return 4;
     }
@@ -8780,21 +8824,25 @@ static int gdb_set_float_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 static int gdb_get_avr_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 {
     if (n < 32) {
-#ifdef HOST_WORDS_BIGENDIAN
-        stq_p(mem_buf, env->avr[n].u64[0]);
-        stq_p(mem_buf+8, env->avr[n].u64[1]);
-#else
-        stq_p(mem_buf, env->avr[n].u64[1]);
-        stq_p(mem_buf+8, env->avr[n].u64[0]);
-#endif
+        if (!avr_need_swap(env)) {
+            stq_p(mem_buf, env->avr[n].u64[0]);
+            stq_p(mem_buf+8, env->avr[n].u64[1]);
+        } else {
+            stq_p(mem_buf, env->avr[n].u64[1]);
+            stq_p(mem_buf+8, env->avr[n].u64[0]);
+        }
+        ppc_maybe_bswap_register(env, mem_buf, 8);
+        ppc_maybe_bswap_register(env, mem_buf + 8, 8);
         return 16;
     }
     if (n == 32) {
         stl_p(mem_buf, env->vscr);
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         return 4;
     }
     if (n == 33) {
         stl_p(mem_buf, (uint32_t)env->spr[SPR_VRSAVE]);
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         return 4;
     }
     return 0;
@@ -8803,20 +8851,24 @@ static int gdb_get_avr_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 static int gdb_set_avr_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
 {
     if (n < 32) {
-#ifdef HOST_WORDS_BIGENDIAN
-        env->avr[n].u64[0] = ldq_p(mem_buf);
-        env->avr[n].u64[1] = ldq_p(mem_buf+8);
-#else
-        env->avr[n].u64[1] = ldq_p(mem_buf);
-        env->avr[n].u64[0] = ldq_p(mem_buf+8);
-#endif
+        ppc_maybe_bswap_register(env, mem_buf, 8);
+        ppc_maybe_bswap_register(env, mem_buf + 8, 8);
+        if (!avr_need_swap(env)) {
+            env->avr[n].u64[0] = ldq_p(mem_buf);
+            env->avr[n].u64[1] = ldq_p(mem_buf+8);
+        } else {
+            env->avr[n].u64[1] = ldq_p(mem_buf);
+            env->avr[n].u64[0] = ldq_p(mem_buf+8);
+        }
         return 16;
     }
     if (n == 32) {
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         env->vscr = ldl_p(mem_buf);
         return 4;
     }
     if (n == 33) {
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         env->spr[SPR_VRSAVE] = (target_ulong)ldl_p(mem_buf);
         return 4;
     }
@@ -8828,6 +8880,7 @@ static int gdb_get_spe_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
     if (n < 32) {
 #if defined(TARGET_PPC64)
         stl_p(mem_buf, env->gpr[n] >> 32);
+        ppc_maybe_bswap_register(env, mem_buf, 4);
 #else
         stl_p(mem_buf, env->gprh[n]);
 #endif
@@ -8835,10 +8888,12 @@ static int gdb_get_spe_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
     }
     if (n == 32) {
         stq_p(mem_buf, env->spe_acc);
+        ppc_maybe_bswap_register(env, mem_buf, 8);
         return 8;
     }
     if (n == 33) {
         stl_p(mem_buf, env->spe_fscr);
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         return 4;
     }
     return 0;
@@ -8849,7 +8904,11 @@ static int gdb_set_spe_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
     if (n < 32) {
 #if defined(TARGET_PPC64)
         target_ulong lo = (uint32_t)env->gpr[n];
-        target_ulong hi = (target_ulong)ldl_p(mem_buf) << 32;
+        target_ulong hi;
+
+        ppc_maybe_bswap_register(env, mem_buf, 4);
+
+        hi = (target_ulong)ldl_p(mem_buf) << 32;
         env->gpr[n] = lo | hi;
 #else
         env->gprh[n] = ldl_p(mem_buf);
@@ -8857,12 +8916,34 @@ static int gdb_set_spe_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
         return 4;
     }
     if (n == 32) {
+        ppc_maybe_bswap_register(env, mem_buf, 8);
         env->spe_acc = ldq_p(mem_buf);
         return 8;
     }
     if (n == 33) {
+        ppc_maybe_bswap_register(env, mem_buf, 4);
         env->spe_fscr = ldl_p(mem_buf);
         return 4;
+    }
+    return 0;
+}
+
+static int gdb_get_vsx_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
+{
+    if (n < 32) {
+        stq_p(mem_buf, env->vsr[n]);
+        ppc_maybe_bswap_register(env, mem_buf, 8);
+        return 8;
+    }
+    return 0;
+}
+
+static int gdb_set_vsx_reg(CPUPPCState *env, uint8_t *mem_buf, int n)
+{
+    if (n < 32) {
+        ppc_maybe_bswap_register(env, mem_buf, 8);
+        env->vsr[n] = ldq_p(mem_buf);
+        return 8;
     }
     return 0;
 }
@@ -8971,6 +9052,10 @@ static void ppc_cpu_realizefn(DeviceState *dev, Error **errp)
     if (pcc->insns_flags & PPC_SPE) {
         gdb_register_coprocessor(cs, gdb_get_spe_reg, gdb_set_spe_reg,
                                  34, "power-spe.xml", 0);
+    }
+    if (pcc->insns_flags2 & PPC2_VSX) {
+        gdb_register_coprocessor(cs, gdb_get_vsx_reg, gdb_set_vsx_reg,
+                                 32, "power-vsx.xml", 0);
     }
 
     qemu_init_vcpu(cs);
@@ -9186,7 +9271,7 @@ int ppc_get_compat_smt_threads(PowerPCCPU *cpu)
     return ret;
 }
 
-int ppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version)
+void ppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version, Error **errp)
 {
     int ret = 0;
     CPUPPCState *env = &cpu->env;
@@ -9208,12 +9293,13 @@ int ppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version)
         break;
     }
 
-    if (kvm_enabled() && kvmppc_set_compat(cpu, cpu->cpu_version) < 0) {
-        error_report("Unable to set compatibility mode in KVM");
-        ret = -1;
+    if (kvm_enabled()) {
+        ret = kvmppc_set_compat(cpu, cpu->cpu_version);
+        if (ret < 0) {
+            error_setg_errno(errp, -ret,
+                             "Unable to set CPU compatibility mode in KVM");
+        }
     }
-
-    return ret;
 }
 
 static gint ppc_cpu_compare_class_pvr(gconstpointer a, gconstpointer b)
@@ -9303,7 +9389,6 @@ static gint ppc_cpu_compare_class_name(gconstpointer a, gconstpointer b)
     return -1;
 }
 
-#include <ctype.h>
 
 static ObjectClass *ppc_cpu_class_by_name(const char *name);
 
@@ -9681,6 +9766,15 @@ static bool ppc_pvr_match_default(PowerPCCPUClass *pcc, uint32_t pvr)
     return pcc->pvr == pvr;
 }
 
+static gchar *ppc_gdb_arch_name(CPUState *cs)
+{
+#if defined(TARGET_PPC64)
+    return g_strdup("powerpc:common64");
+#else
+    return g_strdup("powerpc:common");
+#endif
+}
+
 static void ppc_cpu_class_init(ObjectClass *oc, void *data)
 {
     PowerPCCPUClass *pcc = POWERPC_CPU_CLASS(oc);
@@ -9712,7 +9806,6 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
     cc->vmsd = &vmstate_ppc_cpu;
 #if defined(TARGET_PPC64)
     cc->write_elf64_note = ppc64_cpu_write_elf64_note;
-    cc->write_elf64_qemunote = ppc64_cpu_write_elf64_qemunote;
 #endif
 #endif
     cc->cpu_exec_enter = ppc_cpu_exec_enter;
@@ -9725,6 +9818,7 @@ static void ppc_cpu_class_init(ObjectClass *oc, void *data)
     cc->gdb_num_core_regs = 71 + 32;
 #endif
 
+    cc->gdb_arch_name = ppc_gdb_arch_name;
 #if defined(TARGET_PPC64)
     cc->gdb_core_xml_file = "power64-core.xml";
 #else

@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "block/block_int.h"
 #include "qemu/module.h"
@@ -488,7 +489,7 @@ static uint64_t get_cluster_offset(BlockDriverState *bs,
 }
 
 static int64_t coroutine_fn qcow_co_get_block_status(BlockDriverState *bs,
-        int64_t sector_num, int nb_sectors, int *pnum)
+        int64_t sector_num, int nb_sectors, int *pnum, BlockDriverState **file)
 {
     BDRVQcowState *s = bs->opaque;
     int index_in_cluster, n;
@@ -509,6 +510,7 @@ static int64_t coroutine_fn qcow_co_get_block_status(BlockDriverState *bs,
         return BDRV_BLOCK_DATA;
     }
     cluster_offset |= (index_in_cluster << BDRV_SECTOR_BITS);
+    *file = bs->file->bs;
     return BDRV_BLOCK_DATA | BDRV_BLOCK_OFFSET_VALID | cluster_offset;
 }
 

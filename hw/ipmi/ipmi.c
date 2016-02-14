@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/ipmi/ipmi.h"
 #include "sysemu/sysemu.h"
@@ -50,9 +51,7 @@ static int ipmi_do_hw_op(IPMIInterface *s, enum ipmi_op op, int checkonly)
         if (checkonly) {
             return 0;
         }
-        qemu_mutex_lock_iothread();
         qmp_inject_nmi(NULL);
-        qemu_mutex_unlock_iothread();
         return 0;
 
     case IPMI_POWERCYCLE_CHASSIS:

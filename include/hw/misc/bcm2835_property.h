@@ -8,21 +8,25 @@
 
 #include "hw/sysbus.h"
 #include "exec/address-spaces.h"
-#include "hw/display/bcm2835_fb.h"
+#include "net/net.h"
 
-#define TYPE_BCM2835_PROPERTY "bcm2835_property"
+#define TYPE_BCM2835_PROPERTY "bcm2835-property"
 #define BCM2835_PROPERTY(obj) \
         OBJECT_CHECK(BCM2835PropertyState, (obj), TYPE_BCM2835_PROPERTY)
 
 typedef struct {
+    /*< private >*/
     SysBusDevice busdev;
+    /*< public >*/
     MemoryRegion *dma_mr;
     AddressSpace dma_as;
-    BCM2835FbState *fbdev;
     MemoryRegion iomem;
-    uint32_t addr;
-    int pending;
     qemu_irq mbox_irq;
+    MACAddr macaddr;
+    uint32_t board_rev;
+    uint32_t ram_size;
+    uint32_t addr;
+    bool pending;
 } BCM2835PropertyState;
 
 #endif

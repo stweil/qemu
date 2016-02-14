@@ -18,6 +18,7 @@
  * Contributions after 2012-01-13 are licensed under the terms of the
  * GNU GPL, version 2 or (at your option) any later version.
  */
+#include "qemu/osdep.h"
 #include "sysemu/sysemu.h"
 #include "hw/hw.h"
 #include "hw/i386/pc.h"
@@ -242,7 +243,7 @@ void acpi_table_add(const QemuOpts *opts, Error **errp)
         OptsVisitor *ov;
 
         ov = opts_visitor_new(opts);
-        visit_type_AcpiTableOptions(opts_get_visitor(ov), &hdrs, NULL, &err);
+        visit_type_AcpiTableOptions(opts_get_visitor(ov), NULL, &hdrs, &err);
         opts_visitor_cleanup(ov);
     }
 
@@ -301,7 +302,7 @@ out:
         QapiDeallocVisitor *dv;
 
         dv = qapi_dealloc_visitor_new();
-        visit_type_AcpiTableOptions(qapi_dealloc_get_visitor(dv), &hdrs, NULL,
+        visit_type_AcpiTableOptions(qapi_dealloc_get_visitor(dv), NULL, &hdrs,
                                     NULL);
         qapi_dealloc_visitor_cleanup(dv);
     }
@@ -347,6 +348,22 @@ uint8_t *acpi_table_next(uint8_t *current)
     } else {
         return acpi_table_hdr(next);
     }
+}
+
+int acpi_get_slic_oem(AcpiSlicOem *oem)
+{
+    uint8_t *u;
+
+    for (u = acpi_table_first(); u; u = acpi_table_next(u)) {
+        struct acpi_table_header *hdr = (void *)(u - sizeof(hdr->_length));
+
+        if (memcmp(hdr->sig, "SLIC", 4) == 0) {
+            oem->id = hdr->oem_id;
+            oem->table_id = hdr->oem_table_id;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static void acpi_notify_wakeup(Notifier *notifier, void *data)

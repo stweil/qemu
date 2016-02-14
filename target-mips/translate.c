@@ -21,6 +21,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "cpu.h"
 #include "disas/disas.h"
 #include "tcg-op.h"
@@ -32,6 +33,7 @@
 #include "exec/semihost.h"
 
 #include "trace-tcg.h"
+#include "exec/log.h"
 
 #define MIPS_DEBUG_DISAS 0
 
@@ -4630,7 +4632,16 @@ static void gen_align(DisasContext *ctx, int opc, int rd, int rs, int rt,
     t0 = tcg_temp_new();
     gen_load_gpr(t0, rt);
     if (bp == 0) {
-        tcg_gen_mov_tl(cpu_gpr[rd], t0);
+        switch (opc) {
+        case OPC_ALIGN:
+            tcg_gen_ext32s_tl(cpu_gpr[rd], t0);
+            break;
+#if defined(TARGET_MIPS64)
+        case OPC_DALIGN:
+            tcg_gen_mov_tl(cpu_gpr[rd], t0);
+            break;
+#endif
+        }
     } else {
         TCGv t1 = tcg_temp_new();
         gen_load_gpr(t1, rs);
@@ -19818,48 +19829,49 @@ void mips_tcg_init(void)
         return;
 
     cpu_env = tcg_global_reg_new_ptr(TCG_AREG0, "env");
+
     TCGV_UNUSED(cpu_gpr[0]);
     for (i = 1; i < 32; i++)
-        cpu_gpr[i] = tcg_global_mem_new(TCG_AREG0,
+        cpu_gpr[i] = tcg_global_mem_new(cpu_env,
                                         offsetof(CPUMIPSState, active_tc.gpr[i]),
                                         regnames[i]);
 
     for (i = 0; i < 32; i++) {
         int off = offsetof(CPUMIPSState, active_fpu.fpr[i].wr.d[0]);
         msa_wr_d[i * 2] =
-                tcg_global_mem_new_i64(TCG_AREG0, off, msaregnames[i * 2]);
+                tcg_global_mem_new_i64(cpu_env, off, msaregnames[i * 2]);
         /* The scalar floating-point unit (FPU) registers are mapped on
          * the MSA vector registers. */
         fpu_f64[i] = msa_wr_d[i * 2];
         off = offsetof(CPUMIPSState, active_fpu.fpr[i].wr.d[1]);
         msa_wr_d[i * 2 + 1] =
-                tcg_global_mem_new_i64(TCG_AREG0, off, msaregnames[i * 2 + 1]);
+                tcg_global_mem_new_i64(cpu_env, off, msaregnames[i * 2 + 1]);
     }
 
-    cpu_PC = tcg_global_mem_new(TCG_AREG0,
+    cpu_PC = tcg_global_mem_new(cpu_env,
                                 offsetof(CPUMIPSState, active_tc.PC), "PC");
     for (i = 0; i < MIPS_DSP_ACC; i++) {
-        cpu_HI[i] = tcg_global_mem_new(TCG_AREG0,
+        cpu_HI[i] = tcg_global_mem_new(cpu_env,
                                        offsetof(CPUMIPSState, active_tc.HI[i]),
                                        regnames_HI[i]);
-        cpu_LO[i] = tcg_global_mem_new(TCG_AREG0,
+        cpu_LO[i] = tcg_global_mem_new(cpu_env,
                                        offsetof(CPUMIPSState, active_tc.LO[i]),
                                        regnames_LO[i]);
     }
-    cpu_dspctrl = tcg_global_mem_new(TCG_AREG0,
+    cpu_dspctrl = tcg_global_mem_new(cpu_env,
                                      offsetof(CPUMIPSState, active_tc.DSPControl),
                                      "DSPControl");
-    bcond = tcg_global_mem_new(TCG_AREG0,
+    bcond = tcg_global_mem_new(cpu_env,
                                offsetof(CPUMIPSState, bcond), "bcond");
-    btarget = tcg_global_mem_new(TCG_AREG0,
+    btarget = tcg_global_mem_new(cpu_env,
                                  offsetof(CPUMIPSState, btarget), "btarget");
-    hflags = tcg_global_mem_new_i32(TCG_AREG0,
+    hflags = tcg_global_mem_new_i32(cpu_env,
                                     offsetof(CPUMIPSState, hflags), "hflags");
 
-    fpu_fcr0 = tcg_global_mem_new_i32(TCG_AREG0,
+    fpu_fcr0 = tcg_global_mem_new_i32(cpu_env,
                                       offsetof(CPUMIPSState, active_fpu.fcr0),
                                       "fcr0");
-    fpu_fcr31 = tcg_global_mem_new_i32(TCG_AREG0,
+    fpu_fcr31 = tcg_global_mem_new_i32(cpu_env,
                                        offsetof(CPUMIPSState, active_fpu.fcr31),
                                        "fcr31");
 

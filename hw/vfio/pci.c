@@ -18,14 +18,11 @@
  *  Copyright (C) 2008, IBM, Muli Ben-Yehuda (muli@il.ibm.com)
  */
 
+#include "qemu/osdep.h"
 #include <linux/vfio.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
 
-#include "config.h"
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "hw/pci/pci_bridge.h"
@@ -356,6 +353,13 @@ static void vfio_msi_interrupt(void *opaque)
     if (vdev->interrupt == VFIO_INT_MSIX) {
         get_msg = msix_get_message;
         notify = msix_notify;
+
+        /* A masked vector firing needs to use the PBA, enable it */
+        if (msix_is_masked(&vdev->pdev, nr)) {
+            set_bit(nr, vdev->msix->pending);
+            memory_region_set_enabled(&vdev->pdev.msix_pba_mmio, true);
+            trace_vfio_msix_pba_enable(vdev->vbasedev.name);
+        }
     } else if (vdev->interrupt == VFIO_INT_MSI) {
         get_msg = msi_get_message;
         notify = msi_notify;
@@ -533,6 +537,14 @@ static int vfio_msix_vector_do_use(PCIDevice *pdev, unsigned int nr,
         if (ret) {
             error_report("vfio: failed to modify vector, %d", ret);
         }
+    }
+
+    /* Disable PBA emulation when nothing more is pending. */
+    clear_bit(nr, vdev->msix->pending);
+    if (find_first_bit(vdev->msix->pending,
+                       vdev->nr_vectors) == vdev->nr_vectors) {
+        memory_region_set_enabled(&vdev->pdev.msix_pba_mmio, false);
+        trace_vfio_msix_pba_disable(vdev->vbasedev.name);
     }
 
     return 0;
@@ -737,6 +749,9 @@ static void vfio_msix_disable(VFIOPCIDevice *vdev)
     }
 
     vfio_msi_disable_common(vdev);
+
+    memset(vdev->msix->pending, 0,
+           BITS_TO_LONGS(vdev->msix->entries) * sizeof(unsigned long));
 
     trace_vfio_msix_disable(vdev->vbasedev.name);
 }
@@ -1251,6 +1266,8 @@ static int vfio_msix_setup(VFIOPCIDevice *vdev, int pos)
 {
     int ret;
 
+    vdev->msix->pending = g_malloc0(BITS_TO_LONGS(vdev->msix->entries) *
+                                    sizeof(unsigned long));
     ret = msix_init(&vdev->pdev, vdev->msix->entries,
                     &vdev->bars[vdev->msix->table_bar].region.mem,
                     vdev->msix->table_bar, vdev->msix->table_offset,
@@ -1264,6 +1281,24 @@ static int vfio_msix_setup(VFIOPCIDevice *vdev, int pos)
         return ret;
     }
 
+    /*
+     * The PCI spec suggests that devices provide additional alignment for
+     * MSI-X structures and avoid overlapping non-MSI-X related registers.
+     * For an assigned device, this hopefully means that emulation of MSI-X
+     * structures does not affect the performance of the device.  If devices
+     * fail to provide that alignment, a significant performance penalty may
+     * result, for instance Mellanox MT27500 VFs:
+     * http://www.spinics.net/lists/kvm/msg125881.html
+     *
+     * The PBA is simply not that important for such a serious regression and
+     * most drivers do not appear to look at it.  The solution for this is to
+     * disable the PBA MemoryRegion unless it's being used.  We disable it
+     * here and only enable it if a masked vector fires through QEMU.  As the
+     * vector-use notifier is called, which occurs on unmask, we test whether
+     * PBA emulation is needed and again disable if not.
+     */
+    memory_region_set_enabled(&vdev->pdev.msix_pba_mmio, false);
+
     return 0;
 }
 
@@ -1275,6 +1310,7 @@ static void vfio_teardown_msi(VFIOPCIDevice *vdev)
         msix_uninit(&vdev->pdev,
                     &vdev->bars[vdev->msix->table_bar].region.mem,
                     &vdev->bars[vdev->msix->pba_bar].region.mem);
+        g_free(vdev->msix->pending);
     }
 }
 

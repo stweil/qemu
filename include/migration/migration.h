@@ -105,6 +105,7 @@ struct MigrationIncomingState {
     QemuMutex rp_mutex;    /* We send replies from multiple threads */
     void     *postcopy_tmp_page;
 
+    int state;
     /* See savevm.c */
     LoadStateEntry_Head loadvm_handlers;
 };
@@ -132,7 +133,7 @@ struct MigrationState
     size_t xfer_limit;
     QemuThread thread;
     QEMUBH *cleanup_bh;
-    QEMUFile *file;
+    QEMUFile *to_dst_file;
     int parameters[MIGRATION_PARAMETER__MAX];
 
     int state;
@@ -168,6 +169,8 @@ struct MigrationState
     /* The RAMBlock used in the last src_page_request */
     RAMBlock *last_req_rb;
 };
+
+void migrate_set_state(int *state, int old_state, int new_state);
 
 void process_incoming_migration(QEMUFile *f);
 

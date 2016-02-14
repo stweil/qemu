@@ -23,13 +23,11 @@
  * THE SOFTWARE.
  */
 
-#include <stdio.h>
-#include <string.h>
+#include "qemu/osdep.h"
 
 #include "qemu-common.h"
 #include "qemu/error-report.h"
 #include "qapi/qmp/types.h"
-#include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/option_int.h"
 
@@ -206,7 +204,7 @@ void parse_option_size(const char *name, const char *value,
         default:
             error_setg(errp, QERR_INVALID_PARAMETER_VALUE, name, "a size");
             error_append_hint(errp, "You may use k, M, G or T suffixes for "
-                    "kilobytes, megabytes, gigabytes and terabytes.");
+                    "kilobytes, megabytes, gigabytes and terabytes.\n");
             return;
         }
     } else {
@@ -647,7 +645,7 @@ QemuOpts *qemu_opts_create(QemuOptsList *list, const char *id,
             error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "id",
                        "an identifier");
             error_append_hint(errp, "Identifiers consist of letters, digits, "
-                              "'-', '.', '_', starting with a letter.");
+                              "'-', '.', '_', starting with a letter.\n");
             return NULL;
         }
         opts = qemu_opts_find(list, id);

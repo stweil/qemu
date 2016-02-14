@@ -12,6 +12,7 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qemu/uri.h"
 #include "qemu/error-report.h"
@@ -1861,8 +1862,7 @@ static int sd_create(const char *filename, QemuOpts *opts,
 
         fd = connect_to_sdog(s, &local_err);
         if (fd < 0) {
-            error_report("%s", error_get_pretty(local_err));
-            error_free(local_err);
+            error_report_err(local_err);
             ret = -EIO;
             goto out;
         }
@@ -2406,9 +2406,8 @@ static int sd_snapshot_create(BlockDriverState *bs, QEMUSnapshotInfo *sn_info)
 
     ret = do_sd_create(s, &new_vid, 1, &local_err);
     if (ret < 0) {
-        error_report("failed to create inode for snapshot: %s",
-                     error_get_pretty(local_err));
-        error_free(local_err);
+        error_reportf_err(local_err,
+                          "failed to create inode for snapshot: ");
         goto cleanup;
     }
 
@@ -2709,7 +2708,7 @@ retry:
 
 static coroutine_fn int64_t
 sd_co_get_block_status(BlockDriverState *bs, int64_t sector_num, int nb_sectors,
-                       int *pnum)
+                       int *pnum, BlockDriverState **file)
 {
     BDRVSheepdogState *s = bs->opaque;
     SheepdogInode *inode = &s->inode;
@@ -2739,6 +2738,9 @@ sd_co_get_block_status(BlockDriverState *bs, int64_t sector_num, int nb_sectors,
     *pnum = (idx - start) * object_size / BDRV_SECTOR_SIZE;
     if (*pnum > nb_sectors) {
         *pnum = nb_sectors;
+    }
+    if (ret > 0 && ret & BDRV_BLOCK_OFFSET_VALID) {
+        *file = bs;
     }
     return ret;
 }

@@ -12,6 +12,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "trace.h"
 #include "qemu/iov.h"
 #include "qemu/thread.h"
@@ -38,6 +39,8 @@ struct VirtIOBlockDataPlane {
     Vring vring;                    /* virtqueue vring */
     EventNotifier *guest_notifier;  /* irq */
     QEMUBH *bh;                     /* bh for guest notification */
+
+    Notifier insert_notifier, remove_notifier;
 
     /* Note that these EventNotifiers are assigned by value.  This is
      * fine as long as you do not call event_notifier_cleanup on them
@@ -97,20 +100,19 @@ static void handle_notify(EventNotifier *e)
     blk_io_plug(s->conf->conf.blk);
     for (;;) {
         MultiReqBuffer mrb = {};
-        int ret;
 
         /* Disable guest->host notifies to avoid unnecessary vmexits */
         vring_disable_notification(s->vdev, &s->vring);
 
         for (;;) {
-            VirtIOBlockReq *req = virtio_blk_alloc_request(vblk);
+            VirtIOBlockReq *req = vring_pop(s->vdev, &s->vring,
+                                            sizeof(VirtIOBlockReq));
 
-            ret = vring_pop(s->vdev, &s->vring, &req->elem);
-            if (ret < 0) {
-                virtio_blk_free_request(req);
+            if (req == NULL) {
                 break; /* no more requests */
             }
 
+            virtio_blk_init_request(vblk, req);
             trace_virtio_blk_data_plane_process_request(s, req->elem.out_num,
                                                         req->elem.in_num,
                                                         req->elem.index);
@@ -122,7 +124,7 @@ static void handle_notify(EventNotifier *e)
             virtio_blk_submit_multireq(s->conf->conf.blk, &mrb);
         }
 
-        if (likely(ret == -EAGAIN)) { /* vring emptied */
+        if (likely(!vring_more_avail(s->vdev, &s->vring))) { /* vring emptied */
             /* Re-enable guest->host notifies and stop processing the vring.
              * But if the guest has snuck in more descriptors, keep processing.
              */
@@ -136,13 +138,60 @@ static void handle_notify(EventNotifier *e)
     blk_io_unplug(s->conf->conf.blk);
 }
 
+static void data_plane_set_up_op_blockers(VirtIOBlockDataPlane *s)
+{
+    assert(!s->blocker);
+    error_setg(&s->blocker, "block device is in use by data plane");
+    blk_op_block_all(s->conf->conf.blk, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_RESIZE, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_DRIVE_DEL, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_BACKUP_SOURCE, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_CHANGE, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_COMMIT_SOURCE, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_COMMIT_TARGET, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_EJECT, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_EXTERNAL_SNAPSHOT,
+                   s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_INTERNAL_SNAPSHOT,
+                   s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_INTERNAL_SNAPSHOT_DELETE,
+                   s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_MIRROR_SOURCE, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_STREAM, s->blocker);
+    blk_op_unblock(s->conf->conf.blk, BLOCK_OP_TYPE_REPLACE, s->blocker);
+}
+
+static void data_plane_remove_op_blockers(VirtIOBlockDataPlane *s)
+{
+    if (s->blocker) {
+        blk_op_unblock_all(s->conf->conf.blk, s->blocker);
+        error_free(s->blocker);
+        s->blocker = NULL;
+    }
+}
+
+static void data_plane_blk_insert_notifier(Notifier *n, void *data)
+{
+    VirtIOBlockDataPlane *s = container_of(n, VirtIOBlockDataPlane,
+                                           insert_notifier);
+    assert(s->conf->conf.blk == data);
+    data_plane_set_up_op_blockers(s);
+}
+
+static void data_plane_blk_remove_notifier(Notifier *n, void *data)
+{
+    VirtIOBlockDataPlane *s = container_of(n, VirtIOBlockDataPlane,
+                                           remove_notifier);
+    assert(s->conf->conf.blk == data);
+    data_plane_remove_op_blockers(s);
+}
+
 /* Context: QEMU global mutex held */
 void virtio_blk_data_plane_create(VirtIODevice *vdev, VirtIOBlkConf *conf,
                                   VirtIOBlockDataPlane **dataplane,
                                   Error **errp)
 {
     VirtIOBlockDataPlane *s;
-    Error *local_err = NULL;
     BusState *qbus = BUS(qdev_get_parent_bus(DEVICE(vdev)));
     VirtioBusClass *k = VIRTIO_BUS_GET_CLASS(qbus);
 
@@ -163,11 +212,8 @@ void virtio_blk_data_plane_create(VirtIODevice *vdev, VirtIOBlkConf *conf,
     /* If dataplane is (re-)enabled while the guest is running there could be
      * block jobs that can conflict.
      */
-    if (blk_op_is_blocked(conf->conf.blk, BLOCK_OP_TYPE_DATAPLANE,
-                          &local_err)) {
-        error_setg(errp, "cannot start dataplane thread: %s",
-                   error_get_pretty(local_err));
-        error_free(local_err);
+    if (blk_op_is_blocked(conf->conf.blk, BLOCK_OP_TYPE_DATAPLANE, errp)) {
+        error_prepend(errp, "cannot start dataplane thread: ");
         return;
     }
 
@@ -182,22 +228,12 @@ void virtio_blk_data_plane_create(VirtIODevice *vdev, VirtIOBlkConf *conf,
     s->ctx = iothread_get_aio_context(s->iothread);
     s->bh = aio_bh_new(s->ctx, notify_guest_bh, s);
 
-    error_setg(&s->blocker, "block device is in use by data plane");
-    blk_op_block_all(conf->conf.blk, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_RESIZE, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_DRIVE_DEL, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_BACKUP_SOURCE, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_CHANGE, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_COMMIT_SOURCE, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_COMMIT_TARGET, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_EJECT, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_EXTERNAL_SNAPSHOT, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_INTERNAL_SNAPSHOT, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_INTERNAL_SNAPSHOT_DELETE,
-                   s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_MIRROR_SOURCE, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_STREAM, s->blocker);
-    blk_op_unblock(conf->conf.blk, BLOCK_OP_TYPE_REPLACE, s->blocker);
+    s->insert_notifier.notify = data_plane_blk_insert_notifier;
+    s->remove_notifier.notify = data_plane_blk_remove_notifier;
+    blk_add_insert_bs_notifier(conf->conf.blk, &s->insert_notifier);
+    blk_add_remove_bs_notifier(conf->conf.blk, &s->remove_notifier);
+
+    data_plane_set_up_op_blockers(s);
 
     *dataplane = s;
 }
@@ -210,8 +246,9 @@ void virtio_blk_data_plane_destroy(VirtIOBlockDataPlane *s)
     }
 
     virtio_blk_data_plane_stop(s);
-    blk_op_unblock_all(s->conf->conf.blk, s->blocker);
-    error_free(s->blocker);
+    data_plane_remove_op_blockers(s);
+    notifier_remove(&s->insert_notifier);
+    notifier_remove(&s->remove_notifier);
     qemu_bh_delete(s->bh);
     object_unref(OBJECT(s->iothread));
     g_free(s);

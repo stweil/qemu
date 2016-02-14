@@ -76,6 +76,13 @@ typedef struct VirtIOSCSICommon {
     VirtQueue **cmd_vqs;
 } VirtIOSCSICommon;
 
+typedef struct VirtIOSCSIBlkChangeNotifier {
+    Notifier n;
+    struct VirtIOSCSI *s;
+    SCSIDevice *sd;
+    QTAILQ_ENTRY(VirtIOSCSIBlkChangeNotifier) next;
+} VirtIOSCSIBlkChangeNotifier;
+
 typedef struct VirtIOSCSI {
     VirtIOSCSICommon parent_obj;
 
@@ -85,6 +92,9 @@ typedef struct VirtIOSCSI {
 
     /* Fields for dataplane below */
     AioContext *ctx; /* one iothread per virtio-scsi-pci for now */
+
+    QTAILQ_HEAD(, VirtIOSCSIBlkChangeNotifier) insert_notifiers;
+    QTAILQ_HEAD(, VirtIOSCSIBlkChangeNotifier) remove_notifiers;
 
     /* Vring is used instead of vq in dataplane code, because of the underlying
      * memory layer thread safety */
@@ -102,18 +112,17 @@ typedef struct VirtIOSCSI {
 } VirtIOSCSI;
 
 typedef struct VirtIOSCSIReq {
+    /* Note:
+     * - fields up to resp_iov are initialized by virtio_scsi_init_req;
+     * - fields starting at vring are zeroed by virtio_scsi_init_req.
+     * */
+    VirtQueueElement elem;
+
     VirtIOSCSI *dev;
     VirtQueue *vq;
     QEMUSGList qsgl;
     QEMUIOVector resp_iov;
 
-    /* Note:
-     * - fields before elem are initialized by virtio_scsi_init_req;
-     * - elem is uninitialized at the time of allocation.
-     * - fields after elem are zeroed by virtio_scsi_init_req.
-     * */
-
-    VirtQueueElement elem;
     /* Set by dataplane code. */
     VirtIOSCSIVring *vring;
 
@@ -151,7 +160,7 @@ void virtio_scsi_common_unrealize(DeviceState *dev, Error **errp);
 void virtio_scsi_handle_ctrl_req(VirtIOSCSI *s, VirtIOSCSIReq *req);
 bool virtio_scsi_handle_cmd_req_prepare(VirtIOSCSI *s, VirtIOSCSIReq *req);
 void virtio_scsi_handle_cmd_req_submit(VirtIOSCSI *s, VirtIOSCSIReq *req);
-VirtIOSCSIReq *virtio_scsi_init_req(VirtIOSCSI *s, VirtQueue *vq);
+void virtio_scsi_init_req(VirtIOSCSI *s, VirtQueue *vq, VirtIOSCSIReq *req);
 void virtio_scsi_free_req(VirtIOSCSIReq *req);
 void virtio_scsi_push_event(VirtIOSCSI *s, SCSIDevice *dev,
                             uint32_t event, uint32_t reason);

@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qemu/error-report.h"
 #include "qemu/timer.h"
@@ -51,8 +52,6 @@
 #include <sys/dkio.h>
 #endif
 #ifdef __linux__
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/param.h>
 #include <linux/cdrom.h>
@@ -779,7 +778,6 @@ static int hdev_probe_geometry(BlockDriverState *bs, HDGeometry *geo)
 {
     BDRVRawState *s = bs->opaque;
     struct hd_geometry ioctl_geo = {0};
-    uint32_t blksize;
 
     /* If DASD, get its geometry */
     if (check_for_dasd(s->fd) < 0) {
@@ -799,12 +797,6 @@ static int hdev_probe_geometry(BlockDriverState *bs, HDGeometry *geo)
     }
     geo->heads = ioctl_geo.heads;
     geo->sectors = ioctl_geo.sectors;
-    if (!probe_physical_blocksize(s->fd, &blksize)) {
-        /* overwrite cyls: HDIO_GETGEO result is incorrect for big drives */
-        geo->cylinders = bdrv_nb_sectors(bs) / (blksize / BDRV_SECTOR_SIZE)
-                                             / (geo->heads * geo->sectors);
-        return 0;
-    }
     geo->cylinders = ioctl_geo.cylinders;
 
     return 0;
@@ -1826,7 +1818,8 @@ static int find_allocation(BlockDriverState *bs, off_t start,
  */
 static int64_t coroutine_fn raw_co_get_block_status(BlockDriverState *bs,
                                                     int64_t sector_num,
-                                                    int nb_sectors, int *pnum)
+                                                    int nb_sectors, int *pnum,
+                                                    BlockDriverState **file)
 {
     off_t start, data = 0, hole = 0;
     int64_t total_size;
@@ -1868,6 +1861,7 @@ static int64_t coroutine_fn raw_co_get_block_status(BlockDriverState *bs,
         *pnum = MIN(nb_sectors, (data - start) / BDRV_SECTOR_SIZE);
         ret = BDRV_BLOCK_ZERO;
     }
+    *file = bs;
     return ret | BDRV_BLOCK_OFFSET_VALID | start;
 }
 

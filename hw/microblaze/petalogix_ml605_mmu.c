@@ -25,6 +25,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/sysbus.h"
 #include "hw/hw.h"
 #include "net/net.h"
@@ -35,7 +36,7 @@
 #include "sysemu/block-backend.h"
 #include "hw/char/serial.h"
 #include "exec/address-spaces.h"
-#include "hw/ssi.h"
+#include "hw/ssi/ssi.h"
 
 #include "boot.h"
 

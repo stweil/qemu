@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include <dirent.h>
 #include "hw/hw.h"
 #include "monitor/qdev.h"
@@ -59,7 +60,6 @@
 #include "qapi/qmp/json-streamer.h"
 #include "qapi/qmp/json-parser.h"
 #include <qom/object_interfaces.h>
-#include "qemu/osdep.h"
 #include "cpu.h"
 #include "trace.h"
 #include "trace/control.h"
@@ -1464,8 +1464,7 @@ static void hmp_boot_set(Monitor *mon, const QDict *qdict)
 
     qemu_boot_set(bootdevice, &local_err);
     if (local_err) {
-        monitor_printf(mon, "%s\n", error_get_pretty(local_err));
-        error_free(local_err);
+        error_report_err(local_err);
     } else {
         monitor_printf(mon, "boot device list now set to %s\n", bootdevice);
     }
@@ -4149,8 +4148,7 @@ static void bdrv_password_cb(void *opaque, const char *password,
 
     bdrv_add_key(bs, password, &local_err);
     if (local_err) {
-        monitor_printf(mon, "%s\n", error_get_pretty(local_err));
-        error_free(local_err);
+        error_report_err(local_err);
         ret = -EPERM;
     }
     if (mon->password_completion_cb)

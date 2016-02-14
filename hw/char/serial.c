@@ -23,6 +23,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/char/serial.h"
 #include "sysemu/char.h"
 #include "qemu/timer.h"
@@ -896,7 +897,6 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
                          CharDriverState *chr, MemoryRegion *system_io)
 {
     SerialState *s;
-    Error *err = NULL;
 
     s = g_malloc0(sizeof(SerialState));
 
@@ -905,11 +905,7 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
     s->irq = irq;
     s->baudbase = baudbase;
     s->chr = chr;
-    serial_realize_core(s, &err);
-    if (err != NULL) {
-        error_report_err(err);
-        exit(1);
-    }
+    serial_realize_core(s, &error_fatal);
 
     vmstate_register(NULL, base, &vmstate_serial, s);
 
@@ -959,7 +955,6 @@ SerialState *serial_mm_init(MemoryRegion *address_space,
                             CharDriverState *chr, enum device_endian end)
 {
     SerialState *s;
-    Error *err = NULL;
 
     s = g_malloc0(sizeof(SerialState));
 
@@ -969,11 +964,7 @@ SerialState *serial_mm_init(MemoryRegion *address_space,
     s->baudbase = baudbase;
     s->chr = chr;
 
-    serial_realize_core(s, &err);
-    if (err != NULL) {
-        error_report_err(err);
-        exit(1);
-    }
+    serial_realize_core(s, &error_fatal);
     vmstate_register(NULL, base, &vmstate_serial, s);
 
     memory_region_init_io(&s->io, NULL, &serial_mm_ops[end], s,

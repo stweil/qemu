@@ -22,9 +22,9 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "sysemu/sysemu.h"
 #include "ui/console.h"
-#include "qapi/error.h"
 #include "qmp-commands.h"
 #include "qapi-types.h"
 #include "ui/keymaps.h"
@@ -57,12 +57,13 @@ struct QEMUPutLEDEntry {
 static QTAILQ_HEAD(, QEMUPutLEDEntry) led_handlers =
     QTAILQ_HEAD_INITIALIZER(led_handlers);
 
-int index_from_key(const char *key)
+int index_from_key(const char *key, size_t key_length)
 {
     int i;
 
     for (i = 0; QKeyCode_lookup[i] != NULL; i++) {
-        if (!strcmp(key, QKeyCode_lookup[i])) {
+        if (!strncmp(key, QKeyCode_lookup[i], key_length) &&
+            !QKeyCode_lookup[i][key_length]) {
             break;
         }
     }

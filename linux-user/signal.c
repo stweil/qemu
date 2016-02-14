@@ -16,12 +16,12 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
-
+#include "qemu/osdep.h"
 #include <sys/ucontext.h>
 #include <sys/resource.h>
 
-#include "qemu-common.h"
 #include "qemu.h"
+#include "qemu-common.h"
 #include "target_signal.h"
 #include "trace.h"
 

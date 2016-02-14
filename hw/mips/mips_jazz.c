@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/mips/mips.h"
 #include "hw/mips/cpudevs.h"
@@ -219,12 +220,12 @@ static void mips_jazz_init(MachineState *machine,
     memory_region_init(isa_mem, NULL, "isa-mem", 0x01000000);
     memory_region_add_subregion(address_space, 0x90000000, isa_io);
     memory_region_add_subregion(address_space, 0x91000000, isa_mem);
-    isa_bus = isa_bus_new(NULL, isa_mem, isa_io);
+    isa_bus = isa_bus_new(NULL, isa_mem, isa_io, &error_abort);
 
     /* ISA devices */
     i8259 = i8259_init(isa_bus, env->irq[4]);
     isa_bus_irqs(isa_bus, i8259);
-    DMA_init(0);
+    DMA_init(isa_bus, 0);
     pit = pit_init(isa_bus, 0x40, 0, NULL);
     pcspk_init(isa_bus, pit);
 
@@ -296,7 +297,8 @@ static void mips_jazz_init(MachineState *machine,
     for (n = 0; n < MAX_FD; n++) {
         fds[n] = drive_get(IF_FLOPPY, 0, n);
     }
-    fdctrl_init_sysbus(qdev_get_gpio_in(rc4030, 1), 0, 0x80003000, fds);
+    /* FIXME: we should enable DMA with a custom IsaDma device */
+    fdctrl_init_sysbus(qdev_get_gpio_in(rc4030, 1), -1, 0x80003000, fds);
 
     /* Real time clock */
     rtc_init(isa_bus, 1980, NULL);

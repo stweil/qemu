@@ -68,6 +68,7 @@ BlockBackend *blk_new_open(const char *name, const char *filename,
 int blk_get_refcnt(BlockBackend *blk);
 void blk_ref(BlockBackend *blk);
 void blk_unref(BlockBackend *blk);
+void blk_remove_all_bs(void);
 const char *blk_name(BlockBackend *blk);
 BlockBackend *blk_by_name(const char *name);
 BlockBackend *blk_next(BlockBackend *blk);
@@ -148,6 +149,7 @@ int blk_get_flags(BlockBackend *blk);
 int blk_get_max_transfer_length(BlockBackend *blk);
 int blk_get_max_iov(BlockBackend *blk);
 void blk_set_guest_block_size(BlockBackend *blk, int align);
+void *blk_try_blockalign(BlockBackend *blk, size_t size);
 void *blk_blockalign(BlockBackend *blk, size_t size);
 bool blk_op_is_blocked(BlockBackend *blk, BlockOpType op, Error **errp);
 void blk_op_unblock(BlockBackend *blk, BlockOpType op, Error *reason);
@@ -163,7 +165,8 @@ void blk_remove_aio_context_notifier(BlockBackend *blk,
                                                                   void *),
                                      void (*detach_aio_context)(void *),
                                      void *opaque);
-void blk_add_close_notifier(BlockBackend *blk, Notifier *notify);
+void blk_add_remove_bs_notifier(BlockBackend *blk, Notifier *notify);
+void blk_add_insert_bs_notifier(BlockBackend *blk, Notifier *notify);
 void blk_io_plug(BlockBackend *blk);
 void blk_io_unplug(BlockBackend *blk);
 BlockAcctStats *blk_get_stats(BlockBackend *blk);

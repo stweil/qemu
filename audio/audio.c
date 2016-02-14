@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "audio.h"
 #include "monitor/monitor.h"
@@ -1806,9 +1807,6 @@ static void audio_init (void)
     atexit (audio_atexit);
 
     s->ts = timer_new_ns(QEMU_CLOCK_VIRTUAL, audio_timer, s);
-    if (!s->ts) {
-        hw_error("Could not create audio timer\n");
-    }
 
     audio_process_options ("AUDIO", audio_options);
 
@@ -1859,12 +1857,8 @@ static void audio_init (void)
 
     if (!done) {
         done = !audio_driver_init (s, &no_audio_driver);
-        if (!done) {
-            hw_error("Could not initialize audio subsystem\n");
-        }
-        else {
-            dolog ("warning: Using timer based audio emulation\n");
-        }
+        assert(done);
+        dolog("warning: Using timer based audio emulation\n");
     }
 
     if (conf.period.hertz <= 0) {

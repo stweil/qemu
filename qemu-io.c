@@ -7,10 +7,7 @@
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
  * See the COPYING file in the top-level directory.
  */
-#include <sys/time.h>
-#include <sys/types.h>
-#include <stdarg.h>
-#include <stdio.h>
+#include "qemu/osdep.h"
 #include <getopt.h>
 #include <libgen.h>
 
@@ -57,17 +54,15 @@ static int openfile(char *name, int flags, QDict *opts)
     BlockDriverState *bs;
 
     if (qemuio_blk) {
-        fprintf(stderr, "file open already, try 'help close'\n");
+        error_report("file open already, try 'help close'");
         QDECREF(opts);
         return 1;
     }
 
     qemuio_blk = blk_new_open("hda", name, NULL, opts, flags, &local_err);
     if (!qemuio_blk) {
-        fprintf(stderr, "%s: can't open%s%s: %s\n", progname,
-                name ? " device " : "", name ?: "",
-                error_get_pretty(local_err));
-        error_free(local_err);
+        error_reportf_err(local_err, "can't open%s%s: ",
+                          name ? " device " : "", name ?: "");
         return 1;
     }
 
@@ -444,7 +439,7 @@ int main(int argc, char **argv)
             }
             break;
         case 'T':
-            if (!trace_init_backends(optarg, NULL)) {
+            if (!trace_init_backends()) {
                 exit(1); /* error message will have been printed */
             }
             break;

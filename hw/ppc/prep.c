@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/timer/m48t59.h"
 #include "hw/i386/pc.h"
@@ -33,6 +34,7 @@
 #include "hw/pci/pci_host.h"
 #include "hw/ppc/ppc.h"
 #include "hw/boards.h"
+#include "qemu/error-report.h"
 #include "qemu/log.h"
 #include "hw/ide.h"
 #include "hw/loader.h"
@@ -532,7 +534,7 @@ static void ppc_prep_init(MachineState *machine)
         kernel_size = load_image_targphys(kernel_filename, kernel_base,
                                           ram_size - kernel_base);
         if (kernel_size < 0) {
-            hw_error("qemu: could not load kernel '%s'\n", kernel_filename);
+            error_report("could not load kernel '%s'", kernel_filename);
             exit(1);
         }
         /* load initrd */
@@ -541,8 +543,9 @@ static void ppc_prep_init(MachineState *machine)
             initrd_size = load_image_targphys(initrd_filename, initrd_base,
                                               ram_size - initrd_base);
             if (initrd_size < 0) {
-                hw_error("qemu: could not load initial ram disk '%s'\n",
-                          initrd_filename);
+                error_report("could not load initial ram disk '%s'",
+                             initrd_filename);
+                exit(1);
             }
         } else {
             initrd_base = 0;
@@ -569,7 +572,8 @@ static void ppc_prep_init(MachineState *machine)
     }
 
     if (PPC_INPUT(env) != PPC_FLAGS_INPUT_6xx) {
-        hw_error("Only 6xx bus is supported on PREP machine\n");
+        error_report("Only 6xx bus is supported on PREP machine");
+        exit(1);
     }
 
     dev = qdev_create(NULL, "raven-pcihost");

@@ -11,6 +11,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "trace.h"
 #include "block/blockjob.h"
 #include "block/block_int.h"
@@ -167,6 +168,7 @@ static uint64_t coroutine_fn mirror_iteration(MirrorBlockJob *s)
     MirrorOp *op;
     int pnum;
     int64_t ret;
+    BlockDriverState *file;
 
     max_iov = MIN(source->bl.max_iov, s->target->bl.max_iov);
 
@@ -305,7 +307,7 @@ static uint64_t coroutine_fn mirror_iteration(MirrorBlockJob *s)
     trace_mirror_one_iteration(s, sector_num, nb_sectors);
 
     ret = bdrv_get_block_status_above(source, NULL, sector_num,
-                                      nb_sectors, &pnum);
+                                      nb_sectors, &pnum, &file);
     if (ret < 0 || pnum < nb_sectors ||
             (ret & BDRV_BLOCK_DATA && !(ret & BDRV_BLOCK_ZERO))) {
         bdrv_aio_readv(source, sector_num, &op->qiov, nb_sectors,

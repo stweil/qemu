@@ -17,11 +17,8 @@
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/time.h>
+#include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "cpu.h"
 #if defined(CONFIG_USER_ONLY)
 #include "qemu.h"

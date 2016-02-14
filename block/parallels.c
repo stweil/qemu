@@ -27,6 +27,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "block/block_int.h"
 #include "qemu/module.h"
@@ -260,7 +261,7 @@ static coroutine_fn int parallels_co_flush_to_os(BlockDriverState *bs)
 
 
 static int64_t coroutine_fn parallels_co_get_block_status(BlockDriverState *bs,
-        int64_t sector_num, int nb_sectors, int *pnum)
+        int64_t sector_num, int nb_sectors, int *pnum, BlockDriverState **file)
 {
     BDRVParallelsState *s = bs->opaque;
     int64_t offset;
@@ -273,6 +274,7 @@ static int64_t coroutine_fn parallels_co_get_block_status(BlockDriverState *bs,
         return 0;
     }
 
+    *file = bs->file->bs;
     return (offset << BDRV_SECTOR_BITS) |
         BDRV_BLOCK_DATA | BDRV_BLOCK_OFFSET_VALID;
 }

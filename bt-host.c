@@ -17,13 +17,13 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "sysemu/bt.h"
 #include "qemu/main-loop.h"
 #include "qemu/sockets.h"
 
 #ifndef _WIN32
-# include <errno.h>
 # include <sys/ioctl.h>
 # include <sys/uio.h>
 # ifdef CONFIG_BLUEZ

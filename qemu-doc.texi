@@ -260,7 +260,7 @@ Linux should boot and give you a prompt.
 
 @example
 @c man begin SYNOPSIS
-usage: qemu-system-i386 [options] [@var{disk_image}]
+@command{qemu-system-i386} [@var{options}] [@var{disk_image}]
 @c man end
 @end example
 
@@ -1240,9 +1240,9 @@ echo 100 100 > /proc/sys/net/ipv4/ping_group_range
 When using the built-in TFTP server, the router is also the TFTP
 server.
 
-When using the @option{-redir} option, TCP or UDP connections can be
-redirected from the host to the guest. It allows for example to
-redirect X11, telnet or SSH connections.
+When using the @option{'-netdev user,hostfwd=...'} option, TCP or UDP
+connections can be redirected from the host to the guest. It allows for
+example to redirect X11, telnet or SSH connections.
 
 @subsection Connecting VLANs between QEMU instances
 
@@ -1409,7 +1409,7 @@ no type is given, the HCI logic corresponds to @code{-bt hci,vlan=0}.
 This USB device implements the USB Transport Layer of HCI.  Example
 usage:
 @example
-qemu-system-i386 [...OPTIONS...] -usbdevice bt:hci,vlan=3 -bt device:keyboard,vlan=3
+@command{qemu-system-i386} [...@var{OPTIONS}...] @option{-usbdevice} bt:hci,vlan=3 @option{-bt} device:keyboard,vlan=3
 @end example
 @end table
 
@@ -1892,7 +1892,8 @@ correctly instructs QEMU to shutdown at the appropriate moment.
 
 @subsubsection Share a directory between Unix and Windows
 
-See @ref{sec_invocation} about the help of the option @option{-smb}.
+See @ref{sec_invocation} about the help of the option
+@option{'-netdev user,smb=...'}.
 
 @subsubsection Windows XP security problem
 
@@ -2753,7 +2754,7 @@ qemu-i386 /usr/local/qemu-i386/wine/bin/wine \
 @subsection Command line options
 
 @example
-usage: qemu-i386 [-h] [-d] [-L path] [-s size] [-cpu model] [-g port] [-B offset] [-R size] program [arguments...]
+@command{qemu-i386} [@option{-h]} [@option{-d]} [@option{-L} @var{path}] [@option{-s} @var{size}] [@option{-cpu} @var{model}] [@option{-g} @var{port}] [@option{-B} @var{offset}] [@option{-R} @var{size}] @var{program} [@var{arguments}...]
 @end example
 
 @table @option
@@ -2895,7 +2896,7 @@ qemu-sparc64 /bin/ls
 @subsection Command line options
 
 @example
-usage: qemu-sparc64 [-h] [-d] [-L path] [-s size] [-bsd type] program [arguments...]
+@command{qemu-sparc64} [@option{-h]} [@option{-d]} [@option{-L} @var{path}] [@option{-s} @var{size}] [@option{-bsd} @var{type}] @var{program} [@var{arguments}...]
 @end example
 
 @table @option
@@ -3065,7 +3066,6 @@ Additional Requirements (install in order):
 @item pkg-config: @uref{http://www.freedesktop.org/wiki/Software/pkg-config/}
 @item autoconf: @uref{http://www.gnu.org/software/autoconf/autoconf.html}
 @item automake: @uref{http://www.gnu.org/software/automake/}
-@item libtool: @uref{http://www.gnu.org/software/libtool/}
 @item pixman: @uref{http://www.pixman.org/}
 @end enumerate
 

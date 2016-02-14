@@ -17,10 +17,8 @@
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <sys/types.h>
-#include <sys/stat.h>
+#include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "qemu.h"
 
 #define SYS_EXIT        1

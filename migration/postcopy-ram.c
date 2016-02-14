@@ -16,9 +16,8 @@
  * source to the destination before all the data has been copied.
  */
 
+#include "qemu/osdep.h"
 #include <glib.h>
-#include <stdio.h>
-#include <unistd.h>
 
 #include "qemu-common.h"
 #include "migration/migration.h"
@@ -57,7 +56,6 @@ struct PostcopyDiscardState {
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
-#include <sys/types.h>
 #include <asm/types.h> /* for __u64 */
 #endif
 
@@ -727,7 +725,8 @@ void postcopy_discard_send_range(MigrationState *ms, PostcopyDiscardState *pds,
 
     if (pds->cur_entry == MAX_DISCARDS_PER_COMMAND) {
         /* Full set, ship it! */
-        qemu_savevm_send_postcopy_ram_discard(ms->file, pds->ramblock_name,
+        qemu_savevm_send_postcopy_ram_discard(ms->to_dst_file,
+                                              pds->ramblock_name,
                                               pds->cur_entry,
                                               pds->start_list,
                                               pds->length_list);
@@ -747,7 +746,8 @@ void postcopy_discard_send_finish(MigrationState *ms, PostcopyDiscardState *pds)
 {
     /* Anything unsent? */
     if (pds->cur_entry) {
-        qemu_savevm_send_postcopy_ram_discard(ms->file, pds->ramblock_name,
+        qemu_savevm_send_postcopy_ram_discard(ms->to_dst_file,
+                                              pds->ramblock_name,
                                               pds->cur_entry,
                                               pds->start_list,
                                               pds->length_list);

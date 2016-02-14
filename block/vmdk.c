@@ -23,6 +23,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "block/block_int.h"
 #include "qapi/qmp/qerror.h"
@@ -570,6 +571,7 @@ static int vmdk_open_vmdk4(BlockDriverState *bs,
     VmdkExtent *extent;
     BDRVVmdkState *s = bs->opaque;
     int64_t l1_backup_offset = 0;
+    bool compressed;
 
     ret = bdrv_pread(file->bs, sizeof(magic), &header, sizeof(header));
     if (ret < 0) {
@@ -644,6 +646,8 @@ static int vmdk_open_vmdk4(BlockDriverState *bs,
         header = footer.header;
     }
 
+    compressed =
+        le16_to_cpu(header.compressAlgorithm) == VMDK4_COMPRESSION_DEFLATE;
     if (le32_to_cpu(header.version) > 3) {
         char buf[64];
         snprintf(buf, sizeof(buf), "VMDK version %" PRId32,
@@ -651,7 +655,8 @@ static int vmdk_open_vmdk4(BlockDriverState *bs,
         error_setg(errp, QERR_UNKNOWN_BLOCK_FORMAT_FEATURE,
                    bdrv_get_device_or_node_name(bs), "vmdk", buf);
         return -ENOTSUP;
-    } else if (le32_to_cpu(header.version) == 3 && (flags & BDRV_O_RDWR)) {
+    } else if (le32_to_cpu(header.version) == 3 && (flags & BDRV_O_RDWR) &&
+               !compressed) {
         /* VMware KB 2064959 explains that version 3 added support for
          * persistent changed block tracking (CBT), and backup software can
          * read it as version=1 if it doesn't care about the changed area
@@ -760,6 +765,17 @@ static int vmdk_open_sparse(BlockDriverState *bs, BdrvChild *file, int flags,
     }
 }
 
+static const char *next_line(const char *s)
+{
+    while (*s) {
+        if (*s == '\n') {
+            return s + 1;
+        }
+        s++;
+    }
+    return s;
+}
+
 static int vmdk_parse_extents(const char *desc, BlockDriverState *bs,
                               const char *desc_file_path, QDict *options,
                               Error **errp)
@@ -769,7 +785,7 @@ static int vmdk_parse_extents(const char *desc, BlockDriverState *bs,
     char access[11];
     char type[11];
     char fname[512];
-    const char *p = desc;
+    const char *p, *np;
     int64_t sectors = 0;
     int64_t flat_offset;
     char *extent_path;
@@ -779,7 +795,7 @@ static int vmdk_parse_extents(const char *desc, BlockDriverState *bs,
     char extent_opt_prefix[32];
     Error *local_err = NULL;
 
-    while (*p) {
+    for (p = desc; *p; p = next_line(p)) {
         /* parse extent line in one of below formats:
          *
          * RW [size in sectors] FLAT "file-name.vmdk" OFFSET
@@ -791,29 +807,26 @@ static int vmdk_parse_extents(const char *desc, BlockDriverState *bs,
         matches = sscanf(p, "%10s %" SCNd64 " %10s \"%511[^\n\r\"]\" %" SCNd64,
                          access, &sectors, type, fname, &flat_offset);
         if (matches < 4 || strcmp(access, "RW")) {
-            goto next_line;
+            continue;
         } else if (!strcmp(type, "FLAT")) {
             if (matches != 5 || flat_offset < 0) {
-                error_setg(errp, "Invalid extent lines: \n%s", p);
-                return -EINVAL;
+                goto invalid;
             }
         } else if (!strcmp(type, "VMFS")) {
             if (matches == 4) {
                 flat_offset = 0;
             } else {
-                error_setg(errp, "Invalid extent lines:\n%s", p);
-                return -EINVAL;
+                goto invalid;
             }
         } else if (matches != 4) {
-            error_setg(errp, "Invalid extent lines:\n%s", p);
-            return -EINVAL;
+            goto invalid;
         }
 
         if (sectors <= 0 ||
             (strcmp(type, "FLAT") && strcmp(type, "SPARSE") &&
              strcmp(type, "VMFS") && strcmp(type, "VMFSSPARSE")) ||
             (strcmp(access, "RW"))) {
-            goto next_line;
+            continue;
         }
 
         if (!path_is_absolute(fname) && !path_has_protocol(fname) &&
@@ -870,17 +883,17 @@ static int vmdk_parse_extents(const char *desc, BlockDriverState *bs,
             return -ENOTSUP;
         }
         extent->type = g_strdup(type);
-next_line:
-        /* move to next line */
-        while (*p) {
-            if (*p == '\n') {
-                p++;
-                break;
-            }
-            p++;
-        }
     }
     return 0;
+
+invalid:
+    np = next_line(p);
+    assert(np != p);
+    if (np[-1] == '\n') {
+        np--;
+    }
+    error_setg(errp, "Invalid extent line: %.*s", (int)(np - p), p);
+    return -EINVAL;
 }
 
 static int vmdk_open_desc_file(BlockDriverState *bs, int flags, char *buf,
@@ -1248,7 +1261,7 @@ static inline uint64_t vmdk_find_index_in_cluster(VmdkExtent *extent,
 }
 
 static int64_t coroutine_fn vmdk_co_get_block_status(BlockDriverState *bs,
-        int64_t sector_num, int nb_sectors, int *pnum)
+        int64_t sector_num, int nb_sectors, int *pnum, BlockDriverState **file)
 {
     BDRVVmdkState *s = bs->opaque;
     int64_t index_in_cluster, n, ret;
@@ -1265,6 +1278,7 @@ static int64_t coroutine_fn vmdk_co_get_block_status(BlockDriverState *bs,
                              0, 0);
     qemu_co_mutex_unlock(&s->lock);
 
+    index_in_cluster = vmdk_find_index_in_cluster(extent, sector_num);
     switch (ret) {
     case VMDK_ERROR:
         ret = -EIO;
@@ -1277,14 +1291,15 @@ static int64_t coroutine_fn vmdk_co_get_block_status(BlockDriverState *bs,
         break;
     case VMDK_OK:
         ret = BDRV_BLOCK_DATA;
-        if (extent->file == bs->file && !extent->compressed) {
-            ret |= BDRV_BLOCK_OFFSET_VALID | offset;
+        if (!extent->compressed) {
+            ret |= BDRV_BLOCK_OFFSET_VALID;
+            ret |= (offset + (index_in_cluster << BDRV_SECTOR_BITS))
+                    & BDRV_BLOCK_OFFSET_MASK;
         }
-
+        *file = extent->file->bs;
         break;
     }
 
-    index_in_cluster = vmdk_find_index_in_cluster(extent, sector_num);
     n = extent->cluster_sectors - index_in_cluster;
     if (n > nb_sectors) {
         n = nb_sectors;
@@ -1494,8 +1509,8 @@ static int vmdk_write(BlockDriverState *bs, int64_t sector_num,
 
     if (sector_num > bs->total_sectors) {
         error_report("Wrong offset: sector_num=0x%" PRIx64
-                " total_sectors=0x%" PRIx64 "\n",
-                sector_num, bs->total_sectors);
+                     " total_sectors=0x%" PRIx64,
+                     sector_num, bs->total_sectors);
         return -EIO;
     }
 
@@ -1654,7 +1669,13 @@ static int vmdk_create_extent(const char *filename, int64_t filesize,
     }
     magic = cpu_to_be32(VMDK4_MAGIC);
     memset(&header, 0, sizeof(header));
-    header.version = zeroed_grain ? 2 : 1;
+    if (compress) {
+        header.version = 3;
+    } else if (zeroed_grain) {
+        header.version = 2;
+    } else {
+        header.version = 1;
+    }
     header.flags = VMDK4_FLAG_RGD | VMDK4_FLAG_NL_DETECT
                    | (compress ? VMDK4_FLAG_COMPRESS | VMDK4_FLAG_MARKER : 0)
                    | (zeroed_grain ? VMDK4_FLAG_ZERO_GRAIN : 0);

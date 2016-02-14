@@ -1,12 +1,10 @@
 /* This is the Linux kernel elf-loading code, ported into user space */
-#include <sys/time.h>
+#include "qemu/osdep.h"
 #include <sys/param.h>
 
-#include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 
-#include "qemu-common.h"
 #include "qemu.h"
 #include "disas/disas.h"
 

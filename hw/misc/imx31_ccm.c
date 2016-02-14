@@ -11,6 +11,7 @@
  * the i.MX31 CCM.
  */
 
+#include "qemu/osdep.h"
 #include "hw/misc/imx31_ccm.h"
 
 #define CKIH_FREQ 26000000 /* 26MHz crystal input */
@@ -261,7 +262,7 @@ static void imx31_ccm_reset(DeviceState *dev)
 
 static uint64_t imx31_ccm_read(void *opaque, hwaddr offset, unsigned size)
 {
-    uint32 value = 0;
+    uint32_t value = 0;
     IMX31CCMState *s = (IMX31CCMState *)opaque;
 
     if ((offset >> 2) < IMX31_CCM_MAX_REG) {

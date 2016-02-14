@@ -21,14 +21,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include <unistd.h>
-#include <fcntl.h>
-#include <signal.h>
-#include <time.h>
-#include <errno.h>
-#include <sys/time.h>
+#include "qemu/osdep.h"
 
-#include "config-host.h"
 
 #ifdef CONFIG_SECCOMP
 #include "sysemu/seccomp.h"
@@ -113,7 +107,6 @@ int main(int argc, char **argv)
 #include "qemu/queue.h"
 #include "sysemu/cpus.h"
 #include "sysemu/arch_init.h"
-#include "qemu/osdep.h"
 
 #include "ui/qemu-spice.h"
 #include "qapi/string-input-visitor.h"
@@ -230,7 +223,6 @@ static struct {
     { .driver = "ide-drive",            .flag = &default_cdrom     },
     { .driver = "scsi-cd",              .flag = &default_cdrom     },
     { .driver = "virtio-serial-pci",    .flag = &default_virtcon   },
-    { .driver = "virtio-serial-s390",   .flag = &default_virtcon   },
     { .driver = "virtio-serial",        .flag = &default_virtcon   },
     { .driver = "VGA",                  .flag = &default_vga       },
     { .driver = "isa-vga",              .flag = &default_vga       },
@@ -274,9 +266,13 @@ static QemuOptsList qemu_sandbox_opts = {
 
 static QemuOptsList qemu_trace_opts = {
     .name = "trace",
-    .implied_opt_name = "trace",
+    .implied_opt_name = "enable",
     .head = QTAILQ_HEAD_INITIALIZER(qemu_trace_opts.head),
     .desc = {
+        {
+            .name = "enable",
+            .type = QEMU_OPT_STRING,
+        },
         {
             .name = "events",
             .type = QEMU_OPT_STRING,
@@ -1539,14 +1535,14 @@ MachineInfoList *qmp_query_machines(Error **errp)
 static int machine_help_func(QemuOpts *opts, MachineState *machine)
 {
     ObjectProperty *prop;
-    ObjectPropertyIterator *iter;
+    ObjectPropertyIterator iter;
 
     if (!qemu_opt_has_help_opt(opts)) {
         return 0;
     }
 
-    iter = object_property_iter_init(OBJECT(machine));
-    while ((prop = object_property_iter_next(iter))) {
+    object_property_iter_init(&iter, OBJECT(machine));
+    while ((prop = object_property_iter_next(&iter))) {
         if (!prop->set) {
             continue;
         }
@@ -1559,7 +1555,6 @@ static int machine_help_func(QemuOpts *opts, MachineState *machine)
             error_printf("\n");
         }
     }
-    object_property_iter_free(iter);
 
     return 1;
 }
@@ -2587,11 +2582,7 @@ static int virtcon_parse(const char *devname)
     }
 
     bus_opts = qemu_opts_create(device, NULL, 0, &error_abort);
-    if (arch_type == QEMU_ARCH_S390X) {
-        qemu_opt_set(bus_opts, "driver", "virtio-serial-s390", &error_abort);
-    } else {
-        qemu_opt_set(bus_opts, "driver", "virtio-serial-pci", &error_abort);
-    }
+    qemu_opt_set(bus_opts, "driver", "virtio-serial", &error_abort);
 
     dev_opts = qemu_opts_create(device, NULL, 0, &error_abort);
     qemu_opt_set(dev_opts, "driver", "virtconsole", &error_abort);
@@ -2867,44 +2858,47 @@ static bool object_create_delayed(const char *type)
 static int object_create(void *opaque, QemuOpts *opts, Error **errp)
 {
     Error *err = NULL;
+    Error *err_end = NULL;
     char *type = NULL;
     char *id = NULL;
-    void *dummy = NULL;
     OptsVisitor *ov;
     QDict *pdict;
     bool (*type_predicate)(const char *) = opaque;
+    Visitor *v;
 
     ov = opts_visitor_new(opts);
     pdict = qemu_opts_to_qdict(opts, NULL);
+    v = opts_get_visitor(ov);
 
-    visit_start_struct(opts_get_visitor(ov), &dummy, NULL, NULL, 0, &err);
+    visit_start_struct(v, NULL, NULL, 0, &err);
     if (err) {
         goto out;
     }
 
     qdict_del(pdict, "qom-type");
-    visit_type_str(opts_get_visitor(ov), &type, "qom-type", &err);
+    visit_type_str(v, "qom-type", &type, &err);
     if (err) {
         goto out;
     }
     if (!type_predicate(type)) {
+        visit_end_struct(v, NULL);
         goto out;
     }
 
     qdict_del(pdict, "id");
-    visit_type_str(opts_get_visitor(ov), &id, "id", &err);
+    visit_type_str(v, "id", &id, &err);
     if (err) {
-        goto out;
+        goto out_end;
     }
 
-    object_add(type, id, pdict, opts_get_visitor(ov), &err);
-    if (err) {
-        goto out;
-    }
-    visit_end_struct(opts_get_visitor(ov), &err);
-    if (err) {
+    object_add(type, id, pdict, v, &err);
+
+out_end:
+    visit_end_struct(v, &err_end);
+    if (!err && err_end) {
         qmp_object_del(id, NULL);
     }
+    error_propagate(&err, err_end);
 
 out:
     opts_visitor_cleanup(ov);
@@ -2912,7 +2906,6 @@ out:
     QDECREF(pdict);
     g_free(id);
     g_free(type);
-    g_free(dummy);
     if (err) {
         error_report_err(err);
         return -1;
@@ -3033,8 +3026,7 @@ int main(int argc, char **argv)
     bool userconfig = true;
     const char *log_mask = NULL;
     const char *log_file = NULL;
-    const char *trace_events = NULL;
-    const char *trace_file = NULL;
+    char *trace_file = NULL;
     ram_addr_t maxram_size;
     uint64_t ram_slots = 0;
     FILE *vmstate_dump_file = NULL;
@@ -3082,7 +3074,7 @@ int main(int argc, char **argv)
     runstate_init();
 
     if (qcrypto_init(&err) < 0) {
-        error_report("cannot initialize crypto: %s", error_get_pretty(err));
+        error_reportf_err(err, "cannot initialize crypto: ");
         exit(1);
     }
     rtc_clock = QEMU_CLOCK_HOST;
@@ -3360,12 +3352,18 @@ int main(int argc, char **argv)
 #endif
 #ifdef CONFIG_SLIRP
             case QEMU_OPTION_tftp:
+                error_report("The -tftp option is deprecated. "
+                             "Please use '-netdev user,tftp=...' instead.");
                 legacy_tftp_prefix = optarg;
                 break;
             case QEMU_OPTION_bootp:
+                error_report("The -bootp option is deprecated. "
+                             "Please use '-netdev user,bootfile=...' instead.");
                 legacy_bootp_filename = optarg;
                 break;
             case QEMU_OPTION_redir:
+                error_report("The -redir option is deprecated. "
+                             "Please use '-netdev user,hostfwd=...' instead.");
                 if (net_slirp_redir(optarg) < 0)
                     exit(1);
                 break;
@@ -3953,12 +3951,19 @@ int main(int argc, char **argv)
             case QEMU_OPTION_trace:
             {
                 opts = qemu_opts_parse_noisily(qemu_find_opts("trace"),
-                                               optarg, false);
+                                               optarg, true);
                 if (!opts) {
                     exit(1);
                 }
-                trace_events = qemu_opt_get(opts, "events");
-                trace_file = qemu_opt_get(opts, "file");
+                if (qemu_opt_get(opts, "enable")) {
+                    trace_enable_events(qemu_opt_get(opts, "enable"));
+                }
+                trace_init_events(qemu_opt_get(opts, "events"));
+                if (trace_file) {
+                    g_free(trace_file);
+                }
+                trace_file = g_strdup(qemu_opt_get(opts, "file"));
+                qemu_opts_del(opts);
                 break;
             }
             case QEMU_OPTION_trace_unassigned:
@@ -4144,6 +4149,8 @@ int main(int argc, char **argv)
         exit(0);
     }
 
+    trace_init_file(trace_file);
+
     /* Open the logfile at this point and set the log mask if necessary.
      */
     if (log_file) {
@@ -4158,12 +4165,12 @@ int main(int argc, char **argv)
             exit(1);
         }
         qemu_set_log(mask);
+    } else {
+        qemu_set_log(0);
     }
 
-    if (!is_daemonized()) {
-        if (!trace_init_backends(trace_events, trace_file)) {
-            exit(1);
-        }
+    if (!trace_init_backends()) {
+        exit(1);
     }
 
     /* If no data_dir is specified then try to find it relative to the
@@ -4378,12 +4385,7 @@ int main(int argc, char **argv)
     configure_accelerator(current_machine);
 
     if (qtest_chrdev) {
-        Error *local_err = NULL;
-        qtest_init(qtest_chrdev, qtest_log, &local_err);
-        if (local_err) {
-            error_report_err(local_err);
-            exit(1);
-        }
+        qtest_init(qtest_chrdev, qtest_log, &error_fatal);
     }
 
     machine_opts = qemu_get_machine_opts();
@@ -4394,24 +4396,14 @@ int main(int argc, char **argv)
 
     opts = qemu_opts_find(qemu_find_opts("boot-opts"), NULL);
     if (opts) {
-        Error *local_err = NULL;
-
         boot_order = qemu_opt_get(opts, "order");
         if (boot_order) {
-            validate_bootdevices(boot_order, &local_err);
-            if (local_err) {
-                error_report_err(local_err);
-                exit(1);
-            }
+            validate_bootdevices(boot_order, &error_fatal);
         }
 
         boot_once = qemu_opt_get(opts, "once");
         if (boot_once) {
-            validate_bootdevices(boot_once, &local_err);
-            if (local_err) {
-                error_report_err(local_err);
-                exit(1);
-            }
+            validate_bootdevices(boot_once, &error_fatal);
         }
 
         boot_menu = qemu_opt_get_bool(opts, "menu", boot_menu);
@@ -4614,12 +4606,7 @@ int main(int argc, char **argv)
     net_check_clients();
 
     if (boot_once) {
-        Error *local_err = NULL;
-        qemu_boot_set(boot_once, &local_err);
-        if (local_err) {
-            error_report("%s", error_get_pretty(local_err));
-            exit(1);
-        }
+        qemu_boot_set(boot_once, &error_fatal);
         qemu_register_reset(restore_boot_order, g_strdup(boot_order));
     }
 
@@ -4713,9 +4700,7 @@ int main(int argc, char **argv)
         Error *local_err = NULL;
         qemu_start_incoming_migration(incoming, &local_err);
         if (local_err) {
-            error_report("-incoming %s: %s", incoming,
-                         error_get_pretty(local_err));
-            error_free(local_err);
+            error_reportf_err(local_err, "-incoming %s: ", incoming);
             exit(1);
         }
     } else if (autostart) {
@@ -4723,12 +4708,6 @@ int main(int argc, char **argv)
     }
 
     os_setup_post();
-
-    if (is_daemonized()) {
-        if (!trace_init_backends(trace_events, trace_file)) {
-            exit(1);
-        }
-    }
 
     main_loop();
     replay_disable_events();

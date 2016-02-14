@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "trace.h"
 #include "ui/console.h"
@@ -259,6 +260,16 @@ void graphic_hw_update(QemuConsole *con)
     }
     if (con && con->hw_ops->gfx_update) {
         con->hw_ops->gfx_update(con->hw);
+    }
+}
+
+void graphic_hw_gl_block(QemuConsole *con, bool block)
+{
+    if (!con) {
+        con = active_console;
+    }
+    if (con && con->hw_ops->gl_block) {
+        con->hw_ops->gl_block(con->hw, block);
     }
 }
 
@@ -1954,12 +1965,16 @@ static void text_console_do_init(CharDriverState *chr, DisplayState *ds)
 
 static CharDriverState *text_console_init(ChardevVC *vc, Error **errp)
 {
+    ChardevCommon *common = qapi_ChardevVC_base(vc);
     CharDriverState *chr;
     QemuConsole *s;
     unsigned width = 0;
     unsigned height = 0;
 
-    chr = qemu_chr_alloc();
+    chr = qemu_chr_alloc(common, errp);
+    if (!chr) {
+        return NULL;
+    }
 
     if (vc->has_width) {
         width = vc->width;

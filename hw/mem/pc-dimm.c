@@ -18,6 +18,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>
  */
 
+#include "qemu/osdep.h"
 #include "hw/mem/pc-dimm.h"
 #include "qemu/config-file.h"
 #include "qapi/visitor.h"
@@ -372,8 +373,8 @@ static Property pc_dimm_properties[] = {
     DEFINE_PROP_END_OF_LIST(),
 };
 
-static void pc_dimm_get_size(Object *obj, Visitor *v, void *opaque,
-                          const char *name, Error **errp)
+static void pc_dimm_get_size(Object *obj, Visitor *v, const char *name,
+                             void *opaque, Error **errp)
 {
     int64_t value;
     MemoryRegion *mr;
@@ -382,7 +383,7 @@ static void pc_dimm_get_size(Object *obj, Visitor *v, void *opaque,
     mr = host_memory_backend_get_memory(dimm->hostmem, errp);
     value = memory_region_size(mr);
 
-    visit_type_int(v, &value, name, errp);
+    visit_type_int(v, name, &value, errp);
 }
 
 static void pc_dimm_check_memdev_is_busy(Object *obj, const char *name,

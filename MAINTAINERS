@@ -52,6 +52,11 @@ General Project Administration
 ------------------------------
 M: Peter Maydell <peter.maydell@linaro.org>
 
+All patches CC here
+L: qemu-devel@nongnu.org
+F: *
+F: */
+
 Responsible Disclosure, Reporting Security Issues
 ------------------------------
 W: http://wiki.qemu.org/SecurityProcess
@@ -273,9 +278,12 @@ F: */xen*
 F: hw/char/xen_console.c
 F: hw/display/xenfb.c
 F: hw/net/xen_nic.c
+F: hw/block/xen_*
 F: hw/xen/
 F: hw/xenpv/
+F: hw/i386/xen/
 F: include/hw/xen/
+F: include/sysemu/xen-mapcache.h
 
 Hosts:
 ------
@@ -587,7 +595,7 @@ F: hw/ppc/prep.c
 F: hw/pci-host/prep.[hc]
 F: hw/isa/pc87312.[hc]
 
-sPAPR (pseries)
+sPAPR
 M: David Gibson <david@gibson.dropbear.id.au>
 M: Alexander Graf <agraf@suse.de>
 L: qemu-ppc@nongnu.org
@@ -1116,8 +1124,9 @@ F: net/netmap.c
 Network Block Device (NBD)
 M: Paolo Bonzini <pbonzini@redhat.com>
 S: Odd Fixes
-F: block/nbd.c
-F: nbd.*
+F: block/nbd*
+F: nbd/
+F: include/block/nbd*
 F: qemu-nbd.c
 T: git git://github.com/bonzini/qemu.git nbd-next
 
@@ -1258,6 +1267,14 @@ S: Maintained
 F: io/
 F: include/io/
 F: tests/test-io-*
+
+Sockets
+M: Daniel P. Berrange <berrange@redhat.com>
+M: Gerd Hoffmann <kraxel@redhat.com>
+M: Paolo Bonzini <pbonzini@redhat.com>
+S: Maintained
+F: include/qemu/sockets.h
+F: util/qemu-sockets.c
 
 Usermode Emulation
 ------------------
@@ -1554,6 +1571,12 @@ L: qemu-block@nongnu.org
 S: Supported
 F: tests/image-fuzzer/
 
+Build and test automation
+-------------------------
+M: Alex Bennée <alex.bennee@linaro.org>
+L: qemu-devel@nongnu.org
+S: Supported
+F: .travis.yml
 
 Documentation
 -------------

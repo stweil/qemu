@@ -7,6 +7,7 @@
  * All peripherial devices are attached to this "bus" with
  * the standard PC ISA addresses.
 */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/mips/mips.h"
 #include "hw/mips/cpudevs.h"
@@ -273,7 +274,7 @@ void mips_init(MachineState *machine)
     memory_region_init(isa_mem, NULL, "isa-mem", 0x01000000);
     memory_region_add_subregion(get_system_memory(), 0x14000000, isa_io);
     memory_region_add_subregion(get_system_memory(), 0x10000000, isa_mem);
-    isa_bus = isa_bus_new(NULL, isa_mem, get_system_io());
+    isa_bus = isa_bus_new(NULL, isa_mem, get_system_io(), &error_abort);
 
     /* The PIC is attached to the MIPS CPU INT0 pin */
     i8259 = i8259_init(isa_bus, env->irq[2]);
