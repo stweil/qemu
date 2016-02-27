@@ -9,6 +9,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/arm/bcm2835.h"
 #include "hw/arm/bcm2836.h"
 #include "qemu/error-report.h"
 #include "hw/boards.h"
@@ -24,8 +25,13 @@
 /* Table of Linux board IDs for different Pi versions */
 static const int raspi_boardid[] = {[1] = 0xc42, [2] = 0xc43};
 
+/* Table of board revisions
+ * https://github.com/AndrewFromMelbourne/raspberry_pi_revision/blob/master/README.md
+ */
+static const uint32_t raspi_boardrev[] = {[1] = 0x10, [2] = 0xa21041};
+
 typedef struct RasPiState {
-    BCM2836State soc;
+    Object *soc;
     MemoryRegion ram;
 } RasPiState;
 
@@ -110,17 +116,19 @@ static void setup_boot(MachineState *machine, int version, size_t ram_size)
     arm_load_kernel(ARM_CPU(first_cpu), &binfo);
 }
 
-static void raspi2_init(MachineState *machine)
+static void raspi_machine_init(MachineState *machine, int version,
+                               const char *soc_type)
 {
     RasPiState *s = g_new0(RasPiState, 1);
+    uint32_t vcram_size;
     DriveInfo *di;
     BlockBackend *blk;
     BusState *bus;
     DeviceState *carddev;
 
-    object_initialize(&s->soc, sizeof(s->soc), TYPE_BCM2836);
-    object_property_add_child(OBJECT(machine), "soc", OBJECT(&s->soc),
-                              &error_abort);
+    /* Initialise the relevant SOC */
+    s->soc = object_new(soc_type);
+    object_property_add_child(OBJECT(machine), "soc", s->soc, &error_abort);
 
     /* Allocate and map RAM */
     memory_region_allocate_system_memory(&s->ram, OBJECT(machine), "ram",
@@ -129,18 +137,22 @@ static void raspi2_init(MachineState *machine)
     memory_region_add_subregion_overlap(get_system_memory(), 0, &s->ram, 0);
 
     /* Setup the SOC */
-    object_property_add_const_link(OBJECT(&s->soc), "ram", OBJECT(&s->ram),
+    object_property_add_const_link(s->soc, "ram", OBJECT(&s->ram),
                                    &error_abort);
-    object_property_set_int(OBJECT(&s->soc), smp_cpus, "enabled-cpus",
+
+    object_property_set_int(s->soc, raspi_boardrev[version], "board-rev",
                             &error_abort);
-    object_property_set_int(OBJECT(&s->soc), 0xa21041, "board-rev",
-                            &error_abort);
-    object_property_set_bool(OBJECT(&s->soc), true, "realized", &error_abort);
+
+    if (version == 2) {
+        object_property_set_int(s->soc, smp_cpus, "enabled-cpus", &error_abort);
+    }
+
+    object_property_set_bool(s->soc, true, "realized", &error_abort);
 
     /* Create and plug in the SD cards */
     di = drive_get_next(IF_SD);
     blk = di ? blk_by_legacy_dinfo(di) : NULL;
-    bus = qdev_get_child_bus(DEVICE(&s->soc), "sd-bus");
+    bus = qdev_get_child_bus(DEVICE(s->soc), "sd-bus");
     if (bus == NULL) {
         error_report("No SD bus found in SOC object");
         exit(1);
@@ -149,23 +161,39 @@ static void raspi2_init(MachineState *machine)
     qdev_prop_set_drive(carddev, "drive", blk, &error_fatal);
     object_property_set_bool(OBJECT(carddev), true, "realized", &error_fatal);
 
-    setup_boot(machine, 2, machine->ram_size);
+    /* Prepare to boot */
+    vcram_size = object_property_get_int(s->soc, "vcram-size", &error_abort);
+    setup_boot(machine, version, machine->ram_size - vcram_size);
 }
 
-static void raspi2_machine_init(MachineClass *mc)
+static void raspi1_init(MachineState *machine)
 {
-    mc->desc = "Raspberry Pi 2";
-    mc->init = raspi2_init;
+    raspi_machine_init(machine, 1, TYPE_BCM2835);
+}
+
+static void raspi2_init(MachineState *machine)
+{
+    raspi_machine_init(machine, 2, TYPE_BCM2836);
+}
+
+static void raspi1_machine_init(MachineClass *mc)
+{
+    mc->desc = "Raspberry Pi";
+    mc->init = raspi1_init;
     mc->block_default_type = IF_SD;
     mc->no_parallel = 1;
     mc->no_floppy = 1;
     mc->no_cdrom = 1;
-    mc->max_cpus = BCM2836_NCPUS;
+    mc->default_ram_size = 512 * 1024 * 1024;
+};
+DEFINE_MACHINE("raspi", raspi1_machine_init)
 
-    /* XXX: Temporary restriction in RAM size from the full 1GB. Since
-     * we do not yet support the framebuffer / GPU, we need to limit
-     * RAM usable by the OS to sit below the peripherals.
-     */
-    mc->default_ram_size = 0x3F000000; /* BCM2836_PERI_BASE */
+static void raspi2_machine_init(MachineClass *mc)
+{
+    raspi1_machine_init(mc);
+    mc->desc = "Raspberry Pi 2";
+    mc->init = raspi2_init;
+    mc->max_cpus = BCM2836_NCPUS;
+    mc->default_ram_size = 1024 * 1024 * 1024;
 };
 DEFINE_MACHINE("raspi2", raspi2_machine_init)
