@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "block/block.h"
 #include "pflash.h"

@@ -8,6 +8,7 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
+#include "qemu/osdep.h"
 #include "hw/arm/bcm2836.h"
 #include "hw/arm/raspi_platform.h"
 #include "hw/sysbus.h"
@@ -67,6 +68,13 @@ static void bcm2836_realize(DeviceState *dev, Error **errp)
     }
 
     object_property_set_bool(OBJECT(&s->peripherals), true, "realized", &err);
+    if (err) {
+        error_propagate(errp, err);
+        return;
+    }
+
+    object_property_add_alias(OBJECT(s), "sd-bus", OBJECT(&s->peripherals),
+                              "sd-bus", &err);
     if (err) {
         error_propagate(errp, err);
         return;

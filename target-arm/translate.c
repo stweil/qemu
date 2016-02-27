@@ -4094,7 +4094,7 @@ static void gen_exception_return(DisasContext *s, TCGv_i32 pc)
     TCGv_i32 tmp;
     store_reg(s, 15, pc);
     tmp = load_cpu_field(spsr);
-    gen_set_cpsr(tmp, CPSR_ERET_MASK);
+    gen_helper_cpsr_write_eret(cpu_env, tmp);
     tcg_temp_free_i32(tmp);
     s->is_jmp = DISAS_JUMP;
 }
@@ -4102,7 +4102,7 @@ static void gen_exception_return(DisasContext *s, TCGv_i32 pc)
 /* Generate a v6 exception return.  Marks both values as dead.  */
 static void gen_rfe(DisasContext *s, TCGv_i32 pc, TCGv_i32 cpsr)
 {
-    gen_set_cpsr(cpsr, CPSR_ERET_MASK);
+    gen_helper_cpsr_write_eret(cpu_env, cpsr);
     tcg_temp_free_i32(cpsr);
     store_reg(s, 15, pc);
     s->is_jmp = DISAS_JUMP;
@@ -7578,8 +7578,67 @@ static void gen_srs(DisasContext *s,
                     uint32_t mode, uint32_t amode, bool writeback)
 {
     int32_t offset;
-    TCGv_i32 addr = tcg_temp_new_i32();
-    TCGv_i32 tmp = tcg_const_i32(mode);
+    TCGv_i32 addr, tmp;
+    bool undef = false;
+
+    /* SRS is:
+     * - trapped to EL3 if EL3 is AArch64 and we are at Secure EL1
+     * - UNDEFINED in Hyp mode
+     * - UNPREDICTABLE in User or System mode
+     * - UNPREDICTABLE if the specified mode is:
+     * -- not implemented
+     * -- not a valid mode number
+     * -- a mode that's at a higher exception level
+     * -- Monitor, if we are Non-secure
+     * For the UNPREDICTABLE cases we choose to UNDEF.
+     */
+    if (s->current_el == 1 && !s->ns) {
+        gen_exception_insn(s, 4, EXCP_UDEF, syn_uncategorized(), 3);
+        return;
+    }
+
+    if (s->current_el == 0 || s->current_el == 2) {
+        undef = true;
+    }
+
+    switch (mode) {
+    case ARM_CPU_MODE_USR:
+    case ARM_CPU_MODE_FIQ:
+    case ARM_CPU_MODE_IRQ:
+    case ARM_CPU_MODE_SVC:
+    case ARM_CPU_MODE_ABT:
+    case ARM_CPU_MODE_UND:
+    case ARM_CPU_MODE_SYS:
+        break;
+    case ARM_CPU_MODE_HYP:
+        if (s->current_el == 1 || !arm_dc_feature(s, ARM_FEATURE_EL2)) {
+            undef = true;
+        }
+        break;
+    case ARM_CPU_MODE_MON:
+        /* No need to check specifically for "are we non-secure" because
+         * we've already made EL0 UNDEF and handled the trap for S-EL1;
+         * so if this isn't EL3 then we must be non-secure.
+         */
+        if (s->current_el != 3) {
+            undef = true;
+        }
+        break;
+    default:
+        undef = true;
+    }
+
+    if (undef) {
+        gen_exception_insn(s, 4, EXCP_UDEF, syn_uncategorized(),
+                           default_exception_el(s));
+        return;
+    }
+
+    addr = tcg_temp_new_i32();
+    tmp = tcg_const_i32(mode);
+    /* get_r13_banked() will raise an exception if called from System mode */
+    gen_set_condexec(s);
+    gen_set_pc_im(s, s->pc - 4);
     gen_helper_get_r13_banked(addr, cpu_env, tmp);
     tcg_temp_free_i32(tmp);
     switch (amode) {
@@ -7629,6 +7688,7 @@ static void gen_srs(DisasContext *s,
         tcg_temp_free_i32(tmp);
     }
     tcg_temp_free_i32(addr);
+    s->is_jmp = DISAS_UPDATE;
 }
 
 static void disas_arm_insn(DisasContext *s, unsigned int insn)
@@ -7739,9 +7799,6 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
             }
         } else if ((insn & 0x0e5fffe0) == 0x084d0500) {
             /* srs */
-            if (IS_USER(s)) {
-                goto illegal_op;
-            }
             ARCH(6);
             gen_srs(s, (insn & 0x1f), (insn >> 23) & 3, insn & (1 << 21));
             return;
@@ -9037,7 +9094,7 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
                 if (exc_return) {
                     /* Restore CPSR from SPSR.  */
                     tmp = load_cpu_field(spsr);
-                    gen_set_cpsr(tmp, CPSR_ERET_MASK);
+                    gen_helper_cpsr_write_eret(cpu_env, tmp);
                     tcg_temp_free_i32(tmp);
                     s->is_jmp = DISAS_JUMP;
                 }

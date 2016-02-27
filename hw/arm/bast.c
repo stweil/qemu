@@ -17,6 +17,7 @@
  * * eth1 is 10 Mbps half duplex only.
  */
 
+#include "qemu/osdep.h"
 #include "sysemu/char.h"        /* qemu_chr_new */
 #include "hw/hw.h"
 #include "hw/arm/arm.h"

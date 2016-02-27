@@ -12,6 +12,7 @@
  * This file is under the terms of the GNU General Public License Version 2.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 

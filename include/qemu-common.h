@@ -12,7 +12,6 @@
 #ifndef QEMU_COMMON_H
 #define QEMU_COMMON_H
 
-#include "qemu/osdep.h"
 #include "qemu/typedefs.h"
 #include "qemu/fprintf-fn.h"
 
@@ -480,5 +479,9 @@ int parse_debug_env(const char *name, int max, int initial);
 
 const char *qemu_ether_ntoa(const MACAddr *mac);
 void page_size_init(void);
+
+/* returns non-zero if dump is in progress, otherwise zero is
+ * returned. */
+bool dump_in_progress(void);
 
 #endif

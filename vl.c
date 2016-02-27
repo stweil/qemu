@@ -582,6 +582,7 @@ static const RunStateTransition runstate_transitions_def[] = {
     /*     from      ->     to      */
     { RUN_STATE_DEBUG, RUN_STATE_RUNNING },
     { RUN_STATE_DEBUG, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_DEBUG, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_INMIGRATE, RUN_STATE_INTERNAL_ERROR },
     { RUN_STATE_INMIGRATE, RUN_STATE_IO_ERROR },
@@ -592,18 +593,24 @@ static const RunStateTransition runstate_transitions_def[] = {
     { RUN_STATE_INMIGRATE, RUN_STATE_WATCHDOG },
     { RUN_STATE_INMIGRATE, RUN_STATE_GUEST_PANICKED },
     { RUN_STATE_INMIGRATE, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_INMIGRATE, RUN_STATE_PRELAUNCH },
+    { RUN_STATE_INMIGRATE, RUN_STATE_POSTMIGRATE },
 
     { RUN_STATE_INTERNAL_ERROR, RUN_STATE_PAUSED },
     { RUN_STATE_INTERNAL_ERROR, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_INTERNAL_ERROR, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_IO_ERROR, RUN_STATE_RUNNING },
     { RUN_STATE_IO_ERROR, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_IO_ERROR, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_PAUSED, RUN_STATE_RUNNING },
     { RUN_STATE_PAUSED, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_PAUSED, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_POSTMIGRATE, RUN_STATE_RUNNING },
     { RUN_STATE_POSTMIGRATE, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_POSTMIGRATE, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_PRELAUNCH, RUN_STATE_RUNNING },
     { RUN_STATE_PRELAUNCH, RUN_STATE_FINISH_MIGRATE },
@@ -611,8 +618,10 @@ static const RunStateTransition runstate_transitions_def[] = {
 
     { RUN_STATE_FINISH_MIGRATE, RUN_STATE_RUNNING },
     { RUN_STATE_FINISH_MIGRATE, RUN_STATE_POSTMIGRATE },
+    { RUN_STATE_FINISH_MIGRATE, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_RESTORE_VM, RUN_STATE_RUNNING },
+    { RUN_STATE_RESTORE_VM, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_RUNNING, RUN_STATE_DEBUG },
     { RUN_STATE_RUNNING, RUN_STATE_INTERNAL_ERROR },
@@ -629,17 +638,21 @@ static const RunStateTransition runstate_transitions_def[] = {
 
     { RUN_STATE_SHUTDOWN, RUN_STATE_PAUSED },
     { RUN_STATE_SHUTDOWN, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_SHUTDOWN, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_DEBUG, RUN_STATE_SUSPENDED },
     { RUN_STATE_RUNNING, RUN_STATE_SUSPENDED },
     { RUN_STATE_SUSPENDED, RUN_STATE_RUNNING },
     { RUN_STATE_SUSPENDED, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_SUSPENDED, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_WATCHDOG, RUN_STATE_RUNNING },
     { RUN_STATE_WATCHDOG, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_WATCHDOG, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE_GUEST_PANICKED, RUN_STATE_RUNNING },
     { RUN_STATE_GUEST_PANICKED, RUN_STATE_FINISH_MIGRATE },
+    { RUN_STATE_GUEST_PANICKED, RUN_STATE_PRELAUNCH },
 
     { RUN_STATE__MAX, RUN_STATE__MAX },
 };
@@ -1884,8 +1897,9 @@ static bool main_loop_should_exit(void)
         cpu_synchronize_all_states();
         qemu_system_reset(VMRESET_REPORT);
         resume_all_vcpus();
-        if (runstate_needs_reset()) {
-            runstate_set(RUN_STATE_PAUSED);
+        if (!runstate_check(RUN_STATE_RUNNING) &&
+                !runstate_check(RUN_STATE_INMIGRATE)) {
+            runstate_set(RUN_STATE_PRELAUNCH);
         }
     }
     if (qemu_wakeup_requested()) {
@@ -2787,6 +2801,33 @@ static const QEMUOption *lookup_opt(int argc, char **argv,
     return popt;
 }
 
+static MachineClass *select_machine(void)
+{
+    MachineClass *machine_class = find_default_machine();
+    const char *optarg;
+    QemuOpts *opts;
+    Location loc;
+
+    loc_push_none(&loc);
+
+    opts = qemu_get_machine_opts();
+    qemu_opts_loc_restore(opts);
+
+    optarg = qemu_opt_get(opts, "type");
+    if (optarg) {
+        machine_class = machine_parse(optarg);
+    }
+
+    if (!machine_class) {
+        error_report("No machine specified, and there is no default");
+        error_printf("Use -machine help to list supported machines\n");
+        exit(1);
+    }
+
+    loc_pop(&loc);
+    return machine_class;
+}
+
 static int machine_set_property(void *opaque,
                                 const char *name, const char *value,
                                 Error **errp)
@@ -2855,64 +2896,6 @@ static bool object_create_delayed(const char *type)
 }
 
 
-static int object_create(void *opaque, QemuOpts *opts, Error **errp)
-{
-    Error *err = NULL;
-    Error *err_end = NULL;
-    char *type = NULL;
-    char *id = NULL;
-    OptsVisitor *ov;
-    QDict *pdict;
-    bool (*type_predicate)(const char *) = opaque;
-    Visitor *v;
-
-    ov = opts_visitor_new(opts);
-    pdict = qemu_opts_to_qdict(opts, NULL);
-    v = opts_get_visitor(ov);
-
-    visit_start_struct(v, NULL, NULL, 0, &err);
-    if (err) {
-        goto out;
-    }
-
-    qdict_del(pdict, "qom-type");
-    visit_type_str(v, "qom-type", &type, &err);
-    if (err) {
-        goto out;
-    }
-    if (!type_predicate(type)) {
-        visit_end_struct(v, NULL);
-        goto out;
-    }
-
-    qdict_del(pdict, "id");
-    visit_type_str(v, "id", &id, &err);
-    if (err) {
-        goto out_end;
-    }
-
-    object_add(type, id, pdict, v, &err);
-
-out_end:
-    visit_end_struct(v, &err_end);
-    if (!err && err_end) {
-        qmp_object_del(id, NULL);
-    }
-    error_propagate(&err, err_end);
-
-out:
-    opts_visitor_cleanup(ov);
-
-    QDECREF(pdict);
-    g_free(id);
-    g_free(type);
-    if (err) {
-        error_report_err(err);
-        return -1;
-    }
-    return 0;
-}
-
 static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
                                MachineClass *mc)
 {
@@ -2921,6 +2904,10 @@ static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
     const char *maxmem_str, *slots_str;
     const ram_addr_t default_ram_size = mc->default_ram_size;
     QemuOpts *opts = qemu_find_opts_singleton("memory");
+    Location loc;
+
+    loc_push_none(&loc);
+    qemu_opts_loc_restore(opts);
 
     sz = 0;
     mem_str = qemu_opt_get(opts, "size");
@@ -2995,6 +2982,8 @@ static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
                 "'%s' option", slots_str ? "maxmem" : "slots");
         exit(EXIT_FAILURE);
     }
+
+    loc_pop(&loc);
 }
 
 int main(int argc, char **argv)
@@ -3083,14 +3072,6 @@ int main(int argc, char **argv)
     os_setup_early_signal_handling();
 
     module_call_init(MODULE_INIT_MACHINE);
-    machine_class = 0;
-    optarg = strrchr(argv[0], '/');
-    if (optarg != 0) {
-        machine_class = find_machine(optarg + 1);
-    }
-    if (!machine_class) {
-        machine_class = find_default_machine();
-    }
     cpu_model = NULL;
     snapshot = 0;
     cyls = heads = secs = 0;
@@ -4076,24 +4057,17 @@ int main(int argc, char **argv)
             }
         }
     }
+    /*
+     * Clear error location left behind by the loop.
+     * Best done right after the loop.  Do not insert code here!
+     */
+    loc_set_none();
 
     replay_configure(icount_opts);
 
-    opts = qemu_get_machine_opts();
-    optarg = qemu_opt_get(opts, "type");
-    if (optarg) {
-        machine_class = machine_parse(optarg);
-    }
-
-    if (machine_class == NULL) {
-        error_report("No machine specified, and there is no default");
-        error_printf("Use -machine help to list supported machines\n");
-        exit(1);
-    }
+    machine_class = select_machine();
 
     set_memory_options(&ram_slots, &maxram_size, machine_class);
-
-    loc_set_none();
 
     os_daemonize();
 
@@ -4348,8 +4322,9 @@ int main(int argc, char **argv)
     socket_init();
 
     if (qemu_opts_foreach(qemu_find_opts("object"),
-                          object_create,
-                          object_create_initial, NULL)) {
+                          user_creatable_add_opts_foreach,
+                          object_create_initial, &err)) {
+        error_report_err(err);
         exit(1);
     }
 
@@ -4466,8 +4441,9 @@ int main(int argc, char **argv)
     }
 
     if (qemu_opts_foreach(qemu_find_opts("object"),
-                          object_create,
-                          object_create_delayed, NULL)) {
+                          user_creatable_add_opts_foreach,
+                          object_create_delayed, &err)) {
+        error_report_err(err);
         exit(1);
     }
 

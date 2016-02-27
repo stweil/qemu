@@ -13,6 +13,7 @@
  * ARM 920T Technical Reference Manual
  */
 
+#include "qemu/osdep.h"
 #include "hw/sysbus.h"
 #include "hw/arm/arm.h"
 #include "hw/devices.h"

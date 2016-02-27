@@ -7,7 +7,6 @@
 
 #define CPUArchState struct CPUMIPSState
 
-#include "config.h"
 #include "qemu-common.h"
 #include "mips-defs.h"
 #include "exec/cpu-defs.h"
@@ -19,19 +18,19 @@ typedef struct r4k_tlb_t r4k_tlb_t;
 struct r4k_tlb_t {
     target_ulong VPN;
     uint32_t PageMask;
-    uint_fast8_t ASID;
-    uint_fast16_t G:1;
-    uint_fast16_t C0:3;
-    uint_fast16_t C1:3;
-    uint_fast16_t V0:1;
-    uint_fast16_t V1:1;
-    uint_fast16_t D0:1;
-    uint_fast16_t D1:1;
-    uint_fast16_t XI0:1;
-    uint_fast16_t XI1:1;
-    uint_fast16_t RI0:1;
-    uint_fast16_t RI1:1;
-    uint_fast16_t EHINV:1;
+    uint8_t ASID;
+    unsigned int G:1;
+    unsigned int C0:3;
+    unsigned int C1:3;
+    unsigned int V0:1;
+    unsigned int V1:1;
+    unsigned int D0:1;
+    unsigned int D1:1;
+    unsigned int XI0:1;
+    unsigned int XI1:1;
+    unsigned int RI0:1;
+    unsigned int RI1:1;
+    unsigned int EHINV:1;
     uint64_t PFN[2];
 };
 
@@ -238,6 +237,8 @@ struct CPUMIPSState {
 
     int32_t CP0_Index;
     /* CP0_MVP* are per MVP registers. */
+    int32_t CP0_VPControl;
+#define CP0VPCtl_DIS    0
     int32_t CP0_Random;
     int32_t CP0_VPEControl;
 #define CP0VPECo_YSI	21
@@ -287,6 +288,8 @@ struct CPUMIPSState {
 # define CP0EnLo_RI 31
 # define CP0EnLo_XI 30
 #endif
+    int32_t CP0_GlobalNumber;
+#define CP0GN_VPId 0
     target_ulong CP0_Context;
     target_ulong CP0_KScratch[MIPS_KSCRATCH_NUM];
     int32_t CP0_PageMask;
@@ -473,6 +476,7 @@ struct CPUMIPSState {
 #define CP0C5_XNP        13
 #define CP0C5_UFE        9
 #define CP0C5_FRE        8
+#define CP0C5_VP         7
 #define CP0C5_SBRI       6
 #define CP0C5_MVH        5
 #define CP0C5_LLB        4
@@ -859,6 +863,26 @@ static inline int mips_vpe_active(CPUMIPSState *env)
     }
 
     return active;
+}
+
+static inline int mips_vp_active(CPUMIPSState *env)
+{
+    CPUState *other_cs = first_cpu;
+
+    /* Check if the VP disabled other VPs (which means the VP is enabled) */
+    if ((env->CP0_VPControl >> CP0VPCtl_DIS) & 1) {
+        return 1;
+    }
+
+    /* Check if the virtual processor is disabled due to a DVP */
+    CPU_FOREACH(other_cs) {
+        MIPSCPU *other_cpu = MIPS_CPU(other_cs);
+        if ((&other_cpu->env != env) &&
+            ((other_cpu->env.CP0_VPControl >> CP0VPCtl_DIS) & 1)) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 #include "exec/exec-all.h"

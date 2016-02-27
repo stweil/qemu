@@ -20,7 +20,6 @@
 #define __TRICORE_CPU_H__
 
 #include "tricore-defs.h"
-#include "config.h"
 #include "qemu-common.h"
 #include "exec/cpu-defs.h"
 #include "fpu/softfloat.h"
@@ -271,6 +270,7 @@ enum {
     TRAPC_ASSERT   = 5,
     TRAPC_SYSCALL  = 6,
     TRAPC_NMI      = 7,
+    TRAPC_IRQ      = 8
 };
 
 /* Class 0 TIN */

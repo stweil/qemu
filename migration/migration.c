@@ -323,10 +323,56 @@ void qemu_start_incoming_migration(const char *uri, Error **errp)
     }
 }
 
+static void process_incoming_migration_bh(void *opaque)
+{
+    Error *local_err = NULL;
+    MigrationIncomingState *mis = opaque;
+
+    /* Make sure all file formats flush their mutable metadata */
+    bdrv_invalidate_cache_all(&local_err);
+    if (local_err) {
+        migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
+                          MIGRATION_STATUS_FAILED);
+        error_report_err(local_err);
+        migrate_decompress_threads_join();
+        exit(EXIT_FAILURE);
+    }
+
+    /*
+     * This must happen after all error conditions are dealt with and
+     * we're sure the VM is going to be running on this host.
+     */
+    qemu_announce_self();
+
+    /* If global state section was not received or we are in running
+       state, we need to obey autostart. Any other state is set with
+       runstate_set. */
+
+    if (!global_state_received() ||
+        global_state_get_runstate() == RUN_STATE_RUNNING) {
+        if (autostart) {
+            vm_start();
+        } else {
+            runstate_set(RUN_STATE_PAUSED);
+        }
+    } else {
+        runstate_set(global_state_get_runstate());
+    }
+    migrate_decompress_threads_join();
+    /*
+     * This must happen after any state changes since as soon as an external
+     * observer sees this event they might start to prod at the VM assuming
+     * it's ready to use.
+     */
+    migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
+                      MIGRATION_STATUS_COMPLETED);
+    qemu_bh_delete(mis->bh);
+    migration_incoming_state_destroy();
+}
+
 static void process_incoming_migration_co(void *opaque)
 {
     QEMUFile *f = opaque;
-    Error *local_err = NULL;
     MigrationIncomingState *mis;
     PostcopyState ps;
     int ret;
@@ -369,45 +415,8 @@ static void process_incoming_migration_co(void *opaque)
         exit(EXIT_FAILURE);
     }
 
-    /* Make sure all file formats flush their mutable metadata */
-    bdrv_invalidate_cache_all(&local_err);
-    if (local_err) {
-        migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
-                          MIGRATION_STATUS_FAILED);
-        error_report_err(local_err);
-        migrate_decompress_threads_join();
-        exit(EXIT_FAILURE);
-    }
-
-    /*
-     * This must happen after all error conditions are dealt with and
-     * we're sure the VM is going to be running on this host.
-     */
-    qemu_announce_self();
-
-    /* If global state section was not received or we are in running
-       state, we need to obey autostart. Any other state is set with
-       runstate_set. */
-
-    if (!global_state_received() ||
-        global_state_get_runstate() == RUN_STATE_RUNNING) {
-        if (autostart) {
-            vm_start();
-        } else {
-            runstate_set(RUN_STATE_PAUSED);
-        }
-    } else {
-        runstate_set(global_state_get_runstate());
-    }
-    migrate_decompress_threads_join();
-    /*
-     * This must happen after any state changes since as soon as an external
-     * observer sees this event they might start to prod at the VM assuming
-     * it's ready to use.
-     */
-    migrate_set_state(&mis->state, MIGRATION_STATUS_ACTIVE,
-                      MIGRATION_STATUS_COMPLETED);
-    migration_incoming_state_destroy();
+    mis->bh = qemu_bh_new(process_incoming_migration_bh, mis);
+    qemu_bh_schedule(mis->bh);
 }
 
 void process_incoming_migration(QEMUFile *f)
@@ -905,6 +914,11 @@ bool migration_in_postcopy(MigrationState *s)
     return (s->state == MIGRATION_STATUS_POSTCOPY_ACTIVE);
 }
 
+bool migration_in_postcopy_after_devices(MigrationState *s)
+{
+    return migration_in_postcopy(s) && s->postcopy_after_devices;
+}
+
 MigrationState *migrate_init(const MigrationParams *params)
 {
     MigrationState *s = migrate_get_current();
@@ -930,6 +944,7 @@ MigrationState *migrate_init(const MigrationParams *params)
     s->setup_time = 0;
     s->dirty_sync_count = 0;
     s->start_postcopy = false;
+    s->postcopy_after_devices = false;
     s->migration_thread_running = false;
     s->last_req_rb = NULL;
 
@@ -1489,6 +1504,14 @@ static int postcopy_start(MigrationState *ms, bool *old_vm_running)
         goto fail_closefb;
     }
     qemu_fclose(fb);
+
+    /* Send a notify to give a chance for anything that needs to happen
+     * at the transition to postcopy and after the device state; in particular
+     * spice needs to trigger a transition now
+     */
+    ms->postcopy_after_devices = true;
+    notifier_list_notify(&migration_state_notifiers, ms);
+
     ms->downtime =  qemu_clock_get_ms(QEMU_CLOCK_REALTIME) - time_at_stop;
 
     qemu_mutex_unlock_iothread();

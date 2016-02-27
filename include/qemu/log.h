@@ -1,10 +1,6 @@
 #ifndef QEMU_LOG_H
 #define QEMU_LOG_H
 
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include "qemu/compiler.h"
 
 /* Private global variables, don't use */
 extern FILE *qemu_logfile;
@@ -92,12 +88,6 @@ static inline void qemu_log_close(void)
         }
         qemu_logfile = NULL;
     }
-}
-
-/* Set up a new log file */
-static inline void qemu_log_set_file(FILE *f)
-{
-    qemu_logfile = f;
 }
 
 /* define log items */

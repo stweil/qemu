@@ -26,7 +26,35 @@
 #define QEMU_OSDEP_H
 
 #include "config-host.h"
+#ifdef NEED_CPU_H
+#include "config-target.h"
+#endif
 #include "qemu/compiler.h"
+
+/* Older versions of C++ don't get definitions of various macros from
+ * stdlib.h unless we define these macros before first inclusion of
+ * that system header.
+ */
+#ifndef __STDC_CONSTANT_MACROS
+#define __STDC_CONSTANT_MACROS
+#endif
+#ifndef __STDC_LIMIT_MACROS
+#define __STDC_LIMIT_MACROS
+#endif
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
+#endif
+
+/* The following block of code temporarily renames the daemon() function so the
+ * compiler does not see the warning associated with it in stdlib.h on OSX
+ */
+#ifdef __APPLE__
+#define daemon qemu_fake_daemon_function
+#include <stdlib.h>
+#undef daemon
+extern int daemon(int, int);
+#endif
+
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -72,13 +100,6 @@
 #include "glib-compat.h"
 
 #include "qapi/error.h"
-
-#if defined(CONFIG_SOLARIS) && CONFIG_SOLARIS_VERSION < 10
-/* [u]int_fast*_t not in <sys/int_types.h> */
-typedef unsigned char           uint_fast8_t;
-typedef unsigned int            uint_fast16_t;
-typedef signed int              int_fast16_t;
-#endif
 
 #ifndef O_LARGEFILE
 #define O_LARGEFILE 0

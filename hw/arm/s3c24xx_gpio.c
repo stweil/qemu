@@ -9,6 +9,7 @@
  * This file is under the terms of the GNU General Public License Version 2.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "s3c24xx.h"
