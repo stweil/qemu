@@ -43,7 +43,7 @@ typedef struct BCM2835PeripheralState {
     SysBusDevice *uart0;
     BCM2835AuxState aux;
     BCM2835FBState fb;
-    BCM2835DmaState dma;
+    BCM2835DMAState dma;
     BCM2835ICState ic;
     BCM2835MphiState mphi;
     BCM2835PowerState power;

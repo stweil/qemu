@@ -14,6 +14,8 @@
 #define TYPE_BCM2835_AUX "bcm2835-aux"
 #define BCM2835_AUX(obj) OBJECT_CHECK(BCM2835AuxState, (obj), TYPE_BCM2835_AUX)
 
+#define BCM2835_AUX_RX_FIFO_LEN 8
+
 typedef struct {
     /*< private >*/
     SysBusDevice parent_obj;
@@ -23,9 +25,9 @@ typedef struct {
     CharDriverState *chr;
     qemu_irq irq;
 
-    uint32_t read_fifo[8];
+    uint8_t read_fifo[BCM2835_AUX_RX_FIFO_LEN];
     uint8_t read_pos, read_count;
-    bool rx_int_enable, tx_int_enable;
+    uint8_t ier, iir;
 } BCM2835AuxState;
 
 #endif

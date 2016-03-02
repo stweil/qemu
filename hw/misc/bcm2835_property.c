@@ -63,16 +63,16 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
             break;
         case 0x00010005: /* Get ARM memory */
             /* base */
-            stl_phys(&s->dma_as, value + 12, 0);
+            stl_le_phys(&s->dma_as, value + 12, 0);
             /* size */
-            stl_phys(&s->dma_as, value + 16, s->fbdev->vcram_base);
+            stl_le_phys(&s->dma_as, value + 16, s->fbdev->vcram_base);
             resplen = 8;
             break;
         case 0x00010006: /* Get VC memory */
             /* base */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->vcram_base);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->vcram_base);
             /* size */
-            stl_phys(&s->dma_as, value + 16, s->fbdev->vcram_size);
+            stl_le_phys(&s->dma_as, value + 16, s->fbdev->vcram_size);
             resplen = 8;
             break;
         case 0x00028001: /* Set power state */
@@ -137,8 +137,8 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
         /* Frame buffer */
 
         case 0x00040001: /* Allocate buffer */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->base);
-            stl_phys(&s->dma_as, value + 16, s->fbdev->size);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->base);
+            stl_le_phys(&s->dma_as, value + 16, s->fbdev->size);
             resplen = 8;
             break;
         case 0x00048001: /* Release buffer */
@@ -149,8 +149,8 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
             break;
         case 0x00040003: /* Get display width/height */
         case 0x00040004:
-            stl_phys(&s->dma_as, value + 12, s->fbdev->xres);
-            stl_phys(&s->dma_as, value + 16, s->fbdev->yres);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->xres);
+            stl_le_phys(&s->dma_as, value + 16, s->fbdev->yres);
             resplen = 8;
             break;
         case 0x00044003: /* Test display width/height */
@@ -159,92 +159,88 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
             break;
         case 0x00048003: /* Set display width/height */
         case 0x00048004:
-            xres = ldl_phys(&s->dma_as, value + 12);
+            xres = ldl_le_phys(&s->dma_as, value + 12);
             newxres = &xres;
-            yres = ldl_phys(&s->dma_as, value + 16);
+            yres = ldl_le_phys(&s->dma_as, value + 16);
             newyres = &yres;
             resplen = 8;
             break;
         case 0x00040005: /* Get depth */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->bpp);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->bpp);
             resplen = 4;
             break;
         case 0x00044005: /* Test depth */
             resplen = 4;
             break;
         case 0x00048005: /* Set depth */
-            bpp = ldl_phys(&s->dma_as, value + 12);
+            bpp = ldl_le_phys(&s->dma_as, value + 12);
             newbpp = &bpp;
             resplen = 4;
             break;
         case 0x00040006: /* Get pixel order */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->pixo);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->pixo);
             resplen = 4;
             break;
         case 0x00044006: /* Test pixel order */
             resplen = 4;
             break;
         case 0x00048006: /* Set pixel order */
-            pixo = ldl_phys(&s->dma_as, value + 12);
+            pixo = ldl_le_phys(&s->dma_as, value + 12);
             newpixo = &pixo;
             resplen = 4;
             break;
         case 0x00040007: /* Get alpha */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->alpha);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->alpha);
             resplen = 4;
             break;
         case 0x00044007: /* Test pixel alpha */
             resplen = 4;
             break;
         case 0x00048007: /* Set alpha */
-            alpha = ldl_phys(&s->dma_as, value + 12);
+            alpha = ldl_le_phys(&s->dma_as, value + 12);
             newalpha = &alpha;
             resplen = 4;
             break;
         case 0x00040008: /* Get pitch */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->pitch);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->pitch);
             resplen = 4;
             break;
         case 0x00040009: /* Get virtual offset */
-            stl_phys(&s->dma_as, value + 12, s->fbdev->xoffset);
-            stl_phys(&s->dma_as, value + 16, s->fbdev->yoffset);
+            stl_le_phys(&s->dma_as, value + 12, s->fbdev->xoffset);
+            stl_le_phys(&s->dma_as, value + 16, s->fbdev->yoffset);
             resplen = 8;
             break;
         case 0x00044009: /* Test virtual offset */
             resplen = 8;
             break;
         case 0x00048009: /* Set virtual offset */
-            xoffset = ldl_phys(&s->dma_as, value + 12);
+            xoffset = ldl_le_phys(&s->dma_as, value + 12);
             newxoffset = &xoffset;
-            yoffset = ldl_phys(&s->dma_as, value + 16);
+            yoffset = ldl_le_phys(&s->dma_as, value + 16);
             newyoffset = &yoffset;
-            /*
-            stl_phys(&s->dma_as, value + 12, bcm2835_fb.xres);
-            stl_phys(&s->dma_as, value + 16, bcm2835_fb.yres);
-            */
             resplen = 8;
             break;
         case 0x0004000a: /* Get/Test/Set overscan */
         case 0x0004400a:
         case 0x0004800a:
-            stl_phys(&s->dma_as, value + 12, 0);
-            stl_phys(&s->dma_as, value + 16, 0);
-            stl_phys(&s->dma_as, value + 20, 0);
-            stl_phys(&s->dma_as, value + 24, 0);
+            stl_le_phys(&s->dma_as, value + 12, 0);
+            stl_le_phys(&s->dma_as, value + 16, 0);
+            stl_le_phys(&s->dma_as, value + 20, 0);
+            stl_le_phys(&s->dma_as, value + 24, 0);
             resplen = 16;
             break;
 
         case 0x0004800b: /* Set palette */
-            offset = ldl_phys(&s->dma_as, value + 12);
-            length = ldl_phys(&s->dma_as, value + 16);
+            offset = ldl_le_phys(&s->dma_as, value + 12);
+            length = ldl_le_phys(&s->dma_as, value + 16);
             n = 0;
             while (n < length - offset) {
-                color = ldl_phys(&s->dma_as, value + 20 + (n << 2));
-                stl_phys(&s->dma_as,
-                         s->fbdev->vcram_base + ((offset + n) << 2), color);
+                color = ldl_le_phys(&s->dma_as, value + 20 + (n << 2));
+                stl_le_phys(&s->dma_as,
+                            s->fbdev->vcram_base + ((offset + n) << 2), color);
                 n++;
             }
-            stl_phys(&s->dma_as, value + 12, 0);
+            stl_le_phys(&s->dma_as, value + 12, 0);
             resplen = 4;
             break;
 

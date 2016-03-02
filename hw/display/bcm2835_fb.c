@@ -52,28 +52,31 @@ static void draw_line_src16(void *opaque, uint8_t *dst, const uint8_t *src,
     while (width--) {
         switch (s->bpp) {
         case 8:
-            rgb888 = ldl_phys(&s->dma_as, s->vcram_base + (*src << 2));
+            /* lookup palette starting at video ram base
+             * TODO: cache translation, rather than doing this each time!
+             */
+            rgb888 = ldl_le_phys(&s->dma_as, s->vcram_base + (*src << 2));
             r = (rgb888 >> 0) & 0xff;
             g = (rgb888 >> 8) & 0xff;
             b = (rgb888 >> 16) & 0xff;
             src++;
             break;
         case 16:
-            rgb565 = lduw_p(src);
+            rgb565 = lduw_le_p(src);
             r = ((rgb565 >> 11) & 0x1f) << 3;
             g = ((rgb565 >>  5) & 0x3f) << 2;
             b = ((rgb565 >>  0) & 0x1f) << 3;
             src += 2;
             break;
         case 24:
-            rgb888 = ldl_p(src);
+            rgb888 = ldl_le_p(src);
             r = (rgb888 >> 0) & 0xff;
             g = (rgb888 >> 8) & 0xff;
             b = (rgb888 >> 16) & 0xff;
             src += 3;
             break;
         case 32:
-            rgb888 = ldl_p(src);
+            rgb888 = ldl_le_p(src);
             r = (rgb888 >> 0) & 0xff;
             g = (rgb888 >> 8) & 0xff;
             b = (rgb888 >> 16) & 0xff;
@@ -181,13 +184,13 @@ static void bcm2835_fb_mbox_push(BCM2835FBState *s, uint32_t value)
 
     s->lock = true;
 
-    s->xres = ldl_phys(&s->dma_as, value);
-    s->yres = ldl_phys(&s->dma_as, value + 4);
-    s->xres_virtual = ldl_phys(&s->dma_as, value + 8);
-    s->yres_virtual = ldl_phys(&s->dma_as, value + 12);
-    s->bpp = ldl_phys(&s->dma_as, value + 20);
-    s->xoffset = ldl_phys(&s->dma_as, value + 24);
-    s->yoffset = ldl_phys(&s->dma_as, value + 28);
+    s->xres = ldl_le_phys(&s->dma_as, value);
+    s->yres = ldl_le_phys(&s->dma_as, value + 4);
+    s->xres_virtual = ldl_le_phys(&s->dma_as, value + 8);
+    s->yres_virtual = ldl_le_phys(&s->dma_as, value + 12);
+    s->bpp = ldl_le_phys(&s->dma_as, value + 20);
+    s->xoffset = ldl_le_phys(&s->dma_as, value + 24);
+    s->yoffset = ldl_le_phys(&s->dma_as, value + 28);
 
     s->base = s->vcram_base | (value & 0xc0000000);
     s->base += BCM2835_FB_OFFSET;
@@ -197,9 +200,9 @@ static void bcm2835_fb_mbox_push(BCM2835FBState *s, uint32_t value)
     s->pitch = s->xres * (s->bpp >> 3);
     s->size = s->yres * s->pitch;
 
-    stl_phys(&s->dma_as, value + 16, s->pitch);
-    stl_phys(&s->dma_as, value + 32, s->base);
-    stl_phys(&s->dma_as, value + 36, s->size);
+    stl_le_phys(&s->dma_as, value + 16, s->pitch);
+    stl_le_phys(&s->dma_as, value + 32, s->base);
+    stl_le_phys(&s->dma_as, value + 36, s->size);
 
     s->invalidate = true;
     qemu_console_resize(s->con, s->xres, s->yres);

@@ -12,6 +12,8 @@
 #include "hw/arm/bcm2835_peripherals.h"
 #include "hw/misc/bcm2835_mbox_defs.h"
 #include "hw/arm/raspi_platform.h"
+#include "sysemu/char.h"
+#include "sysemu/sysemu.h" /* for serial_hds */
 
 /* Peripheral base address on the VC (GPU) system bus */
 #define BCM2835_VC_PERI_BASE 0x7e000000
@@ -133,6 +135,7 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
     MemoryRegion *ram;
     Error *err = NULL;
     uint32_t ram_size, vcram_size;
+    CharDriverState *chr;
     int n;
 
     obj = object_property_get_link(OBJECT(dev), "ram", &err);
@@ -186,6 +189,14 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
                                INTERRUPT_UART));
 
     /* AUX / UART1 */
+    /* XXX: pl011 (uart0) uses qemu_char_get_next_serial(), so at this point it
+     * should have claimed the first serial device (if one exists) */
+    chr = serial_hds[1];
+    if (chr == NULL) {
+        chr = qemu_chr_new("bcm2835.uart1", "null", NULL);
+    }
+    qdev_prop_set_chr(DEVICE(&s->aux), "chardev", chr);
+
     object_property_set_bool(OBJECT(&s->aux), true, "realized", &err);
     if (err) {
         error_propagate(errp, err);
@@ -356,7 +367,6 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-
     /* DMA Channels */
     object_property_set_bool(OBJECT(&s->dma), true, "realized", &err);
     if (err) {
@@ -369,32 +379,12 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(&s->peri_mr, DMA15_OFFSET,
                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->dma), 1));
 
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 0,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA0));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 1,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA1));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 2,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA2));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 3,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA3));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 4,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA4));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 5,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA5));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 6,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA6));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 7,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA7));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 8,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA8));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 9,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA9));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 10,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA10));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 11,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA11));
-    sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), 12,
-                       qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ, INTERRUPT_DMA12));
+    for (n = 0; n <= 12; n++) {
+        sysbus_connect_irq(SYS_BUS_DEVICE(&s->dma), n,
+                           qdev_get_gpio_in_named(DEVICE(&s->ic),
+                                                  BCM2835_IC_GPU_IRQ,
+                                                  INTERRUPT_DMA0 + n));
+    }
 }
 
 static void bcm2835_peripherals_class_init(ObjectClass *oc, void *data)

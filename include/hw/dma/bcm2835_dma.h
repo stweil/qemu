@@ -22,22 +22,26 @@ typedef struct {
     uint32_t debug;
 
     qemu_irq irq;
-} BCM2835DmaChan;
+} BCM2835DMAChan;
 
 #define TYPE_BCM2835_DMA "bcm2835-dma"
 #define BCM2835_DMA(obj) \
-        OBJECT_CHECK(BCM2835DmaState, (obj), TYPE_BCM2835_DMA)
+        OBJECT_CHECK(BCM2835DMAState, (obj), TYPE_BCM2835_DMA)
+
+#define BCM2835_DMA_NCHANS 16
 
 typedef struct {
+    /*< private >*/
     SysBusDevice busdev;
-    MemoryRegion iomem0_14;
-    MemoryRegion iomem15;
+    /*< public >*/
+
+    MemoryRegion iomem0, iomem15;
     MemoryRegion *dma_mr;
     AddressSpace dma_as;
 
-    BCM2835DmaChan chan[16];
+    BCM2835DMAChan chan[BCM2835_DMA_NCHANS];
     uint32_t int_status;
     uint32_t enable;
-} BCM2835DmaState;
+} BCM2835DMAState;
 
 #endif
