@@ -656,12 +656,6 @@ F: hw/*/grlib*
 
 S390 Machines
 -------------
-S390 Virtio
-M: Alexander Graf <agraf@suse.de>
-S: Maintained
-F: hw/s390x/s390-*.c
-X: hw/s390x/*pci*.[hc]
-
 S390 Virtio-ccw
 M: Cornelia Huck <cornelia.huck@de.ibm.com>
 M: Christian Borntraeger <borntraeger@de.ibm.com>
@@ -669,7 +663,6 @@ M: Alexander Graf <agraf@suse.de>
 S: Supported
 F: hw/char/sclp*.[hc]
 F: hw/s390x/
-X: hw/s390x/s390-virtio-bus.[ch]
 F: include/hw/s390x/
 F: pc-bios/s390-ccw/
 F: hw/watchdog/wdt_diag288.c
@@ -857,6 +850,10 @@ M: Gerd Hoffmann <kraxel@redhat.com>
 S: Maintained
 F: hw/usb/*
 F: tests/usb-*-test.c
+F: docs/usb2.txt
+F: docs/usb-storage.txt
+F: include/hw/usb.h
+F: include/hw/usb/
 
 USB (serial adapter)
 M: Gerd Hoffmann <kraxel@redhat.com>
@@ -1087,6 +1084,7 @@ SPICE
 M: Gerd Hoffmann <kraxel@redhat.com>
 S: Supported
 F: include/ui/qemu-spice.h
+F: include/ui/spice-display.h
 F: ui/spice-*.c
 F: audio/spiceaudio.c
 F: hw/display/qxl*
@@ -1095,6 +1093,7 @@ Graphics
 M: Gerd Hoffmann <kraxel@redhat.com>
 S: Odd Fixes
 F: ui/
+F: include/ui/
 
 Cocoa graphics
 M: Andreas Färber <andreas.faerber@web.de>
