@@ -3697,7 +3697,7 @@ static void kernel_load(CPUMIPSState *env)
     kernel_size = load_elf(loaderparams.kernel_filename,
                            cpu_mips_kseg0_to_phys, NULL,
                            &kernel_addr, &kernel_low, &kernel_high,
-                           current_cpu->bigendian, EM_MIPS, 1);
+                           current_cpu->bigendian, EM_MIPS, 1, 0);
     if (kernel_size < 0) {
         kernel_size = load_image_targphys(loaderparams.kernel_filename,
                                           KERNEL_LOAD_ADDR,

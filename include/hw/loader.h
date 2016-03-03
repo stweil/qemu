@@ -32,10 +32,49 @@ int load_image_gzipped(const char *filename, hwaddr addr, uint64_t max_sz);
 #define ELF_LOAD_WRONG_ARCH   -3
 #define ELF_LOAD_WRONG_ENDIAN -4
 const char *load_elf_strerror(int error);
+
+/** load_elf:
+ * @filename: Path of ELF file
+ * @translate_fn: optional function to translate load addresses
+ * @translate_opaque: opaque data passed to @translate_fn
+ * @pentry: Populated with program entry point. Ignored if NULL.
+ * @lowaddr: Populated with lowest loaded address. Ignored if NULL.
+ * @highaddr: Populated with highest loaded address. Ignored if NULL.
+ * @bigendian: Expected ELF endianness. 0 for LE otherwise BE
+ * @elf_machine: Expected ELF machine type
+ * @clear_lsb: Set to mask off LSB of addresses (Some arch's use this
+               for non-address data)
+ * @data_swab: Set to order of byte swapping for data. 0 for no swap, 1
+ *             for swapping bytes within halfwords, 2 for bytes within
+ *             words and 3 for within doublewords.
+ *
+ * Load an ELF file's contents to the emulated systems address space.
+ * Clients may optionally specify a callback to perform address
+ * translations. @pentry, @lowaddr and @highaddr are optional pointers
+ * which will be populated with various load information. @bigendian and
+ * @elf_machine give the expected endianness and machine for the ELF the
+ * load will fail it the target ELF does not match. Some architectures
+ * have some arch-specific behaviours that come into effect when their
+ * particular values for @elf_machine are set.
+ */
+
 int load_elf(const char *filename, uint64_t (*translate_fn)(void *, uint64_t),
              void *translate_opaque, uint64_t *pentry, uint64_t *lowaddr,
              uint64_t *highaddr, int big_endian, int elf_machine,
-             int clear_lsb);
+             int clear_lsb, int data_swab);
+
+/** load_elf_hdr:
+ * @filename: Path of ELF file
+ * @hdr: Buffer to populate with header data. Header data will not be
+ * filled if set to NULL.
+ * @is64: Set to true if the ELF is 64bit. Ignored if set to NULL
+ * @errp: Populated with an error in failure cases
+ *
+ * Inspect as ELF file's header. Read its full header contents into a
+ * buffer and/or determine if the ELF is 64bit.
+ */
+void load_elf_hdr(const char *filename, void *hdr, bool *is64, Error **errp);
+
 int load_aout(const char *filename, hwaddr addr, int max_sz,
               int bswap_needed, hwaddr target_page_size);
 int load_uimage(const char *filename, hwaddr *ep,
