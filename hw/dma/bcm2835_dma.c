@@ -58,12 +58,12 @@ static void bcm2835_dma_update(BCM2835DMAState *s, unsigned c)
 
     while ((s->enable & (1 << c)) && (ch->conblk_ad != 0)) {
         /* CB fetch */
-        ch->ti = ldl_phys(&s->dma_as, ch->conblk_ad);
-        ch->source_ad = ldl_phys(&s->dma_as, ch->conblk_ad + 4);
-        ch->dest_ad = ldl_phys(&s->dma_as, ch->conblk_ad + 8);
-        ch->txfr_len = ldl_phys(&s->dma_as, ch->conblk_ad + 12);
-        ch->stride = ldl_phys(&s->dma_as, ch->conblk_ad + 16);
-        ch->nextconbk = ldl_phys(&s->dma_as, ch->conblk_ad + 20);
+        ch->ti = ldl_le_phys(&s->dma_as, ch->conblk_ad);
+        ch->source_ad = ldl_le_phys(&s->dma_as, ch->conblk_ad + 4);
+        ch->dest_ad = ldl_le_phys(&s->dma_as, ch->conblk_ad + 8);
+        ch->txfr_len = ldl_le_phys(&s->dma_as, ch->conblk_ad + 12);
+        ch->stride = ldl_le_phys(&s->dma_as, ch->conblk_ad + 16);
+        ch->nextconbk = ldl_le_phys(&s->dma_as, ch->conblk_ad + 20);
 
         if (ch->ti & BCM2708_DMA_TDMODE) {
             /* 2D transfer mode */
@@ -85,7 +85,7 @@ static void bcm2835_dma_update(BCM2835DMAState *s, unsigned c)
                     /* Ignore reads */
                     data = 0;
                 } else {
-                    data = ldl_phys(&s->dma_as, ch->source_ad);
+                    data = ldl_le_phys(&s->dma_as, ch->source_ad);
                 }
                 if (ch->ti & BCM2708_DMA_S_INC) {
                     ch->source_ad += 4;
@@ -94,7 +94,7 @@ static void bcm2835_dma_update(BCM2835DMAState *s, unsigned c)
                 if (ch->ti & BCM2708_DMA_D_IGNORE) {
                     /* Ignore writes */
                 } else {
-                    stl_phys(&s->dma_as, ch->dest_ad, data);
+                    stl_le_phys(&s->dma_as, ch->dest_ad, data);
                 }
                 if (ch->ti & BCM2708_DMA_D_INC) {
                     ch->dest_ad += 4;
