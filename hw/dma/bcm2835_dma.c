@@ -124,17 +124,27 @@ static void bcm2835_dma_update(BCM2835DMAState *s, unsigned c)
         /* Process next CB */
         ch->conblk_ad = ch->nextconbk;
     }
+
     ch->cs &= ~BCM2708_DMA_ACTIVE;
+    ch->cs |= BCM2708_DMA_ISPAUSED;
+}
+
+static void bcm2835_dma_chan_reset(BCM2835DMAChan *ch)
+{
+    ch->cs = 0;
+    ch->conblk_ad = 0;
 }
 
 static uint64_t bcm2835_dma_read(BCM2835DMAState *s, hwaddr offset,
                                  unsigned size, unsigned c)
 {
-    BCM2835DMAChan *ch = &s->chan[c];
+    BCM2835DMAChan *ch;
     uint32_t res = 0;
 
     assert(size == 4);
     assert(c < BCM2835_DMA_NCHANS);
+
+    ch = &s->chan[c];
 
     switch (offset) {
     case BCM2708_DMA_CS:
@@ -175,20 +185,22 @@ static uint64_t bcm2835_dma_read(BCM2835DMAState *s, hwaddr offset,
 static void bcm2835_dma_write(BCM2835DMAState *s, hwaddr offset,
                               uint64_t value, unsigned size, unsigned c)
 {
-    BCM2835DMAChan *ch = &s->chan[c];
+    BCM2835DMAChan *ch;
     uint32_t oldcs;
 
     assert(size == 4);
     assert(c < BCM2835_DMA_NCHANS);
 
+    ch = &s->chan[c];
+
     switch (offset) {
     case BCM2708_DMA_CS:
         oldcs = ch->cs;
         if (value & BCM2708_DMA_RESET) {
-            ch->cs |= BCM2708_DMA_RESET;
+            bcm2835_dma_chan_reset(ch);
         }
         if (value & BCM2708_DMA_ABORT) {
-            ch->cs |= BCM2708_DMA_ABORT;
+            /* abort is a no-op, since we always run to completion */
         }
         if (value & BCM2708_DMA_END) {
             ch->cs &= ~BCM2708_DMA_END;
@@ -348,8 +360,7 @@ static void bcm2835_dma_reset(DeviceState *dev)
     s->enable = 0xffff;
     s->int_status = 0;
     for (n = 0; n < BCM2835_DMA_NCHANS; n++) {
-        s->chan[n].cs = 0;
-        s->chan[n].conblk_ad = 0;
+        bcm2835_dma_chan_reset(&s->chan[n]);
     }
 }
 
