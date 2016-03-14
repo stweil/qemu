@@ -13,7 +13,6 @@
 #include "hw/misc/bcm2835_mbox_defs.h"
 #include "hw/arm/raspi_platform.h"
 #include "sysemu/char.h"
-#include "sysemu/sysemu.h" /* for serial_hds */
 
 /* Peripheral base address on the VC (GPU) system bus */
 #define BCM2835_VC_PERI_BASE 0x7e000000
@@ -189,9 +188,11 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
                                INTERRUPT_UART));
 
     /* AUX / UART1 */
-    /* XXX: pl011 (uart0) uses qemu_char_get_next_serial(), so at this point it
-     * should have claimed the first serial device (if one exists) */
-    chr = serial_hds[1];
+    /* TODO: don't call qemu_char_get_next_serial() here, instead set
+     * chardev properties for each uart at the board level, once pl011
+     * (uart0) has been updated to avoid qemu_char_get_next_serial()
+     */
+    chr = qemu_char_get_next_serial();
     if (chr == NULL) {
         chr = qemu_chr_new("bcm2835.uart1", "null", NULL);
     }
@@ -392,6 +393,8 @@ static void bcm2835_peripherals_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
 
     dc->realize = bcm2835_peripherals_realize;
+    /* Reason: realize() method uses qemu_char_get_next_serial() */
+    dc->cannot_instantiate_with_device_add_yet = true;
 }
 
 static const TypeInfo bcm2835_peripherals_type_info = {
