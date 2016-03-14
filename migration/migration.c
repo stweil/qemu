@@ -635,6 +635,7 @@ MigrationInfo *qmp_query_migrate(Error **errp)
         info->ram->normal_bytes = norm_mig_bytes_transferred();
         info->ram->dirty_pages_rate = s->dirty_pages_rate;
         info->ram->mbps = s->mbps;
+        info->ram->dirty_sync_count = s->dirty_sync_count;
 
         if (blk_mig_active()) {
             info->has_disk = true;
@@ -705,7 +706,7 @@ void qmp_migrate_set_capabilities(MigrationCapabilityStatusList *params,
              */
             error_report("Postcopy is not currently compatible with "
                          "compression");
-            s->enabled_capabilities[MIGRATION_CAPABILITY_X_POSTCOPY_RAM] =
+            s->enabled_capabilities[MIGRATION_CAPABILITY_POSTCOPY_RAM] =
                 false;
         }
     }
@@ -1124,7 +1125,7 @@ bool migrate_postcopy_ram(void)
 
     s = migrate_get_current();
 
-    return s->enabled_capabilities[MIGRATION_CAPABILITY_X_POSTCOPY_RAM];
+    return s->enabled_capabilities[MIGRATION_CAPABILITY_POSTCOPY_RAM];
 }
 
 bool migrate_auto_converge(void)
@@ -1268,8 +1269,7 @@ static void *source_return_path_thread(void *opaque)
     MigrationState *ms = opaque;
     QEMUFile *rp = ms->rp_state.from_dst_file;
     uint16_t header_len, header_type;
-    const int max_len = 512;
-    uint8_t buf[max_len];
+    uint8_t buf[512];
     uint32_t tmp32, sibling_error;
     ram_addr_t start = 0; /* =0 to silence warning */
     size_t  len = 0, expected_len;
@@ -1292,7 +1292,7 @@ static void *source_return_path_thread(void *opaque)
 
         if ((rp_cmd_args[header_type].len != -1 &&
             header_len != rp_cmd_args[header_type].len) ||
-            header_len > max_len) {
+            header_len > sizeof(buf)) {
             error_report("RP: Received '%s' message (0x%04x) with"
                     "incorrect length %d expecting %zu",
                     rp_cmd_args[header_type].name, header_type, header_len,

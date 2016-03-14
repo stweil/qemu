@@ -701,11 +701,11 @@ static uint64_t arm_load_elf(struct arm_boot_info *info, uint64_t *pentry,
             } else {
                 info->endianness = ARM_ENDIANNESS_BE32;
                 /* In BE32, the CPU has a different view of the per-byte
-                 * address map than the rest of the system. BE32 elfs are
-                 * organised such that they can be programmed through the
-                 * CPUs per-word byte-reversed view of the world. QEMU
-                 * however loads elfs independently of the CPU. So tell
-                 * the elf loader to byte reverse the data for us.
+                 * address map than the rest of the system. BE32 ELF files
+                 * are organised such that they can be programmed through
+                 * the CPU's per-word byte-reversed view of the world. QEMU
+                 * however loads ELF files independently of the CPU. So
+                 * tell the ELF loader to byte reverse the data for us.
                  */
                 data_swab = 2;
             }

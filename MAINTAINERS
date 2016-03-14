@@ -234,6 +234,7 @@ L: kvm@vger.kernel.org
 S: Supported
 F: kvm-*
 F: */kvm.*
+F: include/sysemu/kvm*.h
 
 ARM
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -1122,6 +1123,7 @@ Network device backends
 M: Jason Wang <jasowang@redhat.com>
 S: Maintained
 F: net/
+F: include/net/
 T: git git://github.com/jasowang/qemu.git net
 
 Netmap network backend
@@ -1217,10 +1219,12 @@ F: scripts/qmp/
 T: git git://repo.or.cz/qemu/armbru.git qapi-next
 
 SLIRP
+M: Samuel Thibault <samuel.thibault@ens-lyon.org>
 M: Jan Kiszka <jan.kiszka@siemens.com>
 S: Maintained
 F: slirp/
 F: net/slirp.c
+F: include/net/slirp.h
 T: git git://git.kiszka.org/qemu.git queues/slirp
 
 Tracing

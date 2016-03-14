@@ -1226,6 +1226,15 @@ STEXI
 Set the initial graphical resolution and depth (PPC, SPARC only).
 ETEXI
 
+DEF("input-linux", 1, QEMU_OPTION_input_linux,
+    "-input-linux <evdev>\n"
+    "                Use input device.\n", QEMU_ARCH_ALL)
+STEXI
+@item -input-linux @var{dev}
+@findex -input-linux
+Use input device.
+ETEXI
+
 DEF("vnc", HAS_ARG, QEMU_OPTION_vnc ,
     "-vnc display    start a VNC server on display\n", QEMU_ARCH_ALL)
 STEXI
@@ -3276,7 +3285,7 @@ re-inject them.
 ETEXI
 
 DEF("icount", HAS_ARG, QEMU_OPTION_icount, \
-    "-icount [shift=N|auto][,align=on|off][,sleep=no,rr=record|replay,rrfile=<filename>]\n" \
+    "-icount [shift=N|auto][,align=on|off][,sleep=on|off,rr=record|replay,rrfile=<filename>]\n" \
     "                enable virtual instruction counter with 2^N clock ticks per\n" \
     "                instruction, enable aligning the host and virtual clocks\n" \
     "                or disable real time cpu sleeping\n", QEMU_ARCH_ALL)
@@ -3289,8 +3298,8 @@ then the virtual cpu speed will be automatically adjusted to keep virtual
 time within a few seconds of real time.
 
 When the virtual cpu is sleeping, the virtual time will advance at default
-speed unless @option{sleep=no} is specified.
-With @option{sleep=no}, the virtual time will jump to the next timer deadline
+speed unless @option{sleep=on|off} is specified.
+With @option{sleep=on|off}, the virtual time will jump to the next timer deadline
 instantly whenever the virtual cpu goes to sleep mode and will not advance
 if no timer is enabled. This behavior give deterministic execution times from
 the guest point of view.
@@ -3800,11 +3809,13 @@ version by providing the @var{passwordid} parameter. This provides
 the ID of a previously created @code{secret} object containing the
 password for decryption.
 
-@item -object filter-buffer,id=@var{id},netdev=@var{netdevid},interval=@var{t}[,queue=@var{all|rx|tx}]
+@item -object filter-buffer,id=@var{id},netdev=@var{netdevid},interval=@var{t}[,queue=@var{all|rx|tx}][,status=@var{on|off}]
 
 Interval @var{t} can't be 0, this filter batches the packet delivery: all
 packets arriving in a given interval on netdev @var{netdevid} are delayed
 until the end of the interval. Interval is in microseconds.
+@option{status} is optional that indicate whether the netfilter is
+on (enabled) or off (disabled), the default status for netfilter will be 'on'.
 
 queue @var{all|rx|tx} is an option that can be applied to any netfilter.
 

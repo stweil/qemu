@@ -268,7 +268,7 @@ static void wait_for_connect(void *opaque)
 
     do {
         rc = qemu_getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &val, &valsize);
-    } while (rc == -1 && socket_error() == EINTR);
+    } while (rc == -1 && errno == EINTR);
 
     /* update rc to contain error */
     if (!rc && val) {
@@ -330,7 +330,7 @@ static int inet_connect_addr(struct addrinfo *addr, bool *in_progress,
     do {
         rc = 0;
         if (connect(sock, addr->ai_addr, addr->ai_addrlen) < 0) {
-            rc = -socket_error();
+            rc = -errno;
         }
     } while (rc == -EINTR);
 
@@ -787,7 +787,7 @@ static int unix_connect_saddr(UnixSocketAddress *saddr, Error **errp,
     do {
         rc = 0;
         if (connect(sock, (struct sockaddr *) &un, sizeof(un)) < 0) {
-            rc = -socket_error();
+            rc = -errno;
         }
     } while (rc == -EINTR);
 
@@ -1003,6 +1003,7 @@ socket_sockaddr_to_address_inet(struct sockaddr_storage *sa,
     char host[NI_MAXHOST];
     char serv[NI_MAXSERV];
     SocketAddress *addr;
+    InetSocketAddress *inet;
     int ret;
 
     ret = getnameinfo((struct sockaddr *)sa, salen,
@@ -1017,13 +1018,13 @@ socket_sockaddr_to_address_inet(struct sockaddr_storage *sa,
 
     addr = g_new0(SocketAddress, 1);
     addr->type = SOCKET_ADDRESS_KIND_INET;
-    addr->u.inet = g_new0(InetSocketAddress, 1);
-    addr->u.inet->host = g_strdup(host);
-    addr->u.inet->port = g_strdup(serv);
+    inet = addr->u.inet = g_new0(InetSocketAddress, 1);
+    inet->host = g_strdup(host);
+    inet->port = g_strdup(serv);
     if (sa->ss_family == AF_INET) {
-        addr->u.inet->has_ipv4 = addr->u.inet->ipv4 = true;
+        inet->has_ipv4 = inet->ipv4 = true;
     } else {
-        addr->u.inet->has_ipv6 = addr->u.inet->ipv6 = true;
+        inet->has_ipv6 = inet->ipv6 = true;
     }
 
     return addr;
@@ -1081,7 +1082,7 @@ SocketAddress *socket_local_address(int fd, Error **errp)
     socklen_t sslen = sizeof(ss);
 
     if (getsockname(fd, (struct sockaddr *)&ss, &sslen) < 0) {
-        error_setg_errno(errp, socket_error(), "%s",
+        error_setg_errno(errp, errno, "%s",
                          "Unable to query local socket address");
         return NULL;
     }
@@ -1096,7 +1097,7 @@ SocketAddress *socket_remote_address(int fd, Error **errp)
     socklen_t sslen = sizeof(ss);
 
     if (getpeername(fd, (struct sockaddr *)&ss, &sslen) < 0) {
-        error_setg_errno(errp, socket_error(), "%s",
+        error_setg_errno(errp, errno, "%s",
                          "Unable to query remote socket address");
         return NULL;
     }
