@@ -23,6 +23,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "syborg.h"
 #include "hw/sysbus.h"
 #include "virtio.h"

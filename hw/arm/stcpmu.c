@@ -7,6 +7,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "hw/i2c/i2c.h"
 #include "stcpmu.h"

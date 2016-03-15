@@ -20,6 +20,7 @@
  *           with Sparse Image Capability", by Chunqiang Tang, 2010.
  *============================================================================*/
 
+#include "qemu/osdep.h"
 #include "block/fvd.h"
 
 //#define ENABLE_TRACE_IO

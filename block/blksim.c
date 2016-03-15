@@ -15,6 +15,7 @@
  *  rare race conditions. See qemu-test.c, qemu-io.c, and qemu-io-sim.c.
  *============================================================================*/
 
+#include "qemu/osdep.h"
 #include <sys/vfs.h>
 #include <sys/mman.h>
 #include <pthread.h>
@@ -23,7 +24,6 @@
 #include "qemu-common.h"
 #include "block/block_int.h"
 #include "qemu/option.h"
-#include "qemu/osdep.h"
 #include "qemu/queue.h"
 #include "qemu/timer.h"
 #include "block/block.h"

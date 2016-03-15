@@ -17,13 +17,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-#include "config.h"
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #ifdef _WIN32
 #include <windows.h>
 #include <winioctl.h>
 #else
-#include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
 #endif
@@ -48,8 +47,6 @@
 #  define LOG_INT_STATE(env) do { } while (0)
 #endif
 
-#include <unistd.h>
-#include <fcntl.h>
 #include "kqemu.h"
 
 #ifdef _WIN32

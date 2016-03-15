@@ -37,7 +37,7 @@
  *
  */
 
-#include <assert.h>
+#include "qemu/osdep.h"
 
 #include "hw.h"
 #include "pci/pci.h"

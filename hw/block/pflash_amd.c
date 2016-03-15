@@ -40,8 +40,7 @@
  * Support little endianness.
  */
 
-#include <assert.h>     /* assert */
-#include <stdio.h>      /* fprintf */
+#include "qemu/osdep.h"
 
 #include "hw.h"
 #include "block/block.h"

@@ -20,6 +20,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "vlynq.h"
 
 #if 0 // TODO: Fix code for QOM API.

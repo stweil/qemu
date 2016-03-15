@@ -14,6 +14,7 @@
  * * Replace stcb / STCB by a better name.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
 #include "hw/arm/arm.h"

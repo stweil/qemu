@@ -20,7 +20,7 @@
  * MA 02111-1307 USA
  */
 
-#include <string.h>
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "irq.h"
 #include "net/net.h"

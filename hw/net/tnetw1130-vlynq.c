@@ -23,7 +23,7 @@
  * - Much more emulation is needed.
  */
 
-#include <assert.h>             /* assert */
+#include "qemu/osdep.h"
 #include "hw.h"
 #include "net/net.h"
 #include "pci/pci.h"

@@ -14,8 +14,7 @@
  *=============================================================================
  */
 
-#include <sys/time.h>
-#include <sys/types.h>
+#include "qemu/osdep.h"
 #include <getopt.h>
 
 #include "qemu-common.h"

@@ -18,6 +18,7 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "sdhci.h"
 
 #define EXYNOS4_SDHC_CAPABILITIES    0x05E80080

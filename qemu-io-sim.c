@@ -16,6 +16,7 @@
  * for the simulated block device driver.
  *============================================================================*/
 
+#include "qemu/osdep.h"
 #include "block/blksim.h"
 
 void fvd_init_prefetch (BlockDriverState * bs);

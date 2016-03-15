@@ -29,6 +29,7 @@
  * Routine from Chris Waters
  */
 
+#include "qemu/osdep.h"
 #include "atheros_wlan_crc32.h"
 
 /*

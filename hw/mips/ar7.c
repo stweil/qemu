@@ -52,13 +52,10 @@
  *
  */
 
-#include <assert.h>
-#include <stddef.h>             /* offsetof */
-#include <stdio.h>              /* fprintf */
+#include "qemu/osdep.h"
 
 #include <zlib.h>               /* crc32 */
 
-#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/boards.h"
 #include "hw/mips/mips.h"

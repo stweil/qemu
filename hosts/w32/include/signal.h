@@ -15,8 +15,6 @@
 
 #if !defined(WIN64) && !defined(pthread_sigmask)
 
-#include <sys/types.h>    /* sigset_t */
-
 int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset);
 int sigfillset(sigset_t *set);
 

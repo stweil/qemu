@@ -8,6 +8,7 @@
  * License Version 2.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/arm/arm.h"
 #include "hw/boards.h"

@@ -27,7 +27,7 @@
  *
  */
 
-#include "config-host.h"
+#include "qemu/osdep.h"
 
 #if defined(CONFIG_WIN32)
 #warning("not compiled for Windows host")
@@ -39,25 +39,15 @@
 #include "net/net.h"
 #include "qemu/timer.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
 #include <sys/shm.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
 #include <sys/mman.h>
 #include <netinet/in.h>
 #include <netdb.h>
-#include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
 
-#include <signal.h>
 
-#include <time.h>
-#include <sys/time.h>
 
 /*
  * PCI and EEPROM definitions

@@ -15,6 +15,7 @@
  *  work with the simulation engine block/sim.c
  *============================================================================*/
 
+#include "qemu/osdep.h"
 #include "qemu/timer.h"
 #include "sysemu.h"
 
