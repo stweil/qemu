@@ -34,7 +34,9 @@
  */
 
 #include "qemu/osdep.h"
+#ifdef CONFIG_PPOLL
 #include <poll.h>
+#endif
 #include <libusb.h>
 
 #include "qemu-common.h"
@@ -203,18 +205,24 @@ static const char *err_names[] = {
 static libusb_context *ctx;
 static uint32_t loglevel;
 
+#ifdef CONFIG_PPOLL
 static void usb_host_handle_fd(void *opaque)
 {
     struct timeval tv = { 0, 0 };
     libusb_handle_events_timeout(ctx, &tv);
 }
+#endif
 
 static void usb_host_add_fd(int fd, short events, void *user_data)
 {
+#ifdef CONFIG_PPOLL
     qemu_set_fd_handler(fd,
                         (events & POLLIN)  ? usb_host_handle_fd : NULL,
                         (events & POLLOUT) ? usb_host_handle_fd : NULL,
                         ctx);
+#else
+    g_assert(events == 0);
+#endif
 }
 
 static void usb_host_del_fd(int fd, void *user_data)
