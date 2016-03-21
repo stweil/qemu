@@ -124,7 +124,6 @@ static void bcm2835_peripherals_init(Object *obj)
 
     object_property_add_const_link(OBJECT(&s->dma), "dma-mr",
                                    OBJECT(&s->gpu_bus_mr), &error_abort);
-
 }
 
 static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)

@@ -254,7 +254,8 @@ static const VMStateDescription vmstate_bcm2835_aux = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT8_ARRAY(read_fifo, BCM2835AuxState, BCM2835_AUX_RX_FIFO_LEN),
+        VMSTATE_UINT8_ARRAY(read_fifo, BCM2835AuxState,
+                            BCM2835_AUX_RX_FIFO_LEN),
         VMSTATE_UINT8(read_pos, BCM2835AuxState),
         VMSTATE_UINT8(read_count, BCM2835AuxState),
         VMSTATE_UINT8(ier, BCM2835AuxState),

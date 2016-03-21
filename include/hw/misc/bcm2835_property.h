@@ -19,11 +19,13 @@ typedef struct {
     /*< private >*/
     SysBusDevice busdev;
     /*< public >*/
+
     MemoryRegion *dma_mr;
     AddressSpace dma_as;
-    BCM2835FBState *fbdev;
     MemoryRegion iomem;
     qemu_irq mbox_irq;
+    BCM2835FBState *fbdev;
+
     MACAddr macaddr;
     uint32_t board_rev;
     uint32_t addr;

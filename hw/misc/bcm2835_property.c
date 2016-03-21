@@ -15,10 +15,10 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
     uint32_t tag;
     uint32_t bufsize;
     uint32_t tot_len;
-    int n;
     size_t resplen;
-    uint32_t offset, length, color;
     uint32_t tmp;
+    int n;
+    uint32_t offset, length, color;
     uint32_t xres, yres, xoffset, yoffset, bpp, pixo, alpha;
     uint32_t *newxres = NULL, *newyres = NULL, *newxoffset = NULL,
         *newyoffset = NULL, *newbpp = NULL, *newpixo = NULL, *newalpha = NULL;
@@ -229,7 +229,6 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
             stl_le_phys(&s->dma_as, value + 24, 0);
             resplen = 16;
             break;
-
         case 0x0004800b: /* Set palette */
             offset = ldl_le_phys(&s->dma_as, value + 12);
             length = ldl_le_phys(&s->dma_as, value + 16);
@@ -268,6 +267,7 @@ static void bcm2835_property_mbox_push(BCM2835PropertyState *s, uint32_t value)
         value += bufsize + 12;
     }
 
+    /* Reconfigure framebuffer if required */
     if (newxres || newyres || newxoffset || newyoffset || newbpp || newpixo
         || newalpha) {
         bcm2835_fb_reconfigure(s->fbdev, newxres, newyres, newxoffset,
