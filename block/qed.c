@@ -377,18 +377,6 @@ static void bdrv_qed_attach_aio_context(BlockDriverState *bs,
     }
 }
 
-static void bdrv_qed_drain(BlockDriverState *bs)
-{
-    BDRVQEDState *s = bs->opaque;
-
-    /* Cancel timer and start doing I/O that were meant to happen as if it
-     * fired, that way we get bdrv_drain() taking care of the ongoing requests
-     * correctly. */
-    qed_cancel_need_check_timer(s);
-    qed_plug_allocating_write_reqs(s);
-    bdrv_aio_flush(s->bs, qed_clear_need_check, s);
-}
-
 static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
                          Error **errp)
 {
@@ -412,11 +400,8 @@ static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
     }
     if (s->header.features & ~QED_FEATURE_MASK) {
         /* image uses unsupported feature bits */
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%" PRIx64,
-            s->header.features & ~QED_FEATURE_MASK);
-        error_setg(errp, QERR_UNKNOWN_BLOCK_FORMAT_FEATURE,
-                   bdrv_get_device_or_node_name(bs), "QED", buf);
+        error_setg(errp, "Unsupported QED features: %" PRIx64,
+                   s->header.features & ~QED_FEATURE_MASK);
         return -ENOTSUP;
     }
     if (!qed_is_cluster_size_valid(s->header.cluster_size)) {
@@ -589,7 +574,7 @@ static int qed_create(const char *filename, uint32_t cluster_size,
         return ret;
     }
 
-    blk = blk_new_open("image", filename, NULL, NULL,
+    blk = blk_new_open(filename, NULL, NULL,
                        BDRV_O_RDWR | BDRV_O_CACHE_WB | BDRV_O_PROTOCOL,
                        &local_err);
     if (blk == NULL) {
@@ -1694,7 +1679,6 @@ static BlockDriver bdrv_qed = {
     .bdrv_check               = bdrv_qed_check,
     .bdrv_detach_aio_context  = bdrv_qed_detach_aio_context,
     .bdrv_attach_aio_context  = bdrv_qed_attach_aio_context,
-    .bdrv_drain               = bdrv_qed_drain,
 };
 
 static void bdrv_qed_init(void)

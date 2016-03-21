@@ -25,6 +25,7 @@
 #include "qemu-common.h"
 #include "monitor/monitor.h"
 #include "sysemu/sysemu.h"
+#include "sysemu/block-backend.h"
 #include "qemu/error-report.h"
 #include "qemu/timer.h"
 #include "sysemu/char.h"
@@ -97,16 +98,18 @@ static char *SocketAddress_to_str(const char *prefix, SocketAddress *addr,
     switch (addr->type) {
     case SOCKET_ADDRESS_KIND_INET:
         return g_strdup_printf("%s%s:%s:%s%s", prefix,
-                               is_telnet ? "telnet" : "tcp", addr->u.inet->host,
-                               addr->u.inet->port, is_listen ? ",server" : "");
+                               is_telnet ? "telnet" : "tcp",
+                               addr->u.inet.data->host,
+                               addr->u.inet.data->port,
+                               is_listen ? ",server" : "");
         break;
     case SOCKET_ADDRESS_KIND_UNIX:
         return g_strdup_printf("%sunix:%s%s", prefix,
-                               addr->u.q_unix->path,
+                               addr->u.q_unix.data->path,
                                is_listen ? ",server" : "");
         break;
     case SOCKET_ADDRESS_KIND_FD:
-        return g_strdup_printf("%sfd:%s%s", prefix, addr->u.fd->str,
+        return g_strdup_printf("%sfd:%s%s", prefix, addr->u.fd.data->str,
                                is_listen ? ",server" : "");
         break;
     default:
@@ -487,7 +490,7 @@ static CharDriverState *qemu_chr_open_null(const char *id,
                                            Error **errp)
 {
     CharDriverState *chr;
-    ChardevCommon *common = backend->u.null;
+    ChardevCommon *common = backend->u.null.data;
 
     chr = qemu_chr_alloc(common, errp);
     if (!chr) {
@@ -628,7 +631,7 @@ static int mux_proc_byte(CharDriverState *chr, MuxDriver *d, int ch)
                  break;
             }
         case 's':
-            bdrv_commit_all();
+            blk_commit_all();
             break;
         case 'b':
             qemu_chr_be_event(chr, CHR_EVENT_BREAK);
@@ -788,7 +791,7 @@ static CharDriverState *qemu_chr_open_mux(const char *id,
                                           ChardevBackend *backend,
                                           ChardevReturn *ret, Error **errp)
 {
-    ChardevMux *mux = backend->u.mux;
+    ChardevMux *mux = backend->u.mux.data;
     CharDriverState *chr, *drv;
     MuxDriver *d;
     ChardevCommon *common = qapi_ChardevMux_base(mux);
@@ -1105,7 +1108,7 @@ static CharDriverState *qemu_chr_open_pipe(const char *id,
                                            ChardevReturn *ret,
                                            Error **errp)
 {
-    ChardevHostdev *opts = backend->u.pipe;
+    ChardevHostdev *opts = backend->u.pipe.data;
     int fd_in, fd_out;
     char *filename_in;
     char *filename_out;
@@ -1187,7 +1190,7 @@ static CharDriverState *qemu_chr_open_stdio(const char *id,
                                             ChardevReturn *ret,
                                             Error **errp)
 {
-    ChardevStdio *opts = backend->u.stdio;
+    ChardevStdio *opts = backend->u.stdio.data;
     CharDriverState *chr;
     struct sigaction act;
     ChardevCommon *common = qapi_ChardevStdio_base(opts);
@@ -1433,7 +1436,7 @@ static CharDriverState *qemu_chr_open_pty(const char *id,
     PtyCharDriver *s;
     int master_fd, slave_fd;
     char pty_name[PATH_MAX];
-    ChardevCommon *common = backend->u.pty;
+    ChardevCommon *common = backend->u.pty.data;
 
     master_fd = qemu_openpty_raw(&slave_fd, pty_name);
     if (master_fd < 0) {
@@ -2204,7 +2207,7 @@ static CharDriverState *qemu_chr_open_pipe(const char *id,
                                            ChardevReturn *ret,
                                            Error **errp)
 {
-    ChardevHostdev *opts = backend->u.pipe;
+    ChardevHostdev *opts = backend->u.pipe.data;
     const char *filename = opts->device;
     CharDriverState *chr;
     WinCharState *s;
@@ -2250,7 +2253,7 @@ static CharDriverState *qemu_chr_open_win_con(const char *id,
                                               ChardevReturn *ret,
                                               Error **errp)
 {
-    ChardevCommon *common = backend->u.console;
+    ChardevCommon *common = backend->u.console.data;
     return qemu_chr_open_win_file(GetStdHandle(STD_OUTPUT_HANDLE),
                                   common, errp);
 }
@@ -2400,7 +2403,7 @@ static CharDriverState *qemu_chr_open_stdio(const char *id,
     WinStdioCharState *stdio;
     DWORD              dwMode;
     int                is_console = 0;
-    ChardevCommon *common = qapi_ChardevStdio_base(backend->u.stdio);
+    ChardevCommon *common = qapi_ChardevStdio_base(backend->u.stdio.data);
 
     chr   = qemu_chr_alloc(common, errp);
     if (!chr) {
@@ -3041,7 +3044,7 @@ static void tcp_chr_tls_init(CharDriverState *chr)
     } else {
         tioc = qio_channel_tls_new_client(
             s->ioc, s->tls_creds,
-            s->addr->u.inet->host,
+            s->addr->u.inet.data->host,
             &err);
     }
     if (tioc == NULL) {
@@ -3248,7 +3251,7 @@ static CharDriverState *qemu_chr_open_ringbuf(const char *id,
                                               ChardevReturn *ret,
                                               Error **errp)
 {
-    ChardevRingbuf *opts = backend->u.ringbuf;
+    ChardevRingbuf *opts = backend->u.ringbuf.data;
     ChardevCommon *common = qapi_ChardevRingbuf_base(opts);
     CharDriverState *chr;
     RingBufCharDriver *d;
@@ -3549,7 +3552,7 @@ static void qemu_chr_parse_file_out(QemuOpts *opts, ChardevBackend *backend,
         error_setg(errp, "chardev: file: no filename given");
         return;
     }
-    file = backend->u.file = g_new0(ChardevFile, 1);
+    file = backend->u.file.data = g_new0(ChardevFile, 1);
     qemu_chr_parse_common(opts, qapi_ChardevFile_base(file));
     file->out = g_strdup(path);
 
@@ -3562,7 +3565,7 @@ static void qemu_chr_parse_stdio(QemuOpts *opts, ChardevBackend *backend,
 {
     ChardevStdio *stdio;
 
-    stdio = backend->u.stdio = g_new0(ChardevStdio, 1);
+    stdio = backend->u.stdio.data = g_new0(ChardevStdio, 1);
     qemu_chr_parse_common(opts, qapi_ChardevStdio_base(stdio));
     stdio->has_signal = true;
     stdio->signal = qemu_opt_get_bool(opts, "signal", true);
@@ -3579,7 +3582,7 @@ static void qemu_chr_parse_serial(QemuOpts *opts, ChardevBackend *backend,
         error_setg(errp, "chardev: serial/tty: no device path given");
         return;
     }
-    serial = backend->u.serial = g_new0(ChardevHostdev, 1);
+    serial = backend->u.serial.data = g_new0(ChardevHostdev, 1);
     qemu_chr_parse_common(opts, qapi_ChardevHostdev_base(serial));
     serial->device = g_strdup(device);
 }
@@ -3596,7 +3599,7 @@ static void qemu_chr_parse_parallel(QemuOpts *opts, ChardevBackend *backend,
         error_setg(errp, "chardev: parallel: no device path given");
         return;
     }
-    parallel = backend->u.parallel = g_new0(ChardevHostdev, 1);
+    parallel = backend->u.parallel.data = g_new0(ChardevHostdev, 1);
     qemu_chr_parse_common(opts, qapi_ChardevHostdev_base(parallel));
     parallel->device = g_strdup(device);
 }
@@ -3612,7 +3615,7 @@ static void qemu_chr_parse_pipe(QemuOpts *opts, ChardevBackend *backend,
         error_setg(errp, "chardev: pipe: no device path given");
         return;
     }
-    dev = backend->u.pipe = g_new0(ChardevHostdev, 1);
+    dev = backend->u.pipe.data = g_new0(ChardevHostdev, 1);
     qemu_chr_parse_common(opts, qapi_ChardevHostdev_base(dev));
     dev->device = g_strdup(device);
 }
@@ -3623,7 +3626,7 @@ static void qemu_chr_parse_ringbuf(QemuOpts *opts, ChardevBackend *backend,
     int val;
     ChardevRingbuf *ringbuf;
 
-    ringbuf = backend->u.ringbuf = g_new0(ChardevRingbuf, 1);
+    ringbuf = backend->u.ringbuf.data = g_new0(ChardevRingbuf, 1);
     qemu_chr_parse_common(opts, qapi_ChardevRingbuf_base(ringbuf));
 
     val = qemu_opt_get_size(opts, "size", 0);
@@ -3643,7 +3646,7 @@ static void qemu_chr_parse_mux(QemuOpts *opts, ChardevBackend *backend,
         error_setg(errp, "chardev: mux: no chardev given");
         return;
     }
-    mux = backend->u.mux = g_new0(ChardevMux, 1);
+    mux = backend->u.mux.data = g_new0(ChardevMux, 1);
     qemu_chr_parse_common(opts, qapi_ChardevMux_base(mux));
     mux->chardev = g_strdup(chardev);
 }
@@ -3679,7 +3682,7 @@ static void qemu_chr_parse_socket(QemuOpts *opts, ChardevBackend *backend,
         }
     }
 
-    sock = backend->u.socket = g_new0(ChardevSocket, 1);
+    sock = backend->u.socket.data = g_new0(ChardevSocket, 1);
     qemu_chr_parse_common(opts, qapi_ChardevSocket_base(sock));
 
     sock->has_nodelay = true;
@@ -3698,12 +3701,12 @@ static void qemu_chr_parse_socket(QemuOpts *opts, ChardevBackend *backend,
     if (path) {
         UnixSocketAddress *q_unix;
         addr->type = SOCKET_ADDRESS_KIND_UNIX;
-        q_unix = addr->u.q_unix = g_new0(UnixSocketAddress, 1);
+        q_unix = addr->u.q_unix.data = g_new0(UnixSocketAddress, 1);
         q_unix->path = g_strdup(path);
     } else {
         addr->type = SOCKET_ADDRESS_KIND_INET;
-        addr->u.inet = g_new(InetSocketAddress, 1);
-        *addr->u.inet = (InetSocketAddress) {
+        addr->u.inet.data = g_new(InetSocketAddress, 1);
+        *addr->u.inet.data = (InetSocketAddress) {
             .host = g_strdup(host),
             .port = g_strdup(port),
             .has_to = qemu_opt_get(opts, "to"),
@@ -3746,13 +3749,13 @@ static void qemu_chr_parse_udp(QemuOpts *opts, ChardevBackend *backend,
         has_local = true;
     }
 
-    udp = backend->u.udp = g_new0(ChardevUdp, 1);
+    udp = backend->u.udp.data = g_new0(ChardevUdp, 1);
     qemu_chr_parse_common(opts, qapi_ChardevUdp_base(udp));
 
     addr = g_new0(SocketAddress, 1);
     addr->type = SOCKET_ADDRESS_KIND_INET;
-    addr->u.inet = g_new(InetSocketAddress, 1);
-    *addr->u.inet = (InetSocketAddress) {
+    addr->u.inet.data = g_new(InetSocketAddress, 1);
+    *addr->u.inet.data = (InetSocketAddress) {
         .host = g_strdup(host),
         .port = g_strdup(port),
         .has_ipv4 = qemu_opt_get(opts, "ipv4"),
@@ -3766,8 +3769,8 @@ static void qemu_chr_parse_udp(QemuOpts *opts, ChardevBackend *backend,
         udp->has_local = true;
         addr = g_new0(SocketAddress, 1);
         addr->type = SOCKET_ADDRESS_KIND_INET;
-        addr->u.inet = g_new(InetSocketAddress, 1);
-        *addr->u.inet = (InetSocketAddress) {
+        addr->u.inet.data = g_new(InetSocketAddress, 1);
+        *addr->u.inet.data = (InetSocketAddress) {
             .host = g_strdup(localaddr),
             .port = g_strdup(localport),
         };
@@ -3854,7 +3857,7 @@ CharDriverState *qemu_chr_new_from_opts(QemuOpts *opts,
     } else {
         ChardevCommon *cc = g_new0(ChardevCommon, 1);
         qemu_chr_parse_common(opts, cc);
-        backend->u.null = cc; /* Any ChardevCommon member would work */
+        backend->u.null.data = cc; /* Any ChardevCommon member would work */
     }
 
     ret = qmp_chardev_add(bid ? bid : id, backend, errp);
@@ -3866,9 +3869,9 @@ CharDriverState *qemu_chr_new_from_opts(QemuOpts *opts,
         qapi_free_ChardevBackend(backend);
         qapi_free_ChardevReturn(ret);
         backend = g_new0(ChardevBackend, 1);
-        backend->u.mux = g_new0(ChardevMux, 1);
+        backend->u.mux.data = g_new0(ChardevMux, 1);
         backend->type = CHARDEV_BACKEND_KIND_MUX;
-        backend->u.mux->chardev = g_strdup(bid);
+        backend->u.mux.data->chardev = g_strdup(bid);
         ret = qmp_chardev_add(id, backend, errp);
         if (!ret) {
             chr = qemu_chr_find(bid);
@@ -4197,7 +4200,7 @@ static CharDriverState *qmp_chardev_open_file(const char *id,
                                               ChardevReturn *ret,
                                               Error **errp)
 {
-    ChardevFile *file = backend->u.file;
+    ChardevFile *file = backend->u.file.data;
     ChardevCommon *common = qapi_ChardevFile_base(file);
     HANDLE out;
 
@@ -4220,7 +4223,7 @@ static CharDriverState *qmp_chardev_open_serial(const char *id,
                                                 ChardevReturn *ret,
                                                 Error **errp)
 {
-    ChardevHostdev *serial = backend->u.serial;
+    ChardevHostdev *serial = backend->u.serial.data;
     ChardevCommon *common = qapi_ChardevHostdev_base(serial);
     return qemu_chr_open_win_path(serial->device, common, errp);
 }
@@ -4244,7 +4247,7 @@ static CharDriverState *qmp_chardev_open_file(const char *id,
                                               ChardevReturn *ret,
                                               Error **errp)
 {
-    ChardevFile *file = backend->u.file;
+    ChardevFile *file = backend->u.file.data;
     ChardevCommon *common = qapi_ChardevFile_base(file);
     int flags, in = -1, out;
 
@@ -4278,7 +4281,7 @@ static CharDriverState *qmp_chardev_open_serial(const char *id,
                                                 ChardevReturn *ret,
                                                 Error **errp)
 {
-    ChardevHostdev *serial = backend->u.serial;
+    ChardevHostdev *serial = backend->u.serial.data;
     ChardevCommon *common = qapi_ChardevHostdev_base(serial);
     int fd;
 
@@ -4297,7 +4300,7 @@ static CharDriverState *qmp_chardev_open_parallel(const char *id,
                                                   ChardevReturn *ret,
                                                   Error **errp)
 {
-    ChardevHostdev *parallel = backend->u.parallel;
+    ChardevHostdev *parallel = backend->u.parallel.data;
     ChardevCommon *common = qapi_ChardevHostdev_base(parallel);
     int fd;
 
@@ -4338,7 +4341,7 @@ static CharDriverState *qmp_chardev_open_socket(const char *id,
 {
     CharDriverState *chr;
     TCPCharDriver *s;
-    ChardevSocket *sock = backend->u.socket;
+    ChardevSocket *sock = backend->u.socket.data;
     SocketAddress *addr = sock->addr;
     bool do_nodelay     = sock->has_nodelay ? sock->nodelay : false;
     bool is_listen      = sock->has_server  ? sock->server  : true;
@@ -4463,7 +4466,7 @@ static CharDriverState *qmp_chardev_open_udp(const char *id,
                                              ChardevReturn *ret,
                                              Error **errp)
 {
-    ChardevUdp *udp = backend->u.udp;
+    ChardevUdp *udp = backend->u.udp.data;
     ChardevCommon *common = qapi_ChardevUdp_base(udp);
     QIOChannelSocket *sioc = qio_channel_socket_new();
 
