@@ -333,6 +333,12 @@ static long gethugepagesize(const char *mem_path)
     return fs.f_bsize;
 }
 
+/*
+ * FIXME TOCTTOU: this iterates over memory backends' mem-path, which
+ * may or may not name the same files / on the same filesystem now as
+ * when we actually open and map them.  Iterate over the file
+ * descriptors instead, and use qemu_fd_getpagesize().
+ */
 static int find_max_supported_pagesize(Object *obj, void *opaque)
 {
     char *mem_path;
@@ -2001,7 +2007,7 @@ int kvmppc_get_hypercall(CPUPPCState *env, uint8_t *buf, int buf_len)
     hc[2] = cpu_to_be32(0x48000008);
     hc[3] = cpu_to_be32(bswap32(0x3860ffff));
 
-    return 0;
+    return 1;
 }
 
 static inline int kvmppc_enable_hcall(KVMState *s, target_ulong hcall)
