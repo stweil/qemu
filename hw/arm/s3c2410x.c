@@ -11,6 +11,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
+#include "qapi/error.h"          /* error_abort */
 #include "sysemu/sysemu.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 

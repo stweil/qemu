@@ -22,7 +22,9 @@
 #include <sys/resource.h>
 
 #include "qemu.h"
-#include "qemu-common.h"
+#include "qemu/path.h"
+#include "qemu/cutils.h"
+#include "qemu/help_option.h"
 #include "cpu.h"
 #if defined(CONFIG_USER_ONLY) && defined(TARGET_X86_64)
 #include "vsyscall.h"

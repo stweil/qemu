@@ -22,7 +22,8 @@
  * THE SOFTWARE.
  */
 #include "qemu/osdep.h"
-
+#include "qemu/cutils.h"
+#include "qemu/help_option.h"
 
 #ifdef CONFIG_SECCOMP
 #include "sysemu/seccomp.h"
@@ -2879,7 +2880,9 @@ static bool object_create_initial(const char *type)
      * they depend on netdevs already existing
      */
     if (g_str_equal(type, "filter-buffer") ||
-        g_str_equal(type, "filter-dump")) {
+        g_str_equal(type, "filter-dump") ||
+        g_str_equal(type, "filter-mirror") ||
+        g_str_equal(type, "filter-redirector")) {
         return false;
     }
 
@@ -3393,6 +3396,9 @@ int main(int argc, char **argv)
             case QEMU_OPTION_D:
                 log_file = optarg;
                 break;
+            case QEMU_OPTION_DFILTER:
+                qemu_set_dfilter_ranges(optarg);
+                break;
             case QEMU_OPTION_s:
                 add_device_config(DEV_GDB, "tcp::" DEFAULT_GDBSTUB_PORT);
                 break;
@@ -3768,12 +3774,6 @@ int main(int argc, char **argv)
 #endif
                 break;
             }
-            case QEMU_OPTION_input_linux:
-                if (!qemu_opts_parse_noisily(qemu_find_opts("input-linux"),
-                                             optarg, true)) {
-                    exit(1);
-                }
-                break;
             case QEMU_OPTION_no_acpi:
                 acpi_enabled = 0;
                 break;
@@ -4639,10 +4639,6 @@ int main(int argc, char **argv)
     if (using_spice) {
         qemu_spice_display_init();
     }
-#endif
-#ifdef CONFIG_LINUX
-    qemu_opts_foreach(qemu_find_opts("input-linux"),
-                      input_linux_init, NULL, &error_fatal);
 #endif
 
     if (foreach_device_config(DEV_GDB, gdbserver_start) < 0) {

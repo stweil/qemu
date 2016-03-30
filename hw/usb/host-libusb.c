@@ -39,6 +39,7 @@
 #endif
 #include <libusb.h>
 
+#include "qapi/error.h"
 #include "qemu-common.h"
 #include "monitor/monitor.h"
 #include "qemu/error-report.h"

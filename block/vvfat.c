@@ -24,13 +24,14 @@
  */
 #include "qemu/osdep.h"
 #include <dirent.h>
-#include "qemu-common.h"
+#include "qapi/error.h"
 #include "block/block_int.h"
 #include "qemu/module.h"
 #include "migration/migration.h"
 #include "qapi/qmp/qint.h"
 #include "qapi/qmp/qbool.h"
 #include "qapi/qmp/qstring.h"
+#include "qemu/cutils.h"
 
 #ifndef S_IWGRP
 #define S_IWGRP 0
@@ -2956,8 +2957,7 @@ static int enable_write_target(BDRVVVFATState *s, Error **errp)
     options = qdict_new();
     qdict_put(options, "driver", qstring_from_str("qcow"));
     ret = bdrv_open(&s->qcow, s->qcow_filename, NULL, options,
-                    BDRV_O_RDWR | BDRV_O_CACHE_WB | BDRV_O_NO_FLUSH,
-                    errp);
+                    BDRV_O_RDWR | BDRV_O_NO_FLUSH, errp);
     if (ret < 0) {
         goto err;
     }

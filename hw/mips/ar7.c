@@ -80,6 +80,7 @@
 #include "hw/sysbus.h"          /* SysBusDevice */
 #include "hw/vlynq.h"           /* vlynq_create_bus */
 
+#include "qapi/error.h"          /* error_abort */
 #include "target-mips/cpu-qom.h" /* mips_cpu_do_interrupt */
 
 #if 0 /* Support Titan SoC. */
@@ -2333,7 +2334,7 @@ static void ar7_timer_write(unsigned timer_index, uint32_t addr, uint32_t val)
             timer_del(timer->qemu_timer);
         }
     } else if (addr == TIMER_LOAD) {
-        timer->time = val * (get_ticks_per_sec() / io_frequency);
+        timer->time = val * (NANOSECONDS_PER_SECOND / io_frequency);
     }
 }
 
@@ -2798,12 +2799,12 @@ static void watchdog_trigger(void)
         timer_del(ar7->wd_timer);
     } else {
         int64_t t = ((uint64_t)wdt->change * (uint64_t)wdt->prescale) *
-                    (get_ticks_per_sec() / io_frequency);
+                    (NANOSECONDS_PER_SECOND / io_frequency);
         //~ logout("change   = 0x%x\n", wdt->change);
         //~ logout("prescale = 0x%x\n", wdt->prescale);
         TRACE(WDOG, logout("trigger value = %u ms\n",
-              (unsigned)(t * 1000 / get_ticks_per_sec())));
-        //~ logout("trigger value = %u\n", (unsigned)(get_ticks_per_sec() / 1000000));
+              (unsigned)(t * 1000 / NANOSECONDS_PER_SECOND)));
+        //~ logout("trigger value = %u\n", (unsigned)(NANOSECONDS_PER_SECOND / 1000000));
         timer_mod(ar7->wd_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + t);
     }
 }

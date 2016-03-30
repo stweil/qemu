@@ -19,29 +19,11 @@ void qemu_set_block(int fd);
 void qemu_set_nonblock(int fd);
 int socket_set_fast_reuse(int fd);
 
-int qemu_getsockopt(int sockfd, int level, int optname,
-                    void *optval, socklen_t *optlen);
-int qemu_setsockopt(int sockfd, int level, int optname,
-                    const void *optval, socklen_t optlen);
-
-#ifdef _WIN32
-/* MinGW needs type casts for the 'buf' and 'optval' arguments. */
-#define qemu_recv(sockfd, buf, len, flags) recv(sockfd, (void *)buf, len, flags)
-#define qemu_sendto(sockfd, buf, len, flags, destaddr, addrlen) \
-    sendto(sockfd, (const void *)buf, len, flags, destaddr, addrlen)
-
+#ifdef WIN32
 /* Windows has different names for the same constants with the same values */
 #define SHUT_RD   0
 #define SHUT_WR   1
 #define SHUT_RDWR 2
-#else
-#define qemu_getsockopt(sockfd, level, optname, optval, optlen) \
-    getsockopt(sockfd, level, optname, optval, optlen)
-#define qemu_setsockopt(sockfd, level, optname, optval, optlen) \
-    setsockopt(sockfd, level, optname, optval, optlen)
-#define qemu_recv(sockfd, buf, len, flags) recv(sockfd, buf, len, flags)
-#define qemu_sendto(sockfd, buf, len, flags, destaddr, addrlen) \
-    sendto(sockfd, buf, len, flags, destaddr, addrlen)
 #endif
 
 /* callback function for nonblocking connect

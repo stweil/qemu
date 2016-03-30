@@ -7,6 +7,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/usb/bcm2835_usb.h"
+#include "qapi/error.h"
 #include "sysemu/dma.h"
 
 #include "bcm2835_usb_regs.h"

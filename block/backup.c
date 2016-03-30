@@ -17,8 +17,10 @@
 #include "block/block.h"
 #include "block/block_int.h"
 #include "block/blockjob.h"
+#include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/ratelimit.h"
+#include "qemu/cutils.h"
 #include "sysemu/block-backend.h"
 #include "qemu/bitmap.h"
 
@@ -402,7 +404,6 @@ static void coroutine_fn backup_run(void *opaque)
 
     job->done_bitmap = bitmap_new(end);
 
-    bdrv_set_enable_write_cache(target, true);
     if (target->blk) {
         blk_set_on_error(target->blk, on_target_error, on_target_error);
         blk_iostatus_enable(target->blk);

@@ -13,6 +13,7 @@
 #include "hw/arm/raspi_platform.h"
 #include "hw/sysbus.h"
 #include "exec/address-spaces.h"
+#include "qapi/error.h"          /* error_abort */
 
 /* Peripheral base address seen by the CPU */
 #define BCM2835_PERI_BASE       0x20000000

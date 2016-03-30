@@ -50,12 +50,13 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
+#include "qapi/error.h"
 #include "block/block_int.h"
 #include "sysemu/block-backend.h"
 #include "qemu/module.h"
 #include "migration/migration.h"
 #include "qemu/coroutine.h"
+#include "qemu/cutils.h"
 
 #if defined(CONFIG_UUID)
 #include <uuid/uuid.h>
@@ -769,8 +770,7 @@ static int vdi_create(const char *filename, QemuOpts *opts, Error **errp)
     }
 
     blk = blk_new_open(filename, NULL, NULL,
-                       BDRV_O_RDWR | BDRV_O_CACHE_WB | BDRV_O_PROTOCOL,
-                       &local_err);
+                       BDRV_O_RDWR | BDRV_O_PROTOCOL, &local_err);
     if (blk == NULL) {
         error_propagate(errp, local_err);
         ret = -EIO;

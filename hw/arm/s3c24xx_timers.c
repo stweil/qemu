@@ -96,7 +96,7 @@ s3c24xx_schedule_timer(struct s3c24xx_timers_state_s *s, int num)
     s->timer_last_ticked[num] = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     timer_mod(s->timer[num],
                    s->timer_last_ticked[num] +
-                   ((s->timer_reload_value[num] * get_ticks_per_sec()) / s->tclk1));
+                   ((s->timer_reload_value[num] * NANOSECONDS_PER_SECOND) / s->tclk1));
 }
 
 static void
@@ -143,7 +143,7 @@ s3c24xx_timers_read_f(void *opaque, hwaddr addr_, unsigned size)
 
     if (addr == S3C_TIMERS_TCNTO4 ) {
         return s->timer_reload_value[4] -
-            (((qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - s->timer_last_ticked[4]) * s->tclk1) / get_ticks_per_sec());
+            (((qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) - s->timer_last_ticked[4]) * s->tclk1) / NANOSECONDS_PER_SECOND);
     }
     return s->timers_reg[addr];
 }

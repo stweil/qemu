@@ -32,10 +32,12 @@
 #include "qemu/osdep.h"
 #include <windows.h>
 #include <glib.h>
+#include "qapi/error.h"
 #include "sysemu/sysemu.h"
 #include "qemu/main-loop.h"
 #include "trace.h"
 #include "qemu/sockets.h"
+#include "qemu/cutils.h"
 
 /* this must come after including "trace.h" */
 #include <shlobj.h>
@@ -253,22 +255,6 @@ int qemu_gettimeofday(qemu_timeval *tp)
   /* Always return 0 as per Open Group Base Specifications Issue 6.
      Do not set errno on error.  */
   return 0;
-}
-
-int qemu_getsockopt(int sockfd, int level, int optname,
-                    void *optval, socklen_t *optlen)
-{
-    return getsockopt(sockfd, level, optname, optval, optlen);
-}
-
-int qemu_setsockopt(int sockfd, int level, int optname,
-                    const void *optval, socklen_t optlen)
-{
-    int res = 0;
-    if (optname != SO_REUSEADDR) {
-        res = setsockopt(sockfd, level, optname, optval, optlen);
-    }
-    return res;
 }
 
 int qemu_get_thread_id(void)
@@ -715,8 +701,10 @@ int qemu_getsockopt_wrap(int sockfd, int level, int optname,
 int qemu_setsockopt_wrap(int sockfd, int level, int optname,
                          const void *optval, socklen_t optlen)
 {
-    int ret;
-    ret = setsockopt(sockfd, level, optname, optval, optlen);
+    int ret = 0;
+    if (optname != SO_REUSEADDR) {
+        ret = setsockopt(sockfd, level, optname, optval, optlen);
+    }
     if (ret < 0) {
         errno = socket_error();
     }

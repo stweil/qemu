@@ -36,7 +36,7 @@
 #define NDEBUG
 #endif
 
-#include "qemu-common.h"
+#include "qemu/cutils.h"
 #include "qemu/host-utils.h"
 #include "qemu/timer.h"
 
@@ -2327,7 +2327,7 @@ void tcg_dump_op_count(FILE *f, fprintf_function cpu_fprintf)
 #endif
 
 
-int tcg_gen_code(TCGContext *s, tcg_insn_unit *gen_code_buf)
+int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 {
     int i, oi, oi_next, num_insns;
 
@@ -2350,7 +2350,8 @@ int tcg_gen_code(TCGContext *s, tcg_insn_unit *gen_code_buf)
 #endif
 
 #ifdef DEBUG_DISAS
-    if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP))) {
+    if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP)
+                 && qemu_log_in_addr_range(tb->pc))) {
         qemu_log("OP:\n");
         tcg_dump_ops(s);
         qemu_log("\n");
@@ -2377,7 +2378,8 @@ int tcg_gen_code(TCGContext *s, tcg_insn_unit *gen_code_buf)
 #endif
 
 #ifdef DEBUG_DISAS
-    if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP_OPT))) {
+    if (unlikely(qemu_loglevel_mask(CPU_LOG_TB_OP_OPT)
+                 && qemu_log_in_addr_range(tb->pc))) {
         qemu_log("OP after optimization and liveness analysis:\n");
         tcg_dump_ops(s);
         qemu_log("\n");
@@ -2386,8 +2388,8 @@ int tcg_gen_code(TCGContext *s, tcg_insn_unit *gen_code_buf)
 
     tcg_reg_alloc_start(s);
 
-    s->code_buf = gen_code_buf;
-    s->code_ptr = gen_code_buf;
+    s->code_buf = tb->tc_ptr;
+    s->code_ptr = tb->tc_ptr;
 
     tcg_out_tb_init(s);
 

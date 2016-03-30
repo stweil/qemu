@@ -10,6 +10,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/bcd.h"            /* to_bcd */
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 
