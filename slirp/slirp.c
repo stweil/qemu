@@ -200,8 +200,9 @@ static void slirp_init_once(void)
 static void slirp_state_save(QEMUFile *f, void *opaque);
 static int slirp_state_load(QEMUFile *f, void *opaque, int version_id);
 
-Slirp *slirp_init(int restricted, struct in_addr vnetwork,
+Slirp *slirp_init(int restricted, bool in_enabled, struct in_addr vnetwork,
                   struct in_addr vnetmask, struct in_addr vhost,
+                  bool in6_enabled,
                   struct in6_addr vprefix_addr6, uint8_t vprefix_len,
                   struct in6_addr vhost6, const char *vhostname,
                   const char *tftp_path, const char *bootfile,
@@ -215,6 +216,9 @@ Slirp *slirp_init(int restricted, struct in_addr vnetwork,
 
     slirp->grand = g_rand_new();
     slirp->restricted = restricted;
+
+    slirp->in_enabled = in_enabled;
+    slirp->in6_enabled = in6_enabled;
 
     if_init(slirp);
     ip_init(slirp);
@@ -693,6 +697,10 @@ static void arp_input(Slirp *slirp, const uint8_t *pkt, int pkt_len)
     struct arphdr *rah = (struct arphdr *)(arp_reply + ETH_HLEN);
     int ar_op;
     struct ex_list *ex_ptr;
+
+    if (!slirp->in_enabled) {
+        return;
+    }
 
     ar_op = ntohs(ah->ar_op);
     switch(ar_op) {
@@ -1233,31 +1241,39 @@ static int slirp_sbuf_load(QEMUFile *f, struct sbuf *sbuf)
     return 0;
 }
 
-static int slirp_socket_load(QEMUFile *f, struct socket *so)
+static int slirp_socket_load(QEMUFile *f, struct socket *so, int version_id)
 {
     if (tcp_attach(so) < 0)
         return -ENOMEM;
 
     so->so_urgc = qemu_get_be32(f);
-    so->so_ffamily = qemu_get_be16(f);
-    switch (so->so_ffamily) {
-    case AF_INET:
+    if (version_id <= 3) {
+        so->so_ffamily = AF_INET;
         so->so_faddr.s_addr = qemu_get_be32(f);
-        so->so_fport = qemu_get_be16(f);
-        break;
-    default:
-        error_report(
-                "so_ffamily unknown, unable to restore so_faddr and so_lport\n");
-    }
-    so->so_lfamily = qemu_get_be16(f);
-    switch (so->so_lfamily) {
-    case AF_INET:
         so->so_laddr.s_addr = qemu_get_be32(f);
+        so->so_fport = qemu_get_be16(f);
         so->so_lport = qemu_get_be16(f);
-        break;
-    default:
-        error_report(
-                "so_ffamily unknown, unable to restore so_laddr and so_lport\n");
+    } else {
+        so->so_ffamily = qemu_get_be16(f);
+        switch (so->so_ffamily) {
+        case AF_INET:
+            so->so_faddr.s_addr = qemu_get_be32(f);
+            so->so_fport = qemu_get_be16(f);
+            break;
+        default:
+            error_report(
+                "so_ffamily unknown, unable to restore so_faddr and so_lport");
+        }
+        so->so_lfamily = qemu_get_be16(f);
+        switch (so->so_lfamily) {
+        case AF_INET:
+            so->so_laddr.s_addr = qemu_get_be32(f);
+            so->so_lport = qemu_get_be16(f);
+            break;
+        default:
+            error_report(
+                "so_ffamily unknown, unable to restore so_laddr and so_lport");
+        }
     }
     so->so_iptos = qemu_get_byte(f);
     so->so_emu = qemu_get_byte(f);
@@ -1294,7 +1310,7 @@ static int slirp_state_load(QEMUFile *f, void *opaque, int version_id)
         if (!so)
             return -ENOMEM;
 
-        ret = slirp_socket_load(f, so);
+        ret = slirp_socket_load(f, so, version_id);
 
         if (ret < 0)
             return ret;

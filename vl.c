@@ -1748,6 +1748,8 @@ void qemu_system_reset(bool report)
 
     mc = current_machine ? MACHINE_GET_CLASS(current_machine) : NULL;
 
+    cpu_synchronize_all_states();
+
     if (mc && mc->reset) {
         mc->reset();
     } else {
@@ -1896,7 +1898,6 @@ static bool main_loop_should_exit(void)
     }
     if (qemu_reset_requested()) {
         pause_all_vcpus();
-        cpu_synchronize_all_states();
         qemu_system_reset(VMRESET_REPORT);
         resume_all_vcpus();
         if (!runstate_check(RUN_STATE_RUNNING) &&
@@ -1906,7 +1907,6 @@ static bool main_loop_should_exit(void)
     }
     if (qemu_wakeup_requested()) {
         pause_all_vcpus();
-        cpu_synchronize_all_states();
         qemu_system_reset(VMRESET_SILENT);
         notifier_list_notify(&wakeup_notifiers, &wakeup_reason);
         wakeup_reason = QEMU_WAKEUP_REASON_NONE;
