@@ -15,7 +15,10 @@
 #include "qemu/osdep.h"
 #include "hw/virtio/virtio.h"
 #include "9p.h"
-#include "9p-xattr.h"
+#ifdef WIN32
+#else
+    #include "9p-xattr.h"
+#endif
 #include "fsdev/qemu-fsdev.h"
 #include "9p-synth.h"
 #include "qemu/rcu.h"
@@ -152,8 +155,10 @@ static void v9fs_synth_fill_statbuf(V9fsSynthNode *node, struct stat *stbuf)
     stbuf->st_gid = 0;
     stbuf->st_rdev = 0;
     stbuf->st_size = 0;
+#ifndef WIN32
     stbuf->st_blksize = 0;
     stbuf->st_blocks = 0;
+#endif
     stbuf->st_atime = 0;
     stbuf->st_mtime = 0;
     stbuf->st_ctime = 0;
@@ -222,7 +227,11 @@ static void v9fs_synth_direntry(V9fsSynthNode *node,
 {
     strcpy(entry->d_name, node->name);
     entry->d_ino = node->attr->inode;
+#ifdef WIN32
+    #warning "Can cause problems!"
+#else
     entry->d_off = off + 1;
+#endif
 }
 
 static int v9fs_synth_get_dentry(V9fsSynthNode *dir, struct dirent *entry,

@@ -3,7 +3,34 @@
 
 #include <dirent.h>
 #include <utime.h>
-#include <sys/resource.h>
+#ifdef WIN32
+    //Bad workaround, from http://octave.org/doxygen/3.4/fcntl_8h.html
+    #define O_NOCTTY 0
+    #define O_NDELAY 0
+    #define O_NONBLOCK O_NDELAY
+    #define O_DSYNC 0
+    #define O_DIRECT 0
+    #define O_DIRECTORY 0
+    #define O_NOFOLLOW 0
+    #define O_NOATIME 0
+    #define O_SYNC 0
+    #define O_ASYNC 0
+
+    #define FASYNC 0
+
+    #define AT_REMOVEDIR 1
+
+    #define NAME_MAX 260
+
+    #define DELIMITER_STRING "\\"
+    #define DELIMITER_IN_PATH "%s\%s"
+    #define DELIMITER_IN_PATH2 "%s\%s\%s"
+#else
+    #include <sys/resource.h>
+    #define DELIMITER_STRING "/"
+    #define DELIMITER_IN_PATH "%s/%s"
+    #define DELIMITER_IN_PATH2 "%s/%s/%s"
+#endif
 #include <glib.h>
 #include "standard-headers/linux/virtio_9p.h"
 #include "hw/virtio/virtio.h"
@@ -110,7 +137,7 @@ enum p9_proto_version {
 #define FID_NON_RECLAIMABLE     0x2
 static inline char *rpath(FsContext *ctx, const char *path)
 {
-    return g_strdup_printf("%s/%s", ctx->fs_root, path);
+    return g_strdup_printf(DELIMITER_IN_PATH, ctx->fs_root, path);
 }
 
 /*
