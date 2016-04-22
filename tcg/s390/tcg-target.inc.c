@@ -221,7 +221,7 @@ typedef enum S390Opcode {
     RX_STH      = 0x40,
 } S390Opcode;
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%r0", "%r1", "%r2", "%r3", "%r4", "%r5", "%r6", "%r7",
     "%r8", "%r9", "%r10" "%r11" "%r12" "%r13" "%r14" "%r15"
@@ -348,15 +348,15 @@ static void patch_reloc(tcg_insn_unit *code_ptr, int type,
                         intptr_t value, intptr_t addend)
 {
     intptr_t pcrel2 = (tcg_insn_unit *)value - (code_ptr - 1);
-    assert(addend == -2);
+    tcg_debug_assert(addend == -2);
 
     switch (type) {
     case R_390_PC16DBL:
-        assert(pcrel2 == (int16_t)pcrel2);
+        tcg_debug_assert(pcrel2 == (int16_t)pcrel2);
         tcg_patch16(code_ptr, pcrel2);
         break;
     case R_390_PC32DBL:
-        assert(pcrel2 == (int32_t)pcrel2);
+        tcg_debug_assert(pcrel2 == (int32_t)pcrel2);
         tcg_patch32(code_ptr, pcrel2);
         break;
     default:

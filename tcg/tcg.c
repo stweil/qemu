@@ -31,11 +31,6 @@
 /* Define to jump the ELF file used to communicate with GDB.  */
 #undef DEBUG_JIT
 
-#if !defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-/* define it to suppress various consistency checks (faster) */
-#define NDEBUG
-#endif
-
 #include "qemu/cutils.h"
 #include "qemu/host-utils.h"
 #include "qemu/timer.h"
@@ -228,7 +223,7 @@ static void tcg_out_label(TCGContext *s, TCGLabel *l, tcg_insn_unit *ptr)
     intptr_t value = (intptr_t)ptr;
     TCGRelocation *r;
 
-    assert(!l->has_value);
+    tcg_debug_assert(!l->has_value);
 
     for (r = l->u.first_reloc; r != NULL; r = r->next) {
         patch_reloc(r->ptr, r->type, value, r->addend);
@@ -644,9 +639,9 @@ static void tcg_temp_free_internal(int idx)
     }
 #endif
 
-    assert(idx >= s->nb_globals && idx < s->nb_temps);
+    tcg_debug_assert(idx >= s->nb_globals && idx < s->nb_temps);
     ts = &s->temps[idx];
-    assert(ts->temp_allocated != 0);
+    tcg_debug_assert(ts->temp_allocated != 0);
     ts->temp_allocated = 0;
 
     k = ts->base_type + (ts->temp_local ? TCG_TYPE_COUNT : 0);
@@ -947,7 +942,7 @@ static char *tcg_get_arg_str_ptr(TCGContext *s, char *buf, int buf_size,
 static char *tcg_get_arg_str_idx(TCGContext *s, char *buf,
                                  int buf_size, int idx)
 {
-    assert(idx >= 0 && idx < s->nb_temps);
+    tcg_debug_assert(idx >= 0 && idx < s->nb_temps);
     return tcg_get_arg_str_ptr(s, buf, buf_size, &s->temps[idx]);
 }
 
@@ -1190,25 +1185,25 @@ void tcg_add_target_add_op_defs(const TCGTargetOpDef *tdefs)
         if (tdefs->op == (TCGOpcode)-1)
             break;
         op = tdefs->op;
-        assert((unsigned)op < NB_OPS);
+        tcg_debug_assert((unsigned)op < NB_OPS);
         def = &tcg_op_defs[op];
 #if defined(CONFIG_DEBUG_TCG)
         /* Duplicate entry in op definitions? */
-        assert(!def->used);
+        tcg_debug_assert(!def->used);
         def->used = 1;
 #endif
         nb_args = def->nb_iargs + def->nb_oargs;
         for(i = 0; i < nb_args; i++) {
             ct_str = tdefs->args_ct_str[i];
             /* Incomplete TCGTargetOpDef entry? */
-            assert(ct_str != NULL);
+            tcg_debug_assert(ct_str != NULL);
             tcg_regset_clear(def->args_ct[i].u.regs);
             def->args_ct[i].ct = 0;
             if (ct_str[0] >= '0' && ct_str[0] <= '9') {
                 int oarg;
                 oarg = ct_str[0] - '0';
-                assert(oarg < def->nb_oargs);
-                assert(def->args_ct[oarg].ct & TCG_CT_REG);
+                tcg_debug_assert(oarg < def->nb_oargs);
+                tcg_debug_assert(def->args_ct[oarg].ct & TCG_CT_REG);
                 /* TCG_CT_ALIAS is for the output arguments. The input
                    argument is tagged with TCG_CT_IALIAS. */
                 def->args_ct[i] = def->args_ct[oarg];
@@ -1237,7 +1232,7 @@ void tcg_add_target_add_op_defs(const TCGTargetOpDef *tdefs)
         }
 
         /* TCGTargetOpDef entry with too much information? */
-        assert(i == TCG_MAX_OP_ARGS || tdefs->args_ct_str[i] == NULL);
+        tcg_debug_assert(i == TCG_MAX_OP_ARGS || tdefs->args_ct_str[i] == NULL);
 
         /* sort the constraints (XXX: this is just an heuristic) */
         sort_constraints(def, 0, def->nb_oargs);
@@ -1585,7 +1580,7 @@ static void tcg_liveness_analysis(TCGContext *s)
 }
 #endif
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static void dump_regs(TCGContext *s)
 {
     TCGTemp *ts;
@@ -1684,7 +1679,7 @@ static void tcg_reg_sync(TCGContext *s, TCGReg reg, TCGRegSet allocated_regs)
 {
     TCGTemp *ts = s->reg_to_temp[reg];
 
-    assert(ts->val_type == TEMP_VAL_REG);
+    tcg_debug_assert(ts->val_type == TEMP_VAL_REG);
     if (!ts->mem_coherent && !ts->fixed_reg) {
         if (!ts->mem_allocated) {
             temp_allocate_frame(s, temp_idx(s, ts));
@@ -1821,7 +1816,7 @@ static inline void temp_save(TCGContext *s, TCGTemp *ts,
     /* ??? Liveness does not yet incorporate indirect bases.  */
     if (!ts->indirect_base) {
         /* The liveness analysis already ensures that globals are back
-           in memory. Keep an assert for safety. */
+           in memory. Keep an tcg_debug_assert for safety. */
         tcg_debug_assert(ts->val_type == TEMP_VAL_MEM || ts->fixed_reg);
         return;
     }
@@ -1879,8 +1874,8 @@ static void tcg_reg_alloc_bb_end(TCGContext *s, TCGRegSet allocated_regs)
             /* ??? Liveness does not yet incorporate indirect bases.  */
             if (!ts->indirect_base) {
                 /* The liveness analysis already ensures that temps are dead.
-                   Keep an assert for safety. */
-                assert(ts->val_type == TEMP_VAL_DEAD);
+                   Keep an tcg_debug_assert for safety. */
+                tcg_debug_assert(ts->val_type == TEMP_VAL_DEAD);
                 continue;
             }
 #endif
@@ -1951,9 +1946,9 @@ static void tcg_reg_alloc_mov(TCGContext *s, const TCGOpDef *def,
     if (IS_DEAD_ARG(0) && !ots->fixed_reg) {
         /* mov to a non-saved dead register makes no sense (even with
            liveness analysis disabled). */
-        assert(NEED_SYNC_ARG(0));
+        tcg_debug_assert(NEED_SYNC_ARG(0));
         /* The code above should have moved the temp to a register. */
-        assert(ts->val_type == TEMP_VAL_REG);
+        tcg_debug_assert(ts->val_type == TEMP_VAL_REG);
         if (!ots->mem_allocated) {
             temp_allocate_frame(s, args[0]);
         }
@@ -1981,7 +1976,7 @@ static void tcg_reg_alloc_mov(TCGContext *s, const TCGOpDef *def,
     } else {
         /* The code in the first if block should have moved the
            temp to a register. */
-        assert(ts->val_type == TEMP_VAL_REG);
+        tcg_debug_assert(ts->val_type == TEMP_VAL_REG);
         if (IS_DEAD_ARG(1) && !ts->fixed_reg && !ots->fixed_reg) {
             /* the mov can be suppressed */
             if (ots->val_type == TEMP_VAL_REG) {
@@ -2282,7 +2277,7 @@ static void tcg_reg_alloc_call(TCGContext *s, int nb_oargs, int nb_iargs,
         arg = args[i];
         ts = &s->temps[arg];
         reg = tcg_target_call_oarg_regs[i];
-        assert(s->reg_to_temp[reg] == NULL);
+        tcg_debug_assert(s->reg_to_temp[reg] == NULL);
 
         if (ts->fixed_reg) {
             if (ts->reg != reg) {
@@ -2453,7 +2448,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
             tcg_reg_alloc_op(s, def, opc, args, dead_args, sync_args);
             break;
         }
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
         check_regs(s);
 #endif
         /* Test for (pending) buffer overflow.  The assumption is that any
