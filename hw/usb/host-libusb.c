@@ -34,7 +34,7 @@
  */
 
 #include "qemu/osdep.h"
-#ifdef CONFIG_PPOLL
+#ifndef CONFIG_WIN32
 #include <poll.h>
 #endif
 #include <libusb.h>
@@ -206,24 +206,20 @@ static const char *err_names[] = {
 static libusb_context *ctx;
 static uint32_t loglevel;
 
-#ifdef CONFIG_PPOLL
+#ifndef CONFIG_WIN32
+
 static void usb_host_handle_fd(void *opaque)
 {
     struct timeval tv = { 0, 0 };
     libusb_handle_events_timeout(ctx, &tv);
 }
-#endif
 
 static void usb_host_add_fd(int fd, short events, void *user_data)
 {
-#ifdef CONFIG_PPOLL
     qemu_set_fd_handler(fd,
                         (events & POLLIN)  ? usb_host_handle_fd : NULL,
                         (events & POLLOUT) ? usb_host_handle_fd : NULL,
                         ctx);
-#else
-    g_assert(events == 0);
-#endif
 }
 
 static void usb_host_del_fd(int fd, void *user_data)
@@ -231,9 +227,13 @@ static void usb_host_del_fd(int fd, void *user_data)
     qemu_set_fd_handler(fd, NULL, NULL, NULL);
 }
 
+#endif /* !CONFIG_WIN32 */
+
 static int usb_host_init(void)
 {
+#ifndef CONFIG_WIN32
     const struct libusb_pollfd **poll;
+#endif
     int i, rc;
 
     if (ctx) {
@@ -244,7 +244,9 @@ static int usb_host_init(void)
         return -1;
     }
     libusb_set_debug(ctx, loglevel);
-
+#ifdef CONFIG_WIN32
+    /* FIXME: add support for Windows. */
+#else
     libusb_set_pollfd_notifiers(ctx, usb_host_add_fd,
                                 usb_host_del_fd,
                                 ctx);
@@ -255,6 +257,7 @@ static int usb_host_init(void)
         }
     }
     free(poll);
+#endif
     return 0;
 }
 

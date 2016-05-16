@@ -91,7 +91,7 @@ static ssize_t block_crypto_write_func(QCryptoBlock *block,
     struct BlockCryptoCreateData *data = opaque;
     ssize_t ret;
 
-    ret = blk_pwrite(data->blk, offset, buf, buflen);
+    ret = blk_pwrite(data->blk, offset, buf, buflen, 0);
     if (ret < 0) {
         error_setg_errno(errp, -ret, "Could not write encryption header");
         return ret;
@@ -196,7 +196,6 @@ block_crypto_open_opts_init(QCryptoBlockFormat format,
     OptsVisitor *ov;
     QCryptoBlockOpenOptions *ret = NULL;
     Error *local_err = NULL;
-    Error *end_err = NULL;
 
     ret = g_new0(QCryptoBlockOpenOptions, 1);
     ret->format = format;
@@ -219,9 +218,11 @@ block_crypto_open_opts_init(QCryptoBlockFormat format,
         error_setg(&local_err, "Unsupported block format %d", format);
         break;
     }
+    if (!local_err) {
+        visit_check_struct(opts_get_visitor(ov), &local_err);
+    }
 
-    visit_end_struct(opts_get_visitor(ov), &end_err);
-    error_propagate(&local_err, end_err);
+    visit_end_struct(opts_get_visitor(ov));
 
  out:
     if (local_err) {
@@ -242,7 +243,6 @@ block_crypto_create_opts_init(QCryptoBlockFormat format,
     OptsVisitor *ov;
     QCryptoBlockCreateOptions *ret = NULL;
     Error *local_err = NULL;
-    Error *end_err = NULL;
 
     ret = g_new0(QCryptoBlockCreateOptions, 1);
     ret->format = format;
@@ -265,9 +265,11 @@ block_crypto_create_opts_init(QCryptoBlockFormat format,
         error_setg(&local_err, "Unsupported block format %d", format);
         break;
     }
+    if (!local_err) {
+        visit_check_struct(opts_get_visitor(ov), &local_err);
+    }
 
-    visit_end_struct(opts_get_visitor(ov), &end_err);
-    error_propagate(&local_err, end_err);
+    visit_end_struct(opts_get_visitor(ov));
 
  out:
     if (local_err) {
