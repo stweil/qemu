@@ -4,6 +4,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "hw/timer/bcm2835_timer.h"
 #include "qemu/main-loop.h"
 

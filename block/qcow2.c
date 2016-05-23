@@ -36,6 +36,7 @@
 #include "trace.h"
 #include "qemu/option_int.h"
 #include "qemu/cutils.h"
+#include "qemu/bswap.h"
 
 /*
   Differences with QCOW:
@@ -2412,7 +2413,7 @@ static bool is_zero_cluster(BlockDriverState *bs, int64_t start)
     BlockDriverState *file;
     int64_t res = bdrv_get_block_status_above(bs, NULL, start,
                                               s->cluster_sectors, &nr, &file);
-    return res >= 0 && ((res & BDRV_BLOCK_ZERO) || !(res & BDRV_BLOCK_DATA));
+    return res >= 0 && (res & BDRV_BLOCK_ZERO) && nr == s->cluster_sectors;
 }
 
 static bool is_zero_cluster_top_locked(BlockDriverState *bs, int64_t start)
@@ -2423,6 +2424,7 @@ static bool is_zero_cluster_top_locked(BlockDriverState *bs, int64_t start)
     int ret;
 
     ret = qcow2_get_cluster_offset(bs, start << BDRV_SECTOR_BITS, &nr, &off);
+    assert(nr == s->cluster_sectors);
     return ret == QCOW2_CLUSTER_UNALLOCATED || ret == QCOW2_CLUSTER_ZERO;
 }
 

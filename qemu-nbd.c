@@ -26,6 +26,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/error-report.h"
 #include "qemu/config-file.h"
+#include "qemu/bswap.h"
 #include "block/snapshot.h"
 #include "qapi/util.h"
 #include "qapi/qmp/qstring.h"
@@ -526,10 +527,7 @@ int main(int argc, char **argv)
     sa_sigterm.sa_handler = termsig_handler;
     sigaction(SIGTERM, &sa_sigterm, NULL);
 
-    if (qcrypto_init(&local_err) < 0) {
-        error_reportf_err(local_err, "cannot initialize crypto: ");
-        exit(1);
-    }
+    qcrypto_init(&error_fatal);
 
     module_call_init(MODULE_INIT_QOM);
     qemu_add_opts(&qemu_object_opts);

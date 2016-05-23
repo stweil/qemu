@@ -10,6 +10,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "cpu.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "sysemu/char.h"

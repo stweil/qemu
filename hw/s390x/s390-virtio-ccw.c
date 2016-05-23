@@ -18,8 +18,8 @@
 #include "s390-virtio.h"
 #include "hw/s390x/sclp.h"
 #include "hw/s390x/s390_flic.h"
-#include "ioinst.h"
-#include "css.h"
+#include "hw/s390x/ioinst.h"
+#include "hw/s390x/css.h"
 #include "virtio-ccw.h"
 #include "qemu/config-file.h"
 #include "s390-pci-bus.h"
@@ -330,7 +330,6 @@ static const TypeInfo ccw_machine_info = {
         HW_COMPAT_2_5
 
 #define CCW_COMPAT_2_4 \
-        CCW_COMPAT_2_5 \
         HW_COMPAT_2_4 \
         {\
             .driver   = TYPE_S390_SKEYS,\

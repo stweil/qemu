@@ -4,6 +4,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "hw/misc/bcm2835_power.h"
 #include "hw/misc/bcm2835_mbox_defs.h"
 

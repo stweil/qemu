@@ -8,6 +8,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "cpu.h"
 #include "hw/sysbus.h"
 #include "hw/boards.h"
 #include "hw/arm/arm.h"

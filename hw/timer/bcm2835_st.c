@@ -6,6 +6,7 @@
 /* Based on several timers code found in various QEMU source files. */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "hw/timer/bcm2835_st.h"
 
 static void bcm2835_st_update(BCM2835StState *s)

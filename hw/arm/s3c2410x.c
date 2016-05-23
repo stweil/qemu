@@ -10,6 +10,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "cpu.h"
 #include "hw/sysbus.h"
 #include "qapi/error.h"          /* error_abort */
 #include "sysemu/sysemu.h"

@@ -28,6 +28,7 @@
 #include "cpu.h"
 #include "trace.h"
 #include "disas/disas.h"
+#include "exec/exec-all.h"
 #include "tcg.h"
 #if defined(CONFIG_USER_ONLY)
 #include "qemu.h"
@@ -1564,8 +1565,7 @@ void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr)
         rcu_read_unlock();
         return;
     }
-    ram_addr = (memory_region_get_ram_addr(mr) & TARGET_PAGE_MASK)
-        + addr;
+    ram_addr = memory_region_get_ram_addr(mr) + addr;
     tb_invalidate_phys_page_range(ram_addr, ram_addr + 1, 0);
     rcu_read_unlock();
 }

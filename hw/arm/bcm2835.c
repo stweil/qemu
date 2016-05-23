@@ -9,6 +9,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "cpu.h"
 #include "hw/arm/bcm2835.h"
 #include "hw/arm/raspi_platform.h"
 #include "hw/sysbus.h"

@@ -171,8 +171,10 @@ static void mips_timer_cb(void *opaque)
 #endif
 }
 
-void cpu_mips_clock_init (CPUMIPSState *env)
+void cpu_mips_clock_init (MIPSCPU *cpu)
 {
+    CPUMIPSState *env = &cpu->env;
+
     /*
      * If we're in KVM mode, don't create the periodic timer, that is handled in
      * kernel.

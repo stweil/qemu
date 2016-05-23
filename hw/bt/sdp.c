@@ -19,6 +19,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu-common.h"
+#include "qemu/host-utils.h"
 #include "hw/bt.h"
 
 /* windef.h also defines FALSE, TRUE, so undef it here. */

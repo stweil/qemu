@@ -18,6 +18,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "cpu.h"
 #include "sysemu/char.h"        /* qemu_chr_new */
 #include "hw/hw.h"
 #include "hw/arm/arm.h"

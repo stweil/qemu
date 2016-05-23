@@ -26,6 +26,7 @@
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
 #include "cpu.h"
+#include "exec/exec-all.h"
 #if defined(CONFIG_USER_ONLY) && defined(TARGET_X86_64)
 #include "vsyscall.h"
 #endif
@@ -3805,6 +3806,7 @@ static void handle_arg_log(const char *arg)
         qemu_print_log_usage(stdout);
         exit(EXIT_FAILURE);
     }
+    qemu_log_needs_buffers();
     qemu_set_log(mask);
 }
 

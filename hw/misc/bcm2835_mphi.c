@@ -4,6 +4,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "hw/misc/bcm2835_mphi.h"
 
 static void bcm2835_mphi_update_irq(BCM2835MphiState *s)
