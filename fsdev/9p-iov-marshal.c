@@ -12,10 +12,8 @@
  */
 
 #include "qemu/osdep.h"
-#include <glib.h>
 #include <glib/gprintf.h>
 #include <utime.h>
-#include <sys/uio.h>
 
 #include "9p-iov-marshal.h"
 #include "qemu/bswap.h"

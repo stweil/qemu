@@ -76,8 +76,6 @@ const char *host_net_devices[] = {
     NULL,
 };
 
-int default_net = 1;
-
 /***********************************************************/
 /* network device redirectors */
 
@@ -724,7 +722,7 @@ ssize_t qemu_deliver_packet_iov(NetClientState *sender,
         return 0;
     }
 
-    if (nc->info->receive_iov) {
+    if (nc->info->receive_iov && !(flags & QEMU_NET_PACKET_FLAG_RAW)) {
         ret = nc->info->receive_iov(nc, iov, iovcnt);
     } else {
         ret = nc_sendv_compat(nc, iov, iovcnt, flags);
@@ -1026,8 +1024,7 @@ int net_client_init(QemuOpts *opts, int is_netdev, Error **errp)
     void *object = NULL;
     Error *err = NULL;
     int ret = -1;
-    OptsVisitor *ov = opts_visitor_new(opts);
-    Visitor *v = opts_get_visitor(ov);
+    Visitor *v = opts_visitor_new(opts);
 
     {
         /* Parse convenience option format ip6-net=fec0::0[/64] */
@@ -1077,7 +1074,7 @@ int net_client_init(QemuOpts *opts, int is_netdev, Error **errp)
     }
 
     error_propagate(errp, err);
-    opts_visitor_cleanup(ov);
+    visit_free(v);
     return ret;
 }
 
@@ -1201,7 +1198,7 @@ static void netfilter_print_info(Monitor *mon, NetFilterState *nf)
     char *str;
     ObjectProperty *prop;
     ObjectPropertyIterator iter;
-    StringOutputVisitor *ov;
+    Visitor *v;
 
     /* generate info str */
     object_property_iter_init(&iter, OBJECT(nf));
@@ -1209,11 +1206,10 @@ static void netfilter_print_info(Monitor *mon, NetFilterState *nf)
         if (!strcmp(prop->name, "type")) {
             continue;
         }
-        ov = string_output_visitor_new(false);
-        object_property_get(OBJECT(nf), string_output_get_visitor(ov),
-                            prop->name, NULL);
-        str = string_output_get_string(ov);
-        string_output_visitor_cleanup(ov);
+        v = string_output_visitor_new(false, &str);
+        object_property_get(OBJECT(nf), v, prop->name, NULL);
+        visit_complete(v, &str);
+        visit_free(v);
         monitor_printf(mon, ",%s=%s", prop->name, str);
         g_free(str);
     }
@@ -1415,18 +1411,6 @@ void net_check_clients(void)
     NetClientState *nc;
     int i;
 
-    /* Don't warn about the default network setup that you get if
-     * no command line -net or -netdev options are specified. There
-     * are two cases that we would otherwise complain about:
-     * (1) board doesn't support a NIC but the implicit "-net nic"
-     * requested one
-     * (2) CONFIG_SLIRP not set, in which case the implicit "-net nic"
-     * sets up a nic that isn't connected to anything.
-     */
-    if (default_net) {
-        return;
-    }
-
     net_hub_check_clients();
 
     QTAILQ_FOREACH(nc, &net_clients, next) {
@@ -1483,14 +1467,6 @@ int net_init_clients(void)
 {
     QemuOptsList *net = qemu_find_opts("net");
 
-    if (default_net) {
-        /* if no clients, we use a default config */
-        qemu_opts_set(net, NULL, "type", "nic", &error_abort);
-#ifdef CONFIG_SLIRP
-        qemu_opts_set(net, NULL, "type", "user", &error_abort);
-#endif
-    }
-
     net_change_state_entry =
         qemu_add_vm_change_state_handler(net_vm_change_state_handler, NULL);
 
@@ -1521,7 +1497,6 @@ int net_client_parse(QemuOptsList *opts_list, const char *optarg)
         return -1;
     }
 
-    default_net = 0;
     return 0;
 }
 
@@ -1573,3 +1548,73 @@ QemuOptsList qemu_net_opts = {
         { /* end of list */ }
     },
 };
+
+void net_socket_rs_init(SocketReadState *rs,
+                        SocketReadStateFinalize *finalize)
+{
+    rs->state = 0;
+    rs->index = 0;
+    rs->packet_len = 0;
+    memset(rs->buf, 0, sizeof(rs->buf));
+    rs->finalize = finalize;
+}
+
+/*
+ * Returns
+ * 0: SocketReadState is not ready
+ * 1: SocketReadState is ready
+ * otherwise error occurs
+ */
+int net_fill_rstate(SocketReadState *rs, const uint8_t *buf, int size)
+{
+    unsigned int l;
+
+    while (size > 0) {
+        /* reassemble a packet from the network */
+        switch (rs->state) { /* 0 = getting length, 1 = getting data */
+        case 0:
+            l = 4 - rs->index;
+            if (l > size) {
+                l = size;
+            }
+            memcpy(rs->buf + rs->index, buf, l);
+            buf += l;
+            size -= l;
+            rs->index += l;
+            if (rs->index == 4) {
+                /* got length */
+                rs->packet_len = ntohl(*(uint32_t *)rs->buf);
+                rs->index = 0;
+                rs->state = 1;
+            }
+            break;
+        case 1:
+            l = rs->packet_len - rs->index;
+            if (l > size) {
+                l = size;
+            }
+            if (rs->index + l <= sizeof(rs->buf)) {
+                memcpy(rs->buf + rs->index, buf, l);
+            } else {
+                fprintf(stderr, "serious error: oversized packet received,"
+                    "connection terminated.\n");
+                rs->index = rs->state = 0;
+                return -1;
+            }
+
+            rs->index += l;
+            buf += l;
+            size -= l;
+            if (rs->index >= rs->packet_len) {
+                rs->index = 0;
+                rs->state = 0;
+                if (rs->finalize) {
+                    rs->finalize(rs);
+                }
+                return 1;
+            }
+            break;
+        }
+    }
+    return 0;
+}

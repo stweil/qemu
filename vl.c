@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 #include "qemu/osdep.h"
+#include "qemu-version.h"
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
 
@@ -51,7 +52,6 @@ int main(int argc, char **argv)
 #define main qemu_main
 #endif /* CONFIG_COCOA */
 
-#include <glib.h>
 
 #include "qemu/error-report.h"
 #include "qemu/sockets.h"
@@ -154,7 +154,7 @@ CharDriverState *sclp_hds[MAX_SCLP_CONSOLES];
 int win2k_install_hack = 0;
 int singlestep = 0;
 int smp_cpus = 1;
-int max_cpus = 0;
+int max_cpus = 1;
 int smp_cores = 1;
 int smp_threads = 1;
 int acpi_enabled = 1;
@@ -210,6 +210,7 @@ static int default_floppy = 1;
 static int default_cdrom = 1;
 static int default_sdcard = 1;
 static int default_vga = 1;
+static int default_net = 1;
 
 static struct {
     const char *driver;
@@ -259,26 +260,6 @@ static QemuOptsList qemu_sandbox_opts = {
         {
             .name = "enable",
             .type = QEMU_OPT_BOOL,
-        },
-        { /* end of list */ }
-    },
-};
-
-static QemuOptsList qemu_trace_opts = {
-    .name = "trace",
-    .implied_opt_name = "enable",
-    .head = QTAILQ_HEAD_INITIALIZER(qemu_trace_opts.head),
-    .desc = {
-        {
-            .name = "enable",
-            .type = QEMU_OPT_STRING,
-        },
-        {
-            .name = "events",
-            .type = QEMU_OPT_STRING,
-        },{
-            .name = "file",
-            .type = QEMU_OPT_STRING,
         },
         { /* end of list */ }
     },
@@ -1074,11 +1055,6 @@ bool defaults_enabled(void)
     return has_defaults;
 }
 
-bool usb_enabled(void)
-{
-    return machine_usb(current_machine);
-}
-
 #ifndef _WIN32
 static int parse_add_fd(void *opaque, QemuOpts *opts, Error **errp)
 {
@@ -1225,7 +1201,6 @@ static QemuOptsList qemu_smp_opts = {
 static void smp_parse(QemuOpts *opts)
 {
     if (opts) {
-
         unsigned cpus    = qemu_opt_get_number(opts, "cpus", 0);
         unsigned sockets = qemu_opt_get_number(opts, "sockets", 0);
         unsigned cores   = qemu_opt_get_number(opts, "cores", 0);
@@ -1242,8 +1217,10 @@ static void smp_parse(QemuOpts *opts)
         } else if (cores == 0) {
             threads = threads > 0 ? threads : 1;
             cores = cpus / (sockets * threads);
+            cores = cores > 0 ? cores : 1;
         } else if (threads == 0) {
             threads = cpus / (cores * sockets);
+            threads = threads > 0 ? threads : 1;
         } else if (sockets * cores * threads < cpus) {
             error_report("cpu topology: "
                          "sockets (%u) * cores (%u) * threads (%u) < "
@@ -1253,6 +1230,17 @@ static void smp_parse(QemuOpts *opts)
         }
 
         max_cpus = qemu_opt_get_number(opts, "maxcpus", cpus);
+
+        if (max_cpus > MAX_CPUMASK_BITS) {
+            error_report("unsupported number of maxcpus");
+            exit(1);
+        }
+
+        if (max_cpus < cpus) {
+            error_report("maxcpus must be equal to or greater than smp");
+            exit(1);
+        }
+
         if (sockets * cores * threads > max_cpus) {
             error_report("cpu topology: "
                          "sockets (%u) * cores (%u) * threads (%u) > "
@@ -1262,25 +1250,11 @@ static void smp_parse(QemuOpts *opts)
         }
 
         smp_cpus = cpus;
-        smp_cores = cores > 0 ? cores : 1;
-        smp_threads = threads > 0 ? threads : 1;
-
+        smp_cores = cores;
+        smp_threads = threads;
     }
 
-    if (max_cpus == 0) {
-        max_cpus = smp_cpus;
-    }
-
-    if (max_cpus > MAX_CPUMASK_BITS) {
-        error_report("unsupported number of maxcpus");
-        exit(1);
-    }
-    if (max_cpus < smp_cpus) {
-        error_report("maxcpus must be equal to or greater than smp");
-        exit(1);
-    }
-
-    if (smp_cpus > 1 || smp_cores > 1 || smp_threads > 1) {
+    if (smp_cpus > 1) {
         Error *blocker = NULL;
         error_setg(&blocker, QERR_REPLAY_NOT_SUPPORTED, "smp");
         replay_add_blocker(blocker);
@@ -1395,7 +1369,7 @@ static int usb_device_add(const char *devname)
     const char *p;
 #endif
 
-    if (!usb_enabled()) {
+    if (!machine_usb(current_machine)) {
         return -1;
     }
 
@@ -1427,7 +1401,7 @@ static int usb_device_del(const char *devname)
         return -1;
     }
 
-    if (!usb_enabled()) {
+    if (!machine_usb(current_machine)) {
         return -1;
     }
 
@@ -1535,6 +1509,7 @@ MachineInfoList *qmp_query_machines(Error **errp)
 
         info->name = g_strdup(mc->name);
         info->cpu_max = !mc->max_cpus ? 1 : mc->max_cpus;
+        info->hotpluggable_cpus = !!mc->query_hotpluggable_cpus;
 
         entry = g_malloc0(sizeof(*entry));
         entry->value = info;
@@ -2399,10 +2374,7 @@ static int chardev_init_func(void *opaque, QemuOpts *opts, Error **errp)
 #ifdef CONFIG_VIRTFS
 static int fsdev_init_func(void *opaque, QemuOpts *opts, Error **errp)
 {
-    int ret;
-    ret = qemu_fsdev_add(opts);
-
-    return ret;
+    return qemu_fsdev_add(opts);
 }
 #endif
 
@@ -2742,6 +2714,11 @@ void qemu_add_machine_init_done_notifier(Notifier *notify)
     }
 }
 
+void qemu_remove_machine_init_done_notifier(Notifier *notify)
+{
+    notifier_remove(notify);
+}
+
 static void qemu_run_machine_init_done_notifiers(void)
 {
     notifier_list_notify(&machine_init_done_notifiers, NULL);
@@ -2997,7 +2974,6 @@ int main(int argc, char **argv)
     const char *qtest_log = NULL;
     const char *pid_file = NULL;
     const char *incoming = NULL;
-    int show_vnc_port = 0;
     bool defconfig = true;
     bool userconfig = true;
     bool nographic = false;
@@ -3011,6 +2987,7 @@ int main(int argc, char **argv)
     FILE *vmstate_dump_file = NULL;
     Error *main_loop_err = NULL;
     Error *err = NULL;
+    bool list_data_dirs = false;
 
     qemu_init_cpu_loop();
     qemu_mutex_lock_iothread();
@@ -3114,7 +3091,7 @@ int main(int argc, char **argv)
 
             popt = lookup_opt(argc, argv, &optarg, &optind);
             if (!(popt->arch_mask & arch_type)) {
-                printf("Option %s not supported for this target\n", popt->name);
+                error_report("Option not supported for this target");
                 exit(1);
             }
             switch(popt->index) {
@@ -3306,11 +3283,13 @@ int main(int argc, char **argv)
                 fd_bootchk = 0;
                 break;
             case QEMU_OPTION_netdev:
+                default_net = 0;
                 if (net_client_parse(qemu_find_opts("netdev"), optarg) == -1) {
                     exit(1);
                 }
                 break;
             case QEMU_OPTION_net:
+                default_net = 0;
                 if (net_client_parse(qemu_find_opts("net"), optarg) == -1) {
                     exit(1);
                 }
@@ -3386,7 +3365,7 @@ int main(int argc, char **argv)
                 log_file = optarg;
                 break;
             case QEMU_OPTION_DFILTER:
-                qemu_set_dfilter_ranges(optarg);
+                qemu_set_dfilter_ranges(optarg, &error_fatal);
                 break;
             case QEMU_OPTION_s:
                 add_device_config(DEV_GDB, "tcp::" DEFAULT_GDBSTUB_PORT);
@@ -3395,7 +3374,9 @@ int main(int argc, char **argv)
                 add_device_config(DEV_GDB, optarg);
                 break;
             case QEMU_OPTION_L:
-                if (data_dir_idx < ARRAY_SIZE(data_dir)) {
+                if (is_help_option(optarg)) {
+                    list_data_dirs = true;
+                } else if (data_dir_idx < ARRAY_SIZE(data_dir)) {
                     data_dir[data_dir_idx++] = optarg;
                 }
                 break;
@@ -3888,43 +3869,29 @@ int main(int argc, char **argv)
                 break;
             case QEMU_OPTION_xen_domid:
                 if (!(xen_available())) {
-                    printf("Option %s not supported for this target\n", popt->name);
+                    error_report("Option not supported for this target");
                     exit(1);
                 }
                 xen_domid = atoi(optarg);
                 break;
             case QEMU_OPTION_xen_create:
                 if (!(xen_available())) {
-                    printf("Option %s not supported for this target\n", popt->name);
+                    error_report("Option not supported for this target");
                     exit(1);
                 }
                 xen_mode = XEN_CREATE;
                 break;
             case QEMU_OPTION_xen_attach:
                 if (!(xen_available())) {
-                    printf("Option %s not supported for this target\n", popt->name);
+                    error_report("Option not supported for this target");
                     exit(1);
                 }
                 xen_mode = XEN_ATTACH;
                 break;
             case QEMU_OPTION_trace:
-            {
-                opts = qemu_opts_parse_noisily(qemu_find_opts("trace"),
-                                               optarg, true);
-                if (!opts) {
-                    exit(1);
-                }
-                if (qemu_opt_get(opts, "enable")) {
-                    trace_enable_events(qemu_opt_get(opts, "enable"));
-                }
-                trace_init_events(qemu_opt_get(opts, "events"));
-                if (trace_file) {
-                    g_free(trace_file);
-                }
-                trace_file = g_strdup(qemu_opt_get(opts, "file"));
-                qemu_opts_del(opts);
+                g_free(trace_file);
+                trace_file = trace_opt_parse(optarg);
                 break;
-            }
             case QEMU_OPTION_trace_unassigned:
                 trace_unassigned = true;
                 break;
@@ -4089,13 +4056,6 @@ int main(int argc, char **argv)
         qemu_set_hw_version(machine_class->hw_version);
     }
 
-    /* Init CPU def lists, based on config
-     * - Must be called after all the qemu_read_config_file() calls
-     * - Must be called before list_cpus()
-     * - Must be called before machine_class->init()
-     */
-    cpudef_init();
-
     if (cpu_model && is_help_option(cpu_model)) {
         list_cpus(stdout, &fprintf, cpu_model);
         exit(0);
@@ -4109,7 +4069,7 @@ int main(int argc, char **argv)
     /* Open the logfile at this point and set the log mask if necessary.
      */
     if (log_file) {
-        qemu_set_log_filename(log_file);
+        qemu_set_log_filename(log_file, &error_fatal);
     }
 
     if (log_mask) {
@@ -4135,6 +4095,14 @@ int main(int argc, char **argv)
     /* If all else fails use the install path specified when building. */
     if (data_dir_idx < ARRAY_SIZE(data_dir)) {
         data_dir[data_dir_idx++] = CONFIG_QEMU_DATADIR;
+    }
+
+    /* -L help lists the data directories and exits. */
+    if (list_data_dirs) {
+        for (i = 0; i < data_dir_idx; i++) {
+            printf("%s\n", data_dir[i]);
+        }
+        exit(0);
     }
 
     smp_parse(qemu_opts_find(qemu_find_opts("smp-opts"), NULL));
@@ -4263,7 +4231,6 @@ int main(int argc, char **argv)
         display_type = DT_COCOA;
 #elif defined(CONFIG_VNC)
         vnc_parse("localhost:0,to=99,id=default", &error_abort);
-        show_vnc_port = 1;
 #else
         display_type = DT_NONE;
 #endif
@@ -4410,6 +4377,14 @@ int main(int argc, char **argv)
     /* clean up network at qemu process termination */
     atexit(&net_cleanup);
 
+    if (default_net) {
+        QemuOptsList *net = qemu_find_opts("net");
+        qemu_opts_set(net, NULL, "type", "nic", &error_abort);
+#ifdef CONFIG_SLIRP
+        qemu_opts_set(net, NULL, "type", "user", &error_abort);
+#endif
+    }
+
     if (net_init_clients() < 0) {
         exit(1);
     }
@@ -4539,7 +4514,7 @@ int main(int argc, char **argv)
     }
 
     /* init USB devices */
-    if (usb_enabled()) {
+    if (machine_usb(current_machine)) {
         if (foreach_device_config(DEV_USB, usb_parse) < 0)
             exit(1);
     }
@@ -4558,7 +4533,18 @@ int main(int argc, char **argv)
     /* Did we create any drives that we failed to create a device for? */
     drive_check_orphaned();
 
-    net_check_clients();
+    /* Don't warn about the default network setup that you get if
+     * no command line -net or -netdev options are specified. There
+     * are two cases that we would otherwise complain about:
+     * (1) board doesn't support a NIC but the implicit "-net nic"
+     * requested one
+     * (2) CONFIG_SLIRP not set, in which case the implicit "-net nic"
+     * sets up a nic that isn't connected to anything.
+     */
+    if (!default_net) {
+        net_check_clients();
+    }
+
 
     if (boot_once) {
         qemu_boot_set(boot_once, &error_fatal);
@@ -4589,13 +4575,10 @@ int main(int argc, char **argv)
     os_setup_signal_handling();
 
     /* init remote displays */
+#ifdef CONFIG_VNC
     qemu_opts_foreach(qemu_find_opts("vnc"),
                       vnc_init_func, NULL, NULL);
-    if (show_vnc_port) {
-        char *ret = vnc_display_local_addr("default");
-        printf("VNC server running on '%s'\n", ret);
-        g_free(ret);
-    }
+#endif
 
     if (using_spice) {
         qemu_spice_display_init();

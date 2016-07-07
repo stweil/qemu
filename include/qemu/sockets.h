@@ -51,6 +51,7 @@ SocketAddress *socket_parse(const char *str, Error **errp);
 int socket_connect(SocketAddress *addr, Error **errp,
                    NonBlockingConnectHandler *callback, void *opaque);
 int socket_listen(SocketAddress *addr, Error **errp);
+void socket_listen_cleanup(int fd, Error **errp);
 int socket_dgram(SocketAddress *remote, SocketAddress *local, Error **errp);
 
 /* Old, ipv4 only bits.  Don't use for new code. */
@@ -106,8 +107,18 @@ SocketAddress *socket_local_address(int fd, Error **errp);
  */
 SocketAddress *socket_remote_address(int fd, Error **errp);
 
-
-void qapi_copy_SocketAddress(SocketAddress **p_dest,
-                             SocketAddress *src);
-
+/**
+ * socket_address_to_string:
+ * @addr: the socket address struct
+ * @errp: pointer to uninitialized error object
+ *
+ * Get the string representation of the socket
+ * address. A pointer to the char array containing
+ * string format will be returned, the caller is
+ * required to release the returned value when no
+ * longer required with g_free.
+ *
+ * Returns: the socket address in string format, or NULL on error
+ */
+char *socket_address_to_string(struct SocketAddress *addr, Error **errp);
 #endif /* QEMU_SOCKET_H */

@@ -663,6 +663,11 @@ static void net_init_tap_one(const NetdevTapOptions *tap, NetClientState *peer,
 
         options.backend_type = VHOST_BACKEND_TYPE_KERNEL;
         options.net_backend = &s->nc;
+        if (tap->has_poll_us) {
+            options.busyloop_timeout = tap->poll_us;
+        } else {
+            options.busyloop_timeout = 0;
+        }
 
         if (vhostfdname) {
             vhostfd = monitor_fd_param(cur_mon, vhostfdname, &err);
@@ -687,7 +692,7 @@ static void net_init_tap_one(const NetdevTapOptions *tap, NetClientState *peer,
             return;
         }
     } else if (vhostfdname) {
-        error_setg(errp, "vhostfd= is not valid without vhost");
+        error_setg(errp, "vhostfd(s)= is not valid without vhost");
     }
 }
 
@@ -769,8 +774,8 @@ int net_init_tap(const NetClientOptions *opts, const char *name,
             return -1;
         }
     } else if (tap->has_fds) {
-        char *fds[MAX_TAP_QUEUES];
-        char *vhost_fds[MAX_TAP_QUEUES];
+        char **fds = g_new(char *, MAX_TAP_QUEUES);
+        char **vhost_fds = g_new(char *, MAX_TAP_QUEUES);
         int nfds, nvhosts;
 
         if (tap->has_ifname || tap->has_script || tap->has_downscript ||
@@ -818,6 +823,8 @@ int net_init_tap(const NetClientOptions *opts, const char *name,
                 return -1;
             }
         }
+        g_free(fds);
+        g_free(vhost_fds);
     } else if (tap->has_helper) {
         if (tap->has_ifname || tap->has_script || tap->has_downscript ||
             tap->has_vnet_hdr || tap->has_queues || tap->has_vhostfds) {

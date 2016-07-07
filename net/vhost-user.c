@@ -22,6 +22,8 @@ typedef struct VhostUserState {
     NetClientState nc;
     CharDriverState *chr;
     VHostNetState *vhost_net;
+    guint watch;
+    uint64_t acked_features;
 } VhostUserState;
 
 typedef struct VhostUserChardevProps {
@@ -34,6 +36,13 @@ VHostNetState *vhost_user_get_vhost_net(NetClientState *nc)
     VhostUserState *s = DO_UPCAST(VhostUserState, nc, nc);
     assert(nc->info->type == NET_CLIENT_OPTIONS_KIND_VHOST_USER);
     return s->vhost_net;
+}
+
+uint64_t vhost_user_get_acked_features(NetClientState *nc)
+{
+    VhostUserState *s = DO_UPCAST(VhostUserState, nc, nc);
+    assert(nc->info->type == NET_CLIENT_OPTIONS_KIND_VHOST_USER);
+    return s->acked_features;
 }
 
 static int vhost_user_running(VhostUserState *s)
@@ -55,6 +64,8 @@ static void vhost_user_stop(int queues, NetClientState *ncs[])
         }
 
         if (s->vhost_net) {
+            /* save acked features */
+            s->acked_features = vhost_net_get_acked_features(s->vhost_net);
             vhost_net_cleanup(s->vhost_net);
             s->vhost_net = NULL;
         }
@@ -80,6 +91,7 @@ static int vhost_user_start(int queues, NetClientState *ncs[])
 
         options.net_backend = ncs[i];
         options.opaque      = s->chr;
+        options.busyloop_timeout = 0;
         s->vhost_net = vhost_net_init(&options);
         if (!s->vhost_net) {
             error_report("failed to init vhost_net for queue %d", i);
@@ -140,6 +152,11 @@ static void vhost_user_cleanup(NetClientState *nc)
         vhost_net_cleanup(s->vhost_net);
         s->vhost_net = NULL;
     }
+    if (s->chr) {
+        qemu_chr_add_handlers(s->chr, NULL, NULL, NULL, NULL);
+        qemu_chr_fe_release(s->chr);
+        s->chr = NULL;
+    }
 
     qemu_purge_queued_packets(nc);
 }
@@ -167,6 +184,20 @@ static NetClientInfo net_vhost_user_info = {
         .has_ufo = vhost_user_has_ufo,
 };
 
+static gboolean net_vhost_user_watch(GIOChannel *chan, GIOCondition cond,
+                                           void *opaque)
+{
+    VhostUserState *s = opaque;
+    uint8_t buf[1];
+
+    /* We don't actually want to read anything, but CHR_EVENT_CLOSED will be
+     * raised as a side-effect of the read.
+     */
+    qemu_chr_fe_read_all(s->chr, buf, sizeof(buf));
+
+    return FALSE;
+}
+
 static void net_vhost_user_event(void *opaque, int event)
 {
     const char *name = opaque;
@@ -184,14 +215,19 @@ static void net_vhost_user_event(void *opaque, int event)
     trace_vhost_user_event(s->chr->label, event);
     switch (event) {
     case CHR_EVENT_OPENED:
+        s->watch = qemu_chr_fe_add_watch(s->chr, G_IO_HUP,
+                                         net_vhost_user_watch, s);
         if (vhost_user_start(queues, ncs) < 0) {
-            exit(1);
+            qemu_chr_disconnect(s->chr);
+            return;
         }
         qmp_set_link(name, true, &err);
         break;
     case CHR_EVENT_CLOSED:
         qmp_set_link(name, false, &err);
         vhost_user_stop(queues, ncs);
+        g_source_remove(s->watch);
+        s->watch = 0;
         break;
     }
 

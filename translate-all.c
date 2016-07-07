@@ -18,8 +18,6 @@
  */
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <sys/mman.h>
 #endif
 #include "qemu/osdep.h"
 
@@ -737,6 +735,13 @@ static inline void code_gen_alloc(size_t tb_size)
     qemu_mutex_init(&tcg_ctx.tb_ctx.tb_lock);
 }
 
+static void tb_htable_init(void)
+{
+    unsigned int mode = QHT_MODE_AUTO_RESIZE;
+
+    qht_init(&tcg_ctx.tb_ctx.htable, CODE_GEN_HTABLE_SIZE, mode);
+}
+
 /* Must be called before using the QEMU cpus. 'tb_size' is the size
    (in bytes) allocated to the translation buffer. Zero means default
    size. */
@@ -744,6 +749,7 @@ void tcg_exec_init(uintptr_t tb_size)
 {
     cpu_gen_init();
     page_init();
+    tb_htable_init();
     code_gen_alloc(tb_size);
 #if defined(CONFIG_SOFTMMU)
     /* There's no guest base to take into account, so go ahead and
@@ -848,7 +854,7 @@ void tb_flush(CPUState *cpu)
         cpu->tb_flushed = true;
     }
 
-    memset(tcg_ctx.tb_ctx.tb_phys_hash, 0, sizeof(tcg_ctx.tb_ctx.tb_phys_hash));
+    qht_reset_size(&tcg_ctx.tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
     page_flush_tb();
 
     tcg_ctx.code_gen_ptr = tcg_ctx.code_gen_buffer;
@@ -859,59 +865,45 @@ void tb_flush(CPUState *cpu)
 
 #ifdef DEBUG_TB_CHECK
 
+static void
+do_tb_invalidate_check(struct qht *ht, void *p, uint32_t hash, void *userp)
+{
+    TranslationBlock *tb = p;
+    target_ulong addr = *(target_ulong *)userp;
+
+    if (!(addr + TARGET_PAGE_SIZE <= tb->pc || addr >= tb->pc + tb->size)) {
+        printf("ERROR invalidate: address=" TARGET_FMT_lx
+               " PC=%08lx size=%04x\n", addr, (long)tb->pc, tb->size);
+    }
+}
+
 static void tb_invalidate_check(target_ulong address)
 {
-    TranslationBlock *tb;
-    int i;
-
     address &= TARGET_PAGE_MASK;
-    for (i = 0; i < CODE_GEN_PHYS_HASH_SIZE; i++) {
-        for (tb = tcg_ctx.tb_ctx.tb_phys_hash[i]; tb != NULL;
-             tb = tb->phys_hash_next) {
-            if (!(address + TARGET_PAGE_SIZE <= tb->pc ||
-                  address >= tb->pc + tb->size)) {
-                printf("ERROR invalidate: address=" TARGET_FMT_lx
-                       " PC=%08lx size=%04x\n",
-                       address, (long)tb->pc, tb->size);
-            }
-        }
+    qht_iter(&tcg_ctx.tb_ctx.htable, do_tb_invalidate_check, &address);
+}
+
+static void
+do_tb_page_check(struct qht *ht, void *p, uint32_t hash, void *userp)
+{
+    TranslationBlock *tb = p;
+    int flags1, flags2;
+
+    flags1 = page_get_flags(tb->pc);
+    flags2 = page_get_flags(tb->pc + tb->size - 1);
+    if ((flags1 & PAGE_WRITE) || (flags2 & PAGE_WRITE)) {
+        printf("ERROR page flags: PC=%08lx size=%04x f1=%x f2=%x\n",
+               (long)tb->pc, tb->size, flags1, flags2);
     }
 }
 
 /* verify that all the pages have correct rights for code */
 static void tb_page_check(void)
 {
-    TranslationBlock *tb;
-    int i, flags1, flags2;
-
-    for (i = 0; i < CODE_GEN_PHYS_HASH_SIZE; i++) {
-        for (tb = tcg_ctx.tb_ctx.tb_phys_hash[i]; tb != NULL;
-                tb = tb->phys_hash_next) {
-            flags1 = page_get_flags(tb->pc);
-            flags2 = page_get_flags(tb->pc + tb->size - 1);
-            if ((flags1 & PAGE_WRITE) || (flags2 & PAGE_WRITE)) {
-                printf("ERROR page flags: PC=%08lx size=%04x f1=%x f2=%x\n",
-                       (long)tb->pc, tb->size, flags1, flags2);
-            }
-        }
-    }
+    qht_iter(&tcg_ctx.tb_ctx.htable, do_tb_page_check, NULL);
 }
 
 #endif
-
-static inline void tb_hash_remove(TranslationBlock **ptb, TranslationBlock *tb)
-{
-    TranslationBlock *tb1;
-
-    for (;;) {
-        tb1 = *ptb;
-        if (tb1 == tb) {
-            *ptb = tb1->phys_hash_next;
-            break;
-        }
-        ptb = &tb1->phys_hash_next;
-    }
-}
 
 static inline void tb_page_remove(TranslationBlock **ptb, TranslationBlock *tb)
 {
@@ -994,13 +986,13 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
 {
     CPUState *cpu;
     PageDesc *p;
-    unsigned int h;
+    uint32_t h;
     tb_page_addr_t phys_pc;
 
     /* remove the TB from the hash list */
     phys_pc = tb->page_addr[0] + (tb->pc & ~TARGET_PAGE_MASK);
-    h = tb_phys_hash_func(phys_pc);
-    tb_hash_remove(&tcg_ctx.tb_ctx.tb_phys_hash[h], tb);
+    h = tb_hash_func(phys_pc, tb->pc, tb->flags);
+    qht_remove(&tcg_ctx.tb_ctx.htable, tb, h);
 
     /* remove the TB from the page list */
     if (tb->page_addr[0] != page_addr) {
@@ -1129,14 +1121,11 @@ static inline void tb_alloc_page(TranslationBlock *tb,
 static void tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
                          tb_page_addr_t phys_page2)
 {
-    unsigned int h;
-    TranslationBlock **ptb;
+    uint32_t h;
 
-    /* add in the physical hash table */
-    h = tb_phys_hash_func(phys_pc);
-    ptb = &tcg_ctx.tb_ctx.tb_phys_hash[h];
-    tb->phys_hash_next = *ptb;
-    *ptb = tb;
+    /* add in the hash table */
+    h = tb_hash_func(phys_pc, tb->pc, tb->flags);
+    qht_insert(&tcg_ctx.tb_ctx.htable, tb, h);
 
     /* add in the page list */
     tb_alloc_page(tb, 0, phys_pc & TARGET_PAGE_MASK);
@@ -1195,7 +1184,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 
     tcg_func_start(&tcg_ctx);
 
+    tcg_ctx.cpu = ENV_GET_CPU(env);
     gen_intermediate_code(env, tb);
+    tcg_ctx.cpu = NULL;
 
     trace_translate_block(tb, tb->pc, tb->tc_ptr);
 
@@ -1405,7 +1396,7 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
            modifying the memory. It will ensure that it cannot modify
            itself */
         tb_gen_code(cpu, current_pc, current_cs_base, current_flags, 1);
-        cpu_resume_from_signal(cpu, NULL);
+        cpu_loop_exit_noexc(cpu);
     }
 #endif
 }
@@ -1449,10 +1440,13 @@ void tb_invalidate_phys_page_fast(tb_page_addr_t start, int len)
     }
 }
 #else
-/* Called with mmap_lock held.  */
-static void tb_invalidate_phys_page(tb_page_addr_t addr,
-                                    uintptr_t pc, void *puc,
-                                    bool locked)
+/* Called with mmap_lock held. If pc is not 0 then it indicates the
+ * host PC of the faulting store instruction that caused this invalidate.
+ * Returns true if the caller needs to abort execution of the current
+ * TB (because it was modified by this store and the guest CPU has
+ * precise-SMC semantics).
+ */
+static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
 {
     TranslationBlock *tb;
     PageDesc *p;
@@ -1470,7 +1464,7 @@ static void tb_invalidate_phys_page(tb_page_addr_t addr,
     addr &= TARGET_PAGE_MASK;
     p = page_find(addr >> TARGET_PAGE_BITS);
     if (!p) {
-        return;
+        return false;
     }
     tb = p->first_tb;
 #ifdef TARGET_HAS_PRECISE_SMC
@@ -1509,12 +1503,10 @@ static void tb_invalidate_phys_page(tb_page_addr_t addr,
            modifying the memory. It will ensure that it cannot modify
            itself */
         tb_gen_code(cpu, current_pc, current_cs_base, current_flags, 1);
-        if (locked) {
-            mmap_unlock();
-        }
-        cpu_resume_from_signal(cpu, puc);
+        return true;
     }
 #endif
+    return false;
 }
 #endif
 
@@ -1663,7 +1655,7 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
        repeating the fault, which is horribly inefficient.
        Better would be to execute just this insn uncached, or generate a
        second new TB.  */
-    cpu_resume_from_signal(cpu, NULL);
+    cpu_loop_exit_noexc(cpu);
 }
 
 void tb_flush_jmp_cache(CPUState *cpu, target_ulong addr)
@@ -1686,6 +1678,10 @@ void dump_exec_info(FILE *f, fprintf_function cpu_fprintf)
     int i, target_code_size, max_target_code_size;
     int direct_jmp_count, direct_jmp2_count, cross_page;
     TranslationBlock *tb;
+    struct qht_stats hst;
+    uint32_t hgram_opts;
+    size_t hgram_bins;
+    char *hgram;
 
     target_code_size = 0;
     max_target_code_size = 0;
@@ -1736,6 +1732,38 @@ void dump_exec_info(FILE *f, fprintf_function cpu_fprintf)
                 direct_jmp2_count,
                 tcg_ctx.tb_ctx.nb_tbs ? (direct_jmp2_count * 100) /
                         tcg_ctx.tb_ctx.nb_tbs : 0);
+
+    qht_statistics_init(&tcg_ctx.tb_ctx.htable, &hst);
+
+    cpu_fprintf(f, "TB hash buckets     %zu/%zu (%0.2f%% head buckets used)\n",
+                hst.used_head_buckets, hst.head_buckets,
+                (double)hst.used_head_buckets / hst.head_buckets * 100);
+
+    hgram_opts =  QDIST_PR_BORDER | QDIST_PR_LABELS;
+    hgram_opts |= QDIST_PR_100X   | QDIST_PR_PERCENT;
+    if (qdist_xmax(&hst.occupancy) - qdist_xmin(&hst.occupancy) == 1) {
+        hgram_opts |= QDIST_PR_NODECIMAL;
+    }
+    hgram = qdist_pr(&hst.occupancy, 10, hgram_opts);
+    cpu_fprintf(f, "TB hash occupancy   %0.2f%% avg chain occ. Histogram: %s\n",
+                qdist_avg(&hst.occupancy) * 100, hgram);
+    g_free(hgram);
+
+    hgram_opts = QDIST_PR_BORDER | QDIST_PR_LABELS;
+    hgram_bins = qdist_xmax(&hst.chain) - qdist_xmin(&hst.chain);
+    if (hgram_bins > 10) {
+        hgram_bins = 10;
+    } else {
+        hgram_bins = 0;
+        hgram_opts |= QDIST_PR_NODECIMAL | QDIST_PR_NOBINRANGE;
+    }
+    hgram = qdist_pr(&hst.chain, hgram_bins, hgram_opts);
+    cpu_fprintf(f, "TB hash avg chain   %0.3f buckets. Histogram: %s\n",
+                qdist_avg(&hst.chain), hgram);
+    g_free(hgram);
+
+    qht_statistics_destroy(&hst);
+
     cpu_fprintf(f, "\nStatistics:\n");
     cpu_fprintf(f, "TB flush count      %d\n", tcg_ctx.tb_ctx.tb_flush_count);
     cpu_fprintf(f, "TB invalidate count %d\n",
@@ -1912,7 +1940,7 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
         if (!(p->flags & PAGE_WRITE) &&
             (flags & PAGE_WRITE) &&
             p->first_tb) {
-            tb_invalidate_phys_page(addr, 0, NULL, false);
+            tb_invalidate_phys_page(addr, 0);
         }
         p->flags = flags;
     }
@@ -1964,7 +1992,7 @@ int page_check_range(target_ulong start, target_ulong len, int flags)
             /* unprotect the page if it was put read-only because it
                contains translated code */
             if (!(p->flags & PAGE_WRITE)) {
-                if (!page_unprotect(addr, 0, NULL)) {
+                if (!page_unprotect(addr, 0)) {
                     return -1;
                 }
             }
@@ -1974,8 +2002,12 @@ int page_check_range(target_ulong start, target_ulong len, int flags)
 }
 
 /* called from signal handler: invalidate the code and unprotect the
-   page. Return TRUE if the fault was successfully handled. */
-int page_unprotect(target_ulong address, uintptr_t pc, void *puc)
+ * page. Return 0 if the fault was not handled, 1 if it was handled,
+ * and 2 if it was handled but the caller must cause the TB to be
+ * immediately exited. (We can only return 2 if the 'pc' argument is
+ * non-zero.)
+ */
+int page_unprotect(target_ulong address, uintptr_t pc)
 {
     unsigned int prot;
     PageDesc *p;
@@ -2006,7 +2038,10 @@ int page_unprotect(target_ulong address, uintptr_t pc, void *puc)
 
             /* and since the content will be modified, we must invalidate
                the corresponding translated code. */
-            tb_invalidate_phys_page(addr, pc, puc, true);
+            if (tb_invalidate_phys_page(addr, pc)) {
+                mmap_unlock();
+                return 2;
+            }
 #ifdef DEBUG_TB_CHECK
             tb_invalidate_check(addr);
 #endif

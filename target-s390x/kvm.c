@@ -23,7 +23,6 @@
 
 #include "qemu/osdep.h"
 #include <sys/ioctl.h>
-#include <sys/mman.h>
 
 #include <linux/kvm.h>
 #include <asm/ptrace.h>
@@ -2071,8 +2070,9 @@ void kvm_s390_io_interrupt(uint16_t subchannel_id,
     if (io_int_word & IO_INT_WORD_AI) {
         irq.type = KVM_S390_INT_IO(1, 0, 0, 0);
     } else {
-        irq.type = ((subchannel_id & 0xff00) << 24) |
-            ((subchannel_id & 0x00060) << 22) | (subchannel_nr << 16);
+        irq.type = KVM_S390_INT_IO(0, (subchannel_id & 0xff00) >> 8,
+                                      (subchannel_id & 0x0006),
+                                      subchannel_nr);
     }
     kvm_s390_floating_interrupt(&irq);
 }

@@ -56,6 +56,8 @@
 static QTAILQ_HEAD(, BlockDriverState) monitor_bdrv_states =
     QTAILQ_HEAD_INITIALIZER(monitor_bdrv_states);
 
+static int do_open_tray(const char *device, bool force, Error **errp);
+
 static const char *const if_name[IF_COUNT] = {
     [IF_NONE] = "none",
     [IF_IDE] = "ide",
@@ -567,11 +569,7 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
     if ((!file || !*file) && !qdict_size(bs_opts)) {
         BlockBackendRootState *blk_rs;
 
-        blk = blk_new(errp);
-        if (!blk) {
-            goto early_err;
-        }
-
+        blk = blk_new();
         blk_rs = blk_get_root_state(blk);
         blk_rs->open_flags    = bdrv_flags;
         blk_rs->read_only     = !(bdrv_flags & BDRV_O_RDWR);
@@ -657,7 +655,6 @@ static BlockDriverState *bds_tree_init(QDict *bs_opts, Error **errp)
     QemuOpts *opts;
     Error *local_error = NULL;
     BlockdevDetectZeroesOptions detect_zeroes;
-    int ret;
     int bdrv_flags = 0;
 
     opts = qemu_opts_create(&qemu_root_bds_opts, NULL, 1, errp);
@@ -688,9 +685,8 @@ static BlockDriverState *bds_tree_init(QDict *bs_opts, Error **errp)
         bdrv_flags |= BDRV_O_INACTIVE;
     }
 
-    bs = NULL;
-    ret = bdrv_open(&bs, NULL, NULL, bs_opts, bdrv_flags, errp);
-    if (ret < 0) {
+    bs = bdrv_open(NULL, NULL, bs_opts, bdrv_flags, errp);
+    if (!bs) {
         goto fail_no_bs_opts;
     }
 
@@ -1643,7 +1639,7 @@ typedef struct ExternalSnapshotState {
 static void external_snapshot_prepare(BlkActionState *common,
                                       Error **errp)
 {
-    int flags = 0, ret;
+    int flags = 0;
     QDict *options = NULL;
     Error *local_err = NULL;
     /* Device and node name of the image to generate the snapshot from */
@@ -1768,11 +1764,10 @@ static void external_snapshot_prepare(BlkActionState *common,
         flags |= BDRV_O_NO_BACKING;
     }
 
-    assert(state->new_bs == NULL);
-    ret = bdrv_open(&state->new_bs, new_image_file, snapshot_ref, options,
-                    flags, errp);
+    state->new_bs = bdrv_open(new_image_file, snapshot_ref, options, flags,
+                              errp);
     /* We will manually add the backing_hd field to the bs later */
-    if (ret != 0) {
+    if (!state->new_bs) {
         return;
     }
 
@@ -2281,8 +2276,6 @@ exit:
     block_job_txn_unref(block_job_txn);
 }
 
-static int do_open_tray(const char *device, bool force, Error **errp);
-
 void qmp_eject(const char *device, bool has_force, bool force, Error **errp)
 {
     Error *local_err = NULL;
@@ -2293,16 +2286,11 @@ void qmp_eject(const char *device, bool has_force, bool force, Error **errp)
     }
 
     rc = do_open_tray(device, force, &local_err);
-    if (local_err) {
+    if (rc && rc != -ENOSYS) {
         error_propagate(errp, local_err);
         return;
     }
-
-    if (rc == EINPROGRESS) {
-        error_setg(errp, "Device '%s' is locked and force was not specified, "
-                   "wait for tray to open and try again", device);
-        return;
-    }
+    error_free(local_err);
 
     qmp_x_blockdev_remove_medium(device, errp);
 }
@@ -2331,11 +2319,16 @@ void qmp_block_passwd(bool has_device, const char *device,
     aio_context_release(aio_context);
 }
 
-/**
- * returns -errno on fatal error, +errno for non-fatal situations.
- * errp will always be set when the return code is negative.
- * May return +ENOSYS if the device has no tray,
- * or +EINPROGRESS if the tray is locked and the guest has been notified.
+/*
+ * Attempt to open the tray of @device.
+ * If @force, ignore its tray lock.
+ * Else, if the tray is locked, don't open it, but ask the guest to open it.
+ * On error, store an error through @errp and return -errno.
+ * If @device does not exist, return -ENODEV.
+ * If it has no removable media, return -ENOTSUP.
+ * If it has no tray, return -ENOSYS.
+ * If the guest was asked to open the tray, return -EINPROGRESS.
+ * Else, return 0.
  */
 static int do_open_tray(const char *device, bool force, Error **errp)
 {
@@ -2355,8 +2348,8 @@ static int do_open_tray(const char *device, bool force, Error **errp)
     }
 
     if (!blk_dev_has_tray(blk)) {
-        /* Ignore this command on tray-less devices */
-        return ENOSYS;
+        error_setg(errp, "Device '%s' does not have a tray", device);
+        return -ENOSYS;
     }
 
     if (blk_dev_is_tray_open(blk)) {
@@ -2373,7 +2366,9 @@ static int do_open_tray(const char *device, bool force, Error **errp)
     }
 
     if (locked && !force) {
-        return EINPROGRESS;
+        error_setg(errp, "Device '%s' is locked and force was not specified, "
+                   "wait for tray to open and try again", device);
+        return -EINPROGRESS;
     }
 
     return 0;
@@ -2382,10 +2377,18 @@ static int do_open_tray(const char *device, bool force, Error **errp)
 void qmp_blockdev_open_tray(const char *device, bool has_force, bool force,
                             Error **errp)
 {
+    Error *local_err = NULL;
+    int rc;
+
     if (!has_force) {
         force = false;
     }
-    do_open_tray(device, force, errp);
+    rc = do_open_tray(device, force, &local_err);
+    if (rc && rc != -ENOSYS && rc != -EINPROGRESS) {
+        error_propagate(errp, local_err);
+        return;
+    }
+    error_free(local_err);
 }
 
 void qmp_blockdev_close_tray(const char *device, Error **errp)
@@ -2540,7 +2543,8 @@ void qmp_blockdev_change_medium(const char *device, const char *filename,
 {
     BlockBackend *blk;
     BlockDriverState *medium_bs = NULL;
-    int bdrv_flags, ret;
+    int bdrv_flags;
+    int rc;
     QDict *options = NULL;
     Error *err = NULL;
 
@@ -2584,9 +2588,8 @@ void qmp_blockdev_change_medium(const char *device, const char *filename,
         qdict_put(options, "driver", qstring_from_str(format));
     }
 
-    assert(!medium_bs);
-    ret = bdrv_open(&medium_bs, filename, NULL, options, bdrv_flags, errp);
-    if (ret < 0) {
+    medium_bs = bdrv_open(filename, NULL, options, bdrv_flags, errp);
+    if (!medium_bs) {
         goto fail;
     }
 
@@ -2596,11 +2599,13 @@ void qmp_blockdev_change_medium(const char *device, const char *filename,
         goto fail;
     }
 
-    qmp_blockdev_open_tray(device, false, false, &err);
-    if (err) {
+    rc = do_open_tray(device, false, &err);
+    if (rc && rc != -ENOSYS) {
         error_propagate(errp, err);
         goto fail;
     }
+    error_free(err);
+    err = NULL;
 
     qmp_x_blockdev_remove_medium(device, &err);
     if (err) {
@@ -3199,7 +3204,6 @@ static void do_drive_backup(const char *device, const char *target,
     Error *local_err = NULL;
     int flags;
     int64_t size;
-    int ret;
 
     if (!has_speed) {
         speed = 0;
@@ -3283,10 +3287,8 @@ static void do_drive_backup(const char *device, const char *target,
         qdict_put(options, "driver", qstring_from_str(format));
     }
 
-    target_bs = NULL;
-    ret = bdrv_open(&target_bs, target, NULL, options, flags, &local_err);
-    if (ret < 0) {
-        error_propagate(errp, local_err);
+    target_bs = bdrv_open(target, NULL, options, flags, errp);
+    if (!target_bs) {
         goto out;
     }
 
@@ -3304,8 +3306,8 @@ static void do_drive_backup(const char *device, const char *target,
     backup_start(bs, target_bs, speed, sync, bmap,
                  on_source_error, on_target_error,
                  block_job_cb, bs, txn, &local_err);
+    bdrv_unref(target_bs);
     if (local_err != NULL) {
-        bdrv_unref(target_bs);
         error_propagate(errp, local_err);
         goto out;
     }
@@ -3346,7 +3348,7 @@ void do_blockdev_backup(const char *device, const char *target,
                          BlockdevOnError on_target_error,
                          BlockJobTxn *txn, Error **errp)
 {
-    BlockBackend *blk, *target_blk;
+    BlockBackend *blk;
     BlockDriverState *bs;
     BlockDriverState *target_bs;
     Error *local_err = NULL;
@@ -3377,24 +3379,25 @@ void do_blockdev_backup(const char *device, const char *target,
     }
     bs = blk_bs(blk);
 
-    target_blk = blk_by_name(target);
-    if (!target_blk) {
-        error_setg(errp, "Device '%s' not found", target);
+    target_bs = bdrv_lookup_bs(target, target, errp);
+    if (!target_bs) {
         goto out;
     }
 
-    if (!blk_is_available(target_blk)) {
-        error_setg(errp, "Device '%s' has no medium", target);
-        goto out;
+    if (bdrv_get_aio_context(target_bs) != aio_context) {
+        if (!bdrv_has_blk(target_bs)) {
+            /* The target BDS is not attached, we can safely move it to another
+             * AioContext. */
+            bdrv_set_aio_context(target_bs, aio_context);
+        } else {
+            error_setg(errp, "Target is attached to a different thread from "
+                             "source.");
+            goto out;
+        }
     }
-    target_bs = blk_bs(target_blk);
-
-    bdrv_ref(target_bs);
-    bdrv_set_aio_context(target_bs, aio_context);
     backup_start(bs, target_bs, speed, sync, NULL, on_source_error,
                  on_target_error, block_job_cb, bs, txn, &local_err);
     if (local_err != NULL) {
-        bdrv_unref(target_bs);
         error_propagate(errp, local_err);
     }
 out:
@@ -3423,6 +3426,7 @@ static void blockdev_mirror_common(BlockDriverState *bs,
                                    BlockDriverState *target,
                                    bool has_replaces, const char *replaces,
                                    enum MirrorSyncMode sync,
+                                   BlockMirrorBackingMode backing_mode,
                                    bool has_speed, int64_t speed,
                                    bool has_granularity, uint32_t granularity,
                                    bool has_buf_size, int64_t buf_size,
@@ -3470,10 +3474,6 @@ static void blockdev_mirror_common(BlockDriverState *bs,
     if (bdrv_op_is_blocked(target, BLOCK_OP_TYPE_MIRROR_TARGET, errp)) {
         return;
     }
-    if (bdrv_has_blk(target)) {
-        error_setg(errp, "Cannot mirror to an attached block device");
-        return;
-    }
 
     if (!bs->backing && sync == MIRROR_SYNC_MODE_TOP) {
         sync = MIRROR_SYNC_MODE_FULL;
@@ -3484,7 +3484,7 @@ static void blockdev_mirror_common(BlockDriverState *bs,
      */
     mirror_start(bs, target,
                  has_replaces ? replaces : NULL,
-                 speed, granularity, buf_size, sync,
+                 speed, granularity, buf_size, sync, backing_mode,
                  on_source_error, on_target_error, unmap,
                  block_job_cb, bs, errp);
 }
@@ -3507,11 +3507,11 @@ void qmp_drive_mirror(const char *device, const char *target,
     BlockBackend *blk;
     BlockDriverState *source, *target_bs;
     AioContext *aio_context;
+    BlockMirrorBackingMode backing_mode;
     Error *local_err = NULL;
     QDict *options = NULL;
     int flags;
     int64_t size;
-    int ret;
 
     blk = blk_by_name(device);
     if (!blk) {
@@ -3581,6 +3581,12 @@ void qmp_drive_mirror(const char *device, const char *target,
         }
     }
 
+    if (mode == NEW_IMAGE_MODE_ABSOLUTE_PATHS) {
+        backing_mode = MIRROR_SOURCE_BACKING_CHAIN;
+    } else {
+        backing_mode = MIRROR_OPEN_BACKING_CHAIN;
+    }
+
     if ((sync == MIRROR_SYNC_MODE_FULL || !source)
         && mode != NEW_IMAGE_MODE_EXISTING)
     {
@@ -3620,18 +3626,16 @@ void qmp_drive_mirror(const char *device, const char *target,
     /* Mirroring takes care of copy-on-write using the source's backing
      * file.
      */
-    target_bs = NULL;
-    ret = bdrv_open(&target_bs, target, NULL, options,
-                    flags | BDRV_O_NO_BACKING, &local_err);
-    if (ret < 0) {
-        error_propagate(errp, local_err);
+    target_bs = bdrv_open(target, NULL, options, flags | BDRV_O_NO_BACKING,
+                          errp);
+    if (!target_bs) {
         goto out;
     }
 
     bdrv_set_aio_context(target_bs, aio_context);
 
     blockdev_mirror_common(bs, target_bs,
-                           has_replaces, replaces, sync,
+                           has_replaces, replaces, sync, backing_mode,
                            has_speed, speed,
                            has_granularity, granularity,
                            has_buf_size, buf_size,
@@ -3639,10 +3643,8 @@ void qmp_drive_mirror(const char *device, const char *target,
                            has_on_target_error, on_target_error,
                            has_unmap, unmap,
                            &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
-        bdrv_unref(target_bs);
-    }
+    bdrv_unref(target_bs);
+    error_propagate(errp, local_err);
 out:
     aio_context_release(aio_context);
 }
@@ -3663,6 +3665,7 @@ void qmp_blockdev_mirror(const char *device, const char *target,
     BlockBackend *blk;
     BlockDriverState *target_bs;
     AioContext *aio_context;
+    BlockMirrorBackingMode backing_mode = MIRROR_LEAVE_BACKING_CHAIN;
     Error *local_err = NULL;
 
     blk = blk_by_name(device);
@@ -3685,11 +3688,10 @@ void qmp_blockdev_mirror(const char *device, const char *target,
     aio_context = bdrv_get_aio_context(bs);
     aio_context_acquire(aio_context);
 
-    bdrv_ref(target_bs);
     bdrv_set_aio_context(target_bs, aio_context);
 
     blockdev_mirror_common(bs, target_bs,
-                           has_replaces, replaces, sync,
+                           has_replaces, replaces, sync, backing_mode,
                            has_speed, speed,
                            has_granularity, granularity,
                            has_buf_size, buf_size,
@@ -3697,10 +3699,7 @@ void qmp_blockdev_mirror(const char *device, const char *target,
                            has_on_target_error, on_target_error,
                            true, true,
                            &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
-        bdrv_unref(target_bs);
-    }
+    error_propagate(errp, local_err);
 
     aio_context_release(aio_context);
 }
@@ -3808,6 +3807,7 @@ void qmp_block_job_resume(const char *device, Error **errp)
 
     job->user_paused = false;
     trace_qmp_block_job_resume(job);
+    block_job_iostatus_reset(job);
     block_job_resume(job);
     aio_context_release(aio_context);
 }
@@ -3910,9 +3910,7 @@ void qmp_change_backing_file(const char *device,
 
     if (ro) {
         bdrv_reopen(image_bs, open_flags, &local_err);
-        if (local_err) {
-            error_propagate(errp, local_err); /* will preserve prior errp */
-        }
+        error_propagate(errp, local_err);
     }
 
 out:
@@ -3952,10 +3950,10 @@ out:
 
 void qmp_blockdev_add(BlockdevOptions *options, Error **errp)
 {
-    QmpOutputVisitor *ov = qmp_output_visitor_new();
     BlockDriverState *bs;
     BlockBackend *blk = NULL;
     QObject *obj;
+    Visitor *v = qmp_output_visitor_new(&obj);
     QDict *qdict;
     Error *local_err = NULL;
 
@@ -3974,14 +3972,13 @@ void qmp_blockdev_add(BlockdevOptions *options, Error **errp)
         }
     }
 
-    visit_type_BlockdevOptions(qmp_output_get_visitor(ov), NULL, &options,
-                               &local_err);
+    visit_type_BlockdevOptions(v, NULL, &options, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         goto fail;
     }
 
-    obj = qmp_output_get_qobject(ov);
+    visit_complete(v, &obj);
     qdict = qobject_to_qdict(obj);
 
     qdict_flatten(qdict);
@@ -4022,7 +4019,7 @@ void qmp_blockdev_add(BlockdevOptions *options, Error **errp)
     }
 
 fail:
-    qmp_output_visitor_cleanup(ov);
+    visit_free(v);
 }
 
 void qmp_x_blockdev_del(bool has_id, const char *id,
@@ -4163,22 +4160,18 @@ void qmp_x_blockdev_change(const char *parent, bool has_child,
 BlockJobInfoList *qmp_query_block_jobs(Error **errp)
 {
     BlockJobInfoList *head = NULL, **p_next = &head;
-    BlockDriverState *bs;
-    BdrvNextIterator *it = NULL;
+    BlockJob *job;
 
-    while ((it = bdrv_next(it, &bs))) {
-        AioContext *aio_context = bdrv_get_aio_context(bs);
+    for (job = block_job_next(NULL); job; job = block_job_next(job)) {
+        BlockJobInfoList *elem = g_new0(BlockJobInfoList, 1);
+        AioContext *aio_context = blk_get_aio_context(job->blk);
 
         aio_context_acquire(aio_context);
-
-        if (bs->job) {
-            BlockJobInfoList *elem = g_new0(BlockJobInfoList, 1);
-            elem->value = block_job_query(bs->job);
-            *p_next = elem;
-            p_next = &elem->next;
-        }
-
+        elem->value = block_job_query(job);
         aio_context_release(aio_context);
+
+        *p_next = elem;
+        p_next = &elem->next;
     }
 
     return head;

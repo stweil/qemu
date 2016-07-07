@@ -11,10 +11,10 @@
  */
 
 #include "qemu/osdep.h"
-#include <glib.h>
 #include "qapi/error.h"
 #include "qemu/main-loop.h"
 #include "block/blockjob.h"
+#include "sysemu/block-backend.h"
 
 typedef struct {
     BlockJob common;
@@ -30,7 +30,7 @@ static const BlockJobDriver test_block_job_driver = {
 
 static void test_block_job_complete(BlockJob *job, void *opaque)
 {
-    BlockDriverState *bs = job->bs;
+    BlockDriverState *bs = blk_bs(job->blk);
     int rc = (intptr_t)opaque;
 
     if (block_job_is_cancelled(job)) {

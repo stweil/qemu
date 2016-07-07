@@ -9,7 +9,6 @@
  */
 
 #include "qemu/osdep.h"
-#include <sys/mman.h>
 
 #include "cpu.h"
 #include "hw/pci/pci.h"
@@ -191,6 +190,9 @@ static void xen_ram_init(PCMachineState *pcms,
     /* Handle the machine opt max-ram-below-4g.  It is basically doing
      * min(xen limit, user limit).
      */
+    if (!user_lowmem) {
+        user_lowmem = HVM_BELOW_4G_RAM_END; /* default */
+    }
     if (HVM_BELOW_4G_RAM_END <= user_lowmem) {
         user_lowmem = HVM_BELOW_4G_RAM_END;
     }
@@ -511,8 +513,13 @@ static void xen_io_add(MemoryListener *listener,
                        MemoryRegionSection *section)
 {
     XenIOState *state = container_of(listener, XenIOState, io_listener);
+    MemoryRegion *mr = section->mr;
 
-    memory_region_ref(section->mr);
+    if (mr->ops == &unassigned_io_ops) {
+        return;
+    }
+
+    memory_region_ref(mr);
 
     xen_map_io_section(xen_xc, xen_domid, state->ioservid, section);
 }
@@ -521,10 +528,15 @@ static void xen_io_del(MemoryListener *listener,
                        MemoryRegionSection *section)
 {
     XenIOState *state = container_of(listener, XenIOState, io_listener);
+    MemoryRegion *mr = section->mr;
+
+    if (mr->ops == &unassigned_io_ops) {
+        return;
+    }
 
     xen_unmap_io_section(xen_xc, xen_domid, state->ioservid, section);
 
-    memory_region_unref(section->mr);
+    memory_region_unref(mr);
 }
 
 static void xen_device_realize(DeviceListener *listener,
@@ -557,7 +569,7 @@ static void xen_sync_dirty_bitmap(XenIOState *state,
 {
     hwaddr npages = size >> TARGET_PAGE_BITS;
     const int width = sizeof(unsigned long) * 8;
-    unsigned long bitmap[(npages + width - 1) / width];
+    unsigned long bitmap[DIV_ROUND_UP(npages, width)];
     int rc, i, j;
     const XenPhysmap *physmap = NULL;
 

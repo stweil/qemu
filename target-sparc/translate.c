@@ -4679,12 +4679,15 @@ static void disas_sparc_insn(DisasContext * dc, unsigned int insn)
                 case 0xd:       /* ldstub -- XXX: should be atomically */
                     {
                         TCGv r_const;
+                        TCGv tmp = tcg_temp_new();
 
                         gen_address_mask(dc, cpu_addr);
-                        tcg_gen_qemu_ld8u(cpu_val, cpu_addr, dc->mem_idx);
+                        tcg_gen_qemu_ld8u(tmp, cpu_addr, dc->mem_idx);
                         r_const = tcg_const_tl(0xff);
                         tcg_gen_qemu_st8(r_const, cpu_addr, dc->mem_idx);
+                        tcg_gen_mov_tl(cpu_val, tmp);
                         tcg_temp_free(r_const);
+                        tcg_temp_free(tmp);
                     }
                     break;
                 case 0x0f:
@@ -5330,7 +5333,8 @@ void gen_intermediate_code(CPUSPARCState * env, TranslationBlock * tb)
     tb->icount = num_insns;
 
 #ifdef DEBUG_DISAS
-    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
+    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
+        && qemu_log_in_addr_range(pc_start)) {
         qemu_log("--------------\n");
         qemu_log("IN: %s\n", lookup_symbol(pc_start));
         log_target_disas(cs, pc_start, last_pc + 4 - pc_start, 0);
@@ -5403,6 +5407,7 @@ void gen_intermediate_code_init(CPUSPARCState *env)
     inited = 1;
 
     cpu_env = tcg_global_reg_new_ptr(TCG_AREG0, "env");
+    tcg_ctx.tcg_env = cpu_env;
 
     cpu_regwptr = tcg_global_mem_new_ptr(cpu_env,
                                          offsetof(CPUSPARCState, regwptr),

@@ -13,7 +13,6 @@
  */
 
 #include "qemu/osdep.h"
-#include <glib.h>
 #include <math.h>
 #include "block/aio.h"
 #include "qapi/error.h"
@@ -398,6 +397,14 @@ static void test_max_is_missing_limit(void)
     }
 }
 
+static void test_iops_size_is_missing_limit(void)
+{
+    /* A total/read/write iops limit is required */
+    throttle_config_init(&cfg);
+    cfg.op_size = 4096;
+    g_assert(!throttle_is_valid(&cfg, NULL));
+}
+
 static void test_have_timer(void)
 {
     /* zero structures */
@@ -578,9 +585,9 @@ static void test_groups(void)
     BlockBackend *blk1, *blk2, *blk3;
     BlockBackendPublic *blkp1, *blkp2, *blkp3;
 
-    blk1 = blk_new_with_bs(&error_abort);
-    blk2 = blk_new_with_bs(&error_abort);
-    blk3 = blk_new_with_bs(&error_abort);
+    blk1 = blk_new();
+    blk2 = blk_new();
+    blk3 = blk_new();
 
     blkp1 = blk_get_public(blk1);
     blkp2 = blk_get_public(blk2);
@@ -653,6 +660,8 @@ int main(int argc, char **argv)
     g_test_add_func("/throttle/config/conflicting", test_conflicting_config);
     g_test_add_func("/throttle/config/is_valid",    test_is_valid);
     g_test_add_func("/throttle/config/max",         test_max_is_missing_limit);
+    g_test_add_func("/throttle/config/iops_size",
+                    test_iops_size_is_missing_limit);
     g_test_add_func("/throttle/config_functions",   test_config_functions);
     g_test_add_func("/throttle/accounting",         test_accounting);
     g_test_add_func("/throttle/groups",             test_groups);

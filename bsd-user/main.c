@@ -18,8 +18,8 @@
  */
 #include "qemu/osdep.h"
 #include <machine/trap.h>
-#include <sys/mman.h>
 
+#include "qapi/error.h"
 #include "qemu.h"
 #include "qemu/path.h"
 #include "qemu/help_option.h"
@@ -753,9 +753,6 @@ int main(int argc, char **argv)
     }
 
     cpu_model = NULL;
-#if defined(cpudef_setup)
-    cpudef_setup(); /* parse cpu definitions in target config file (TBD) */
-#endif
 
     optind = 1;
     for(;;) {
@@ -851,7 +848,7 @@ int main(int argc, char **argv)
 
     /* init debug */
     qemu_log_needs_buffers();
-    qemu_set_log_filename(log_file);
+    qemu_set_log_filename(log_file, &error_fatal);
     if (log_mask) {
         int mask;
 

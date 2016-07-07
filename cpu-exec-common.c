@@ -26,11 +26,8 @@
 bool exit_request;
 CPUState *tcg_current_cpu;
 
-/* exit the current TB from a signal handler. The host registers are
-   restored in a state compatible with the CPU emulator
- */
-#if defined(CONFIG_SOFTMMU)
-void cpu_resume_from_signal(CPUState *cpu, void *puc)
+/* exit the current TB, but without causing any exception to be raised */
+void cpu_loop_exit_noexc(CPUState *cpu)
 {
     /* XXX: restore cpu registers saved in host registers */
 
@@ -38,6 +35,7 @@ void cpu_resume_from_signal(CPUState *cpu, void *puc)
     siglongjmp(cpu->jmp_env, 1);
 }
 
+#if defined(CONFIG_SOFTMMU)
 void cpu_reloading_memory_map(void)
 {
     if (qemu_in_vcpu_thread()) {

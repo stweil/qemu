@@ -42,6 +42,7 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/kvm.h"
 #include "hw/boards.h"
+#include "hw/compat.h"
 #include "hw/loader.h"
 #include "exec/address-spaces.h"
 #include "qemu/bitops.h"
@@ -97,6 +98,36 @@ typedef struct {
     OBJECT_GET_CLASS(VirtMachineClass, obj, TYPE_VIRT_MACHINE)
 #define VIRT_MACHINE_CLASS(klass) \
     OBJECT_CLASS_CHECK(VirtMachineClass, klass, TYPE_VIRT_MACHINE)
+
+
+#define DEFINE_VIRT_MACHINE_LATEST(major, minor, latest) \
+    static void virt_##major##_##minor##_class_init(ObjectClass *oc, \
+                                                    void *data) \
+    { \
+        MachineClass *mc = MACHINE_CLASS(oc); \
+        virt_machine_##major##_##minor##_options(mc); \
+        mc->desc = "QEMU " # major "." # minor " ARM Virtual Machine"; \
+        if (latest) { \
+            mc->alias = "virt"; \
+        } \
+    } \
+    static const TypeInfo machvirt_##major##_##minor##_info = { \
+        .name = MACHINE_TYPE_NAME("virt-" # major "." # minor), \
+        .parent = TYPE_VIRT_MACHINE, \
+        .instance_init = virt_##major##_##minor##_instance_init, \
+        .class_init = virt_##major##_##minor##_class_init, \
+    }; \
+    static void machvirt_machine_##major##_##minor##_init(void) \
+    { \
+        type_register_static(&machvirt_##major##_##minor##_info); \
+    } \
+    type_init(machvirt_machine_##major##_##minor##_init);
+
+#define DEFINE_VIRT_MACHINE_AS_LATEST(major, minor) \
+    DEFINE_VIRT_MACHINE_LATEST(major, minor, true)
+#define DEFINE_VIRT_MACHINE(major, minor) \
+    DEFINE_VIRT_MACHINE_LATEST(major, minor, false)
+
 
 /* RAM limit in GB. Since VIRT_MEM starts at the 1GB mark, this means
  * RAM can go up to the 256GB mark, leaving 256GB of the physical
@@ -436,6 +467,37 @@ static void fdt_add_gic_node(VirtBoardInfo *vbi, int type)
     qemu_fdt_setprop_cell(vbi->fdt, "/intc", "phandle", vbi->gic_phandle);
 }
 
+static void fdt_add_pmu_nodes(const VirtBoardInfo *vbi, int gictype)
+{
+    CPUState *cpu;
+    ARMCPU *armcpu;
+    uint32_t irqflags = GIC_FDT_IRQ_FLAGS_LEVEL_HI;
+
+    CPU_FOREACH(cpu) {
+        armcpu = ARM_CPU(cpu);
+        if (!armcpu->has_pmu ||
+            !kvm_arm_pmu_create(cpu, PPI(VIRTUAL_PMU_IRQ))) {
+            return;
+        }
+    }
+
+    if (gictype == 2) {
+        irqflags = deposit32(irqflags, GIC_FDT_IRQ_PPI_CPU_START,
+                             GIC_FDT_IRQ_PPI_CPU_WIDTH,
+                             (1 << vbi->smp_cpus) - 1);
+    }
+
+    armcpu = ARM_CPU(qemu_get_cpu(0));
+    qemu_fdt_add_subnode(vbi->fdt, "/pmu");
+    if (arm_feature(&armcpu->env, ARM_FEATURE_V8)) {
+        const char compat[] = "arm,armv8-pmuv3";
+        qemu_fdt_setprop(vbi->fdt, "/pmu", "compatible",
+                         compat, sizeof(compat));
+        qemu_fdt_setprop_cells(vbi->fdt, "/pmu", "interrupts",
+                               GIC_FDT_IRQ_TYPE_PPI, VIRTUAL_PMU_IRQ, irqflags);
+    }
+}
+
 static void create_v2m(VirtBoardInfo *vbi, qemu_irq *pic)
 {
     int i;
@@ -525,7 +587,7 @@ static void create_gic(VirtBoardInfo *vbi, qemu_irq *pic, int type, bool secure)
 }
 
 static void create_uart(const VirtBoardInfo *vbi, qemu_irq *pic, int uart,
-                        MemoryRegion *mem)
+                        MemoryRegion *mem, CharDriverState *chr)
 {
     char *nodename;
     hwaddr base = vbi->memmap[uart].base;
@@ -536,6 +598,7 @@ static void create_uart(const VirtBoardInfo *vbi, qemu_irq *pic, int uart,
     DeviceState *dev = qdev_create(NULL, "pl011");
     SysBusDevice *s = SYS_BUS_DEVICE(dev);
 
+    qdev_prop_set_chr(dev, "chardev", chr);
     qdev_init_nofail(dev);
     memory_region_add_subregion(mem, base,
                                 sysbus_mmio_get_region(s, 0));
@@ -958,6 +1021,7 @@ static void create_pcie(const VirtBoardInfo *vbi, qemu_irq *pic,
     qemu_fdt_setprop_cell(vbi->fdt, nodename, "#size-cells", 2);
     qemu_fdt_setprop_cells(vbi->fdt, nodename, "bus-range", 0,
                            nr_pcie_buses - 1);
+    qemu_fdt_setprop(vbi->fdt, nodename, "dma-coherent", NULL, 0);
 
     if (vbi->v2m_phandle) {
         qemu_fdt_setprop_cells(vbi->fdt, nodename, "msi-parent",
@@ -1122,10 +1186,14 @@ static void machvirt_init(MachineState *machine)
      * KVM is not available yet
      */
     if (!gic_version) {
+        if (!kvm_enabled()) {
+            error_report("gic-version=host requires KVM");
+            exit(1);
+        }
+
         gic_version = kvm_arm_vgic_probe();
         if (!gic_version) {
             error_report("Unable to determine GIC version supported by host");
-            error_printf("KVM acceleration is probably not supported\n");
             exit(1);
         }
     }
@@ -1254,11 +1322,13 @@ static void machvirt_init(MachineState *machine)
 
     create_gic(vbi, pic, gic_version, vms->secure);
 
-    create_uart(vbi, pic, VIRT_UART, sysmem);
+    fdt_add_pmu_nodes(vbi, gic_version);
+
+    create_uart(vbi, pic, VIRT_UART, sysmem, serial_hds[0]);
 
     if (vms->secure) {
         create_secure_ram(vbi, secure_sysmem);
-        create_uart(vbi, pic, VIRT_SECURE_UART, secure_sysmem);
+        create_uart(vbi, pic, VIRT_SECURE_UART, secure_sysmem, serial_hds[1]);
     }
 
     create_rtc(vbi, pic);
@@ -1382,7 +1452,13 @@ static const TypeInfo virt_machine_info = {
     .class_init    = virt_machine_class_init,
 };
 
-static void virt_2_6_instance_init(Object *obj)
+static void machvirt_machine_init(void)
+{
+    type_register_static(&virt_machine_info);
+}
+type_init(machvirt_machine_init);
+
+static void virt_2_7_instance_init(Object *obj)
 {
     VirtMachineState *vms = VIRT_MACHINE(obj);
 
@@ -1415,25 +1491,22 @@ static void virt_2_6_instance_init(Object *obj)
                                     "Valid values are 2, 3 and host", NULL);
 }
 
-static void virt_2_6_class_init(ObjectClass *oc, void *data)
+static void virt_machine_2_7_options(MachineClass *mc)
 {
-    MachineClass *mc = MACHINE_CLASS(oc);
+}
+DEFINE_VIRT_MACHINE_AS_LATEST(2, 7)
 
-    mc->desc = "QEMU 2.6 ARM Virtual Machine";
-    mc->alias = "virt";
+#define VIRT_COMPAT_2_6 \
+    HW_COMPAT_2_6
+
+static void virt_2_6_instance_init(Object *obj)
+{
+    virt_2_7_instance_init(obj);
 }
 
-static const TypeInfo machvirt_info = {
-    .name = MACHINE_TYPE_NAME("virt-2.6"),
-    .parent = TYPE_VIRT_MACHINE,
-    .instance_init = virt_2_6_instance_init,
-    .class_init = virt_2_6_class_init,
-};
-
-static void machvirt_machine_init(void)
+static void virt_machine_2_6_options(MachineClass *mc)
 {
-    type_register_static(&virt_machine_info);
-    type_register_static(&machvirt_info);
+    virt_machine_2_7_options(mc);
+    SET_MACHINE_COMPAT(mc, VIRT_COMPAT_2_6);
 }
-
-type_init(machvirt_machine_init);
+DEFINE_VIRT_MACHINE(2, 6)

@@ -27,10 +27,6 @@
 #include "qapi-event.h"
 #include "trace.h"
 
-#if defined(__linux__)
-#include <sys/mman.h>
-#endif
-
 #include "hw/virtio/virtio-bus.h"
 #include "hw/virtio/virtio-access.h"
 
@@ -143,13 +139,13 @@ static void balloon_stats_get_all(Object *obj, Visitor *v, const char *name,
     }
     visit_check_struct(v, &err);
 out_nested:
-    visit_end_struct(v);
+    visit_end_struct(v, NULL);
 
     if (!err) {
         visit_check_struct(v, &err);
     }
 out_end:
-    visit_end_struct(v);
+    visit_end_struct(v, NULL);
 out:
     error_propagate(errp, err);
 }

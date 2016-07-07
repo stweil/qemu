@@ -57,12 +57,9 @@ static char *spapr_vio_get_dev_name(DeviceState *qdev)
 {
     VIOsPAPRDevice *dev = VIO_SPAPR_DEVICE(qdev);
     VIOsPAPRDeviceClass *pc = VIO_SPAPR_DEVICE_GET_CLASS(dev);
-    char *name;
 
     /* Device tree style name device@reg */
-    name = g_strdup_printf("%s@%x", pc->dt_name, dev->reg);
-
-    return name;
+    return g_strdup_printf("%s@%x", pc->dt_name, dev->reg);
 }
 
 static void spapr_vio_bus_class_init(ObjectClass *klass, void *data)
@@ -466,7 +463,7 @@ static void spapr_vio_busdev_realize(DeviceState *qdev, Error **errp)
         dev->qdev.id = id;
     }
 
-    dev->irq = xics_alloc(spapr->icp, 0, dev->irq, false, &local_err);
+    dev->irq = xics_spapr_alloc(spapr->xics, 0, dev->irq, false, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -483,11 +480,9 @@ static void spapr_vio_busdev_realize(DeviceState *qdev, Error **errp)
         memory_region_add_subregion_overlap(&dev->mrroot, 0, &dev->mrbypass, 1);
         address_space_init(&dev->as, &dev->mrroot, qdev->id);
 
-        dev->tcet = spapr_tce_new_table(qdev, liobn,
-                                        0,
-                                        SPAPR_TCE_PAGE_SHIFT,
-                                        pc->rtce_window_size >>
-                                        SPAPR_TCE_PAGE_SHIFT, false);
+        dev->tcet = spapr_tce_new_table(qdev, liobn);
+        spapr_tce_table_enable(dev->tcet, SPAPR_TCE_PAGE_SHIFT, 0,
+                               pc->rtce_window_size >> SPAPR_TCE_PAGE_SHIFT);
         dev->tcet->vdev = dev;
         memory_region_add_subregion_overlap(&dev->mrroot, 0,
                                             spapr_tce_get_iommu(dev->tcet), 2);

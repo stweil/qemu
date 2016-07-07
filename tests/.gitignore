@@ -7,11 +7,13 @@ check-qnull
 check-qstring
 check-qom-interface
 check-qom-proplist
+qht-bench
 rcutorture
 test-aio
 test-base64
 test-bitops
 test-blockjob-txn
+test-clone-visitor
 test-coroutine
 test-crypto-afsplit
 test-crypto-block
@@ -48,7 +50,10 @@ test-qapi-types.[ch]
 test-qapi-visit.[ch]
 test-qdev-global-props
 test-qemu-opts
+test-qdist
 test-qga
+test-qht
+test-qht-par
 test-qmp-commands
 test-qmp-commands.h
 test-qmp-event

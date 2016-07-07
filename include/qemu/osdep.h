@@ -197,8 +197,6 @@ void qemu_anon_ram_free(void *ptr, size_t size);
 
 #if defined(CONFIG_MADVISE)
 
-#include <sys/mman.h>
-
 #define QEMU_MADV_WILLNEED  MADV_WILLNEED
 #define QEMU_MADV_DONTNEED  MADV_DONTNEED
 #ifdef MADV_DONTFORK
@@ -326,6 +324,15 @@ static inline void qemu_timersub(const struct timeval *val1,
 #endif
 
 void qemu_set_cloexec(int fd);
+
+/* Starting on QEMU 2.5, qemu_hw_version() returns "2.5+" by default
+ * instead of QEMU_VERSION, so setting hw_version on MachineClass
+ * is no longer mandatory.
+ *
+ * Do NOT change this string, or it will break compatibility on all
+ * machine classes that don't set hw_version.
+ */
+#define QEMU_HW_VERSION "2.5+"
 
 /* QEMU "hardware version" setting. Used to replace code that exposed
  * QEMU_VERSION to guests in the past and need to keep compatibility.

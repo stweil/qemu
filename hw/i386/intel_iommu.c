@@ -24,6 +24,8 @@
 #include "exec/address-spaces.h"
 #include "intel_iommu_internal.h"
 #include "hw/pci/pci.h"
+#include "hw/pci/pci_bus.h"
+#include "hw/i386/pc.h"
 
 /*#define DEBUG_INTEL_IOMMU*/
 #ifdef DEBUG_INTEL_IOMMU
@@ -1871,6 +1873,16 @@ static IOMMUTLBEntry vtd_iommu_translate(MemoryRegion *iommu, hwaddr addr,
     return ret;
 }
 
+static void vtd_iommu_notify_started(MemoryRegion *iommu)
+{
+    VTDAddressSpace *vtd_as = container_of(iommu, VTDAddressSpace, iommu);
+
+    hw_error("Device at bus %s addr %02x.%d requires iommu notifier which "
+             "is currently not supported by intel-iommu emulation",
+             vtd_as->bus->qbus.name, PCI_SLOT(vtd_as->devfn),
+             PCI_FUNC(vtd_as->devfn));
+}
+
 static const VMStateDescription vtd_vmstate = {
     .name = "iommu-intel",
     .unmigratable = 1,
@@ -1938,6 +1950,7 @@ static void vtd_init(IntelIOMMUState *s)
     memset(s->womask, 0, DMAR_REG_SIZE);
 
     s->iommu_ops.translate = vtd_iommu_translate;
+    s->iommu_ops.notify_started = vtd_iommu_notify_started;
     s->root = 0;
     s->root_extended = false;
     s->dmar_enabled = false;
@@ -2014,8 +2027,20 @@ static void vtd_reset(DeviceState *dev)
     vtd_init(s);
 }
 
+static AddressSpace *vtd_host_dma_iommu(PCIBus *bus, void *opaque, int devfn)
+{
+    IntelIOMMUState *s = opaque;
+    VTDAddressSpace *vtd_as;
+
+    assert(0 <= devfn && devfn <= VTD_PCI_DEVFN_MAX);
+
+    vtd_as = vtd_find_add_as(s, bus, devfn);
+    return &vtd_as->as;
+}
+
 static void vtd_realize(DeviceState *dev, Error **errp)
 {
+    PCIBus *bus = PC_MACHINE(qdev_get_machine())->bus;
     IntelIOMMUState *s = INTEL_IOMMU_DEVICE(dev);
 
     VTD_DPRINTF(GENERAL, "");
@@ -2029,6 +2054,8 @@ static void vtd_realize(DeviceState *dev, Error **errp)
     s->vtd_as_by_busptr = g_hash_table_new_full(vtd_uint64_hash, vtd_uint64_equal,
                                               g_free, g_free);
     vtd_init(s);
+    sysbus_mmio_map(SYS_BUS_DEVICE(s), 0, Q35_HOST_BRIDGE_IOMMU_ADDR);
+    pci_setup_iommu(bus, vtd_host_dma_iommu, dev);
 }
 
 static void vtd_class_init(ObjectClass *klass, void *data)
@@ -2039,6 +2066,7 @@ static void vtd_class_init(ObjectClass *klass, void *data)
     dc->realize = vtd_realize;
     dc->vmsd = &vtd_vmstate;
     dc->props = vtd_properties;
+    dc->hotpluggable = false;
 }
 
 static const TypeInfo vtd_info = {

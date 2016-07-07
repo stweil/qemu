@@ -1,6 +1,6 @@
 /* BlockDriver implementation for "raw"
  *
- * Copyright (C) 2010, 2013, Red Hat, Inc.
+ * Copyright (C) 2010-2016 Red Hat, Inc.
  * Copyright (C) 2010, Blue Swirl <blauwirbel@gmail.com>
  * Copyright (C) 2009, Anthony Liguori <aliguori@us.ibm.com>
  *
@@ -54,7 +54,7 @@ static int coroutine_fn raw_co_readv(BlockDriverState *bs, int64_t sector_num,
                                      int nb_sectors, QEMUIOVector *qiov)
 {
     BLKDBG_EVENT(bs->file, BLKDBG_READ_AIO);
-    return bdrv_co_readv(bs->file->bs, sector_num, nb_sectors, qiov);
+    return bdrv_co_readv(bs->file, sector_num, nb_sectors, qiov);
 }
 
 static int coroutine_fn
@@ -105,7 +105,7 @@ raw_co_writev_flags(BlockDriverState *bs, int64_t sector_num, int nb_sectors,
     }
 
     BLKDBG_EVENT(bs->file, BLKDBG_WRITE_AIO);
-    ret = bdrv_co_pwritev(bs->file->bs, sector_num * BDRV_SECTOR_SIZE,
+    ret = bdrv_co_pwritev(bs->file, sector_num * BDRV_SECTOR_SIZE,
                           nb_sectors * BDRV_SECTOR_SIZE, qiov, flags);
 
 fail:
@@ -127,11 +127,11 @@ static int64_t coroutine_fn raw_co_get_block_status(BlockDriverState *bs,
            (sector_num << BDRV_SECTOR_BITS);
 }
 
-static int coroutine_fn raw_co_write_zeroes(BlockDriverState *bs,
-                                            int64_t sector_num, int nb_sectors,
-                                            BdrvRequestFlags flags)
+static int coroutine_fn raw_co_pwrite_zeroes(BlockDriverState *bs,
+                                             int64_t offset, int count,
+                                             BdrvRequestFlags flags)
 {
-    return bdrv_co_write_zeroes(bs->file->bs, sector_num, nb_sectors, flags);
+    return bdrv_co_pwrite_zeroes(bs->file, offset, count, flags);
 }
 
 static int coroutine_fn raw_co_discard(BlockDriverState *bs,
@@ -148,11 +148,6 @@ static int64_t raw_getlength(BlockDriverState *bs)
 static int raw_get_info(BlockDriverState *bs, BlockDriverInfo *bdi)
 {
     return bdrv_get_info(bs->file->bs, bdi);
-}
-
-static void raw_refresh_limits(BlockDriverState *bs, Error **errp)
-{
-    bs->bl = bs->file->bs->bl;
 }
 
 static int raw_truncate(BlockDriverState *bs, int64_t offset)
@@ -190,14 +185,7 @@ static int raw_has_zero_init(BlockDriverState *bs)
 
 static int raw_create(const char *filename, QemuOpts *opts, Error **errp)
 {
-    Error *local_err = NULL;
-    int ret;
-
-    ret = bdrv_create_file(filename, opts, &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
-    }
-    return ret;
+    return bdrv_create_file(filename, opts, errp);
 }
 
 static int raw_open(BlockDriverState *bs, QDict *options, int flags,
@@ -252,14 +240,13 @@ BlockDriver bdrv_raw = {
     .bdrv_create          = &raw_create,
     .bdrv_co_readv        = &raw_co_readv,
     .bdrv_co_writev_flags = &raw_co_writev_flags,
-    .bdrv_co_write_zeroes = &raw_co_write_zeroes,
+    .bdrv_co_pwrite_zeroes = &raw_co_pwrite_zeroes,
     .bdrv_co_discard      = &raw_co_discard,
     .bdrv_co_get_block_status = &raw_co_get_block_status,
     .bdrv_truncate        = &raw_truncate,
     .bdrv_getlength       = &raw_getlength,
     .has_variable_length  = true,
     .bdrv_get_info        = &raw_get_info,
-    .bdrv_refresh_limits  = &raw_refresh_limits,
     .bdrv_probe_blocksizes = &raw_probe_blocksizes,
     .bdrv_probe_geometry  = &raw_probe_geometry,
     .bdrv_media_changed   = &raw_media_changed,
