@@ -1,5 +1,5 @@
-#if !defined (__MIPS_CPU_H__)
-#define __MIPS_CPU_H__
+#ifndef MIPS_CPU_H
+#define MIPS_CPU_H
 
 //#define DEBUG_OP
 
@@ -19,7 +19,7 @@ typedef struct r4k_tlb_t r4k_tlb_t;
 struct r4k_tlb_t {
     target_ulong VPN;
     uint32_t PageMask;
-    uint8_t ASID;
+    uint16_t ASID;
     unsigned int G:1;
     unsigned int C0:3;
     unsigned int C1:3;
@@ -343,6 +343,7 @@ struct CPUMIPSState {
     int32_t CP0_Count;
     target_ulong CP0_EntryHi;
 #define CP0EnHi_EHINV 10
+    target_ulong CP0_EntryHi_ASID_mask;
     int32_t CP0_Compare;
     int32_t CP0_Status;
 #define CP0St_CU3   31
@@ -468,6 +469,7 @@ struct CPUMIPSState {
     int32_t CP0_Config4_rw_bitmask;
 #define CP0C4_M    31
 #define CP0C4_IE   29
+#define CP0C4_AE   28
 #define CP0C4_KScrExist 16
 #define CP0C4_MMUExtDef 14
 #define CP0C4_FTLBPageSize 8
@@ -504,6 +506,7 @@ struct CPUMIPSState {
     int CP0_LLAddr_shift;
     target_ulong CP0_WatchLo[8];
     int32_t CP0_WatchHi[8];
+#define CP0WH_ASID 16
     target_ulong CP0_XContext;
     int32_t CP0_Framemask;
     int32_t CP0_Debug;
@@ -618,6 +621,7 @@ struct CPUMIPSState {
     void *irq[8];
     QEMUTimer *timer; /* Internal timer */
     MemoryRegion *itc_tag; /* ITC Configuration Tags */
+    target_ulong exception_base; /* ExceptionBase input to the core */
 };
 
 /**
@@ -655,7 +659,8 @@ hwaddr mips_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 int mips_cpu_gdb_read_register(CPUState *cpu, uint8_t *buf, int reg);
 int mips_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 void mips_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
-                                  int is_write, int is_user, uintptr_t retaddr);
+                                  MMUAccessType access_type,
+                                  int mmu_idx, uintptr_t retaddr);
 
 #if !defined(CONFIG_USER_ONLY)
 int no_mmu_map_address (CPUMIPSState *env, hwaddr *physical, int *prot,
@@ -809,6 +814,7 @@ int cpu_mips_signal_handler(int host_signum, void *pinfo, void *puc);
 
 #define cpu_init(cpu_model) CPU(cpu_mips_init(cpu_model))
 bool cpu_supports_cps_smp(const char *cpu_model);
+void cpu_set_exception_base(int vp_index, target_ulong address);
 
 /* TODO QOM'ify CPU reset and remove */
 void cpu_state_reset(CPUMIPSState *s);
@@ -1062,4 +1068,4 @@ static inline void QEMU_NORETURN do_raise_exception(CPUMIPSState *env,
     do_raise_exception_err(env, exception, 0, pc);
 }
 
-#endif /* !defined (__MIPS_CPU_H__) */
+#endif /* MIPS_CPU_H */

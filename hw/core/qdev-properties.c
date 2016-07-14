@@ -539,6 +539,19 @@ PropertyInfo qdev_prop_losttickpolicy = {
     .set   = set_enum,
 };
 
+/* --- Block device error handling policy --- */
+
+QEMU_BUILD_BUG_ON(sizeof(BlockdevOnError) != sizeof(int));
+
+PropertyInfo qdev_prop_blockdev_on_error = {
+    .name = "BlockdevOnError",
+    .description = "Error handling policy, "
+                   "report/ignore/enospc/stop/auto",
+    .enum_table = BlockdevOnError_lookup,
+    .get = get_enum,
+    .set = set_enum,
+};
+
 /* --- BIOS CHS translation */
 
 QEMU_BUILD_BUG_ON(sizeof(BiosAtaTranslation) != sizeof(int));
@@ -1085,10 +1098,14 @@ static void qdev_prop_set_globals_for_type(DeviceState *dev,
         prop->used = true;
         object_property_parse(OBJECT(dev), prop->value, prop->property, &err);
         if (err != NULL) {
-            assert(prop->user_provided);
-            error_reportf_err(err, "Warning: global %s.%s=%s ignored: ",
-                              prop->driver, prop->property, prop->value);
-            return;
+            error_prepend(&err, "can't apply global %s.%s=%s: ",
+                          prop->driver, prop->property, prop->value);
+            if (prop->errp) {
+                error_propagate(prop->errp, err);
+            } else {
+                assert(prop->user_provided);
+                error_reportf_err(err, "Warning: ");
+            }
         }
     }
 }

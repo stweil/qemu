@@ -6,10 +6,10 @@
    interface, for making instruction-processing programs more independent
    of the instruction set being processed.  */
 
-#ifndef DIS_ASM_H
-#define DIS_ASM_H
+#ifndef DISAS_BFD_H
+#define DISAS_BFD_H
 
-#include "qemu-common.h"
+#include "qemu/fprintf-fn.h"
 
 typedef void *PTR;
 typedef uint64_t bfd_vma;
@@ -489,4 +489,4 @@ bfd_vma bfd_getl16 (const bfd_byte *addr);
 bfd_vma bfd_getb16 (const bfd_byte *addr);
 typedef bool bfd_boolean;
 
-#endif /* ! defined (DIS_ASM_H) */
+#endif /* DISAS_BFD_H */

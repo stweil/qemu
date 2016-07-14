@@ -151,7 +151,8 @@ extern int daemon(int, int);
 /* Minimum function that returns zero only iff both values are zero.
  * Intended for use with unsigned values only. */
 #ifndef MIN_NON_ZERO
-#define MIN_NON_ZERO(a, b) (((a) != 0 && (a) < (b)) ? (a) : (b))
+#define MIN_NON_ZERO(a, b) ((a) == 0 ? (b) : \
+                                ((b) == 0 ? (a) : (MIN(a, b))))
 #endif
 
 /* Round number down to multiple */
@@ -278,6 +279,9 @@ int qemu_madvise(void *addr, size_t len, int advice);
 
 int qemu_open(const char *name, int flags, ...);
 int qemu_close(int fd);
+#ifndef _WIN32
+int qemu_dup(int fd);
+#endif
 
 #if defined(__HAIKU__) && defined(__i386__)
 #define FMT_pid "%ld"

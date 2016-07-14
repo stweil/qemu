@@ -2952,6 +2952,19 @@ static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
     loc_pop(&loc);
 }
 
+static int global_init_func(void *opaque, QemuOpts *opts, Error **errp)
+{
+    GlobalProperty *g;
+
+    g = g_malloc0(sizeof(*g));
+    g->driver   = qemu_opt_get(opts, "driver");
+    g->property = qemu_opt_get(opts, "property");
+    g->value    = qemu_opt_get(opts, "value");
+    g->user_provided = true;
+    qdev_prop_register_global(g);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int i;
@@ -4374,9 +4387,6 @@ int main(int argc, char **argv)
         qemu_opts_del(icount_opts);
     }
 
-    /* clean up network at qemu process termination */
-    atexit(&net_cleanup);
-
     if (default_net) {
         QemuOptsList *net = qemu_find_opts("net");
         qemu_opts_set(net, NULL, "type", "nic", &error_abort);
@@ -4477,14 +4487,10 @@ int main(int argc, char **argv)
             exit (i == 1 ? 1 : 0);
     }
 
-    if (machine_class->compat_props) {
-        GlobalProperty *p;
-        for (i = 0; i < machine_class->compat_props->len; i++) {
-            p = g_array_index(machine_class->compat_props, GlobalProperty *, i);
-            qdev_prop_register_global(p);
-        }
-    }
-    qemu_add_globals();
+    machine_register_compat_props(current_machine);
+
+    qemu_opts_foreach(qemu_find_opts("global"),
+                      global_init_func, NULL, NULL);
 
     /* This checkpoint is required by replay to separate prior clock
        reading from the other reads, because timer polling functions query
@@ -4643,6 +4649,10 @@ int main(int argc, char **argv)
 #ifdef CONFIG_TPM
     tpm_cleanup();
 #endif
+
+    /* vhost-user must be cleaned up before chardevs.  */
+    net_cleanup();
+    qemu_chr_cleanup();
 
     return 0;
 }

@@ -17,8 +17,8 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _EXEC_ALL_H_
-#define _EXEC_ALL_H_
+#ifndef EXEC_ALL_H
+#define EXEC_ALL_H
 
 #include "qemu-common.h"
 #include "exec/tb-context.h"
@@ -364,8 +364,8 @@ extern uintptr_t tci_tb_ptr;
 struct MemoryRegion *iotlb_to_region(CPUState *cpu,
                                      hwaddr index, MemTxAttrs attrs);
 
-void tlb_fill(CPUState *cpu, target_ulong addr, int is_write, int mmu_idx,
-              uintptr_t retaddr);
+void tlb_fill(CPUState *cpu, target_ulong addr, MMUAccessType access_type,
+              int mmu_idx, uintptr_t retaddr);
 
 #endif
 

@@ -17,8 +17,8 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#if !defined (__CPU_ALPHA_H__)
-#define __CPU_ALPHA_H__
+#ifndef ALPHA_CPU_H
+#define ALPHA_CPU_H
 
 #include "qemu-common.h"
 #include "cpu-qom.h"
@@ -323,7 +323,8 @@ hwaddr alpha_cpu_get_phys_page_debug(CPUState *cpu, vaddr addr);
 int alpha_cpu_gdb_read_register(CPUState *cpu, uint8_t *buf, int reg);
 int alpha_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 void alpha_cpu_do_unaligned_access(CPUState *cpu, vaddr addr,
-                                   int is_write, int is_user, uintptr_t retaddr);
+                                   MMUAccessType access_type,
+                                   int mmu_idx, uintptr_t retaddr);
 
 #define cpu_list alpha_cpu_list
 #define cpu_signal_handler cpu_alpha_signal_handler
@@ -523,4 +524,4 @@ static inline void cpu_get_tb_cpu_state(CPUAlphaState *env, target_ulong *pc,
     *pflags = flags;
 }
 
-#endif /* !defined (__CPU_ALPHA_H__) */
+#endif /* ALPHA_CPU_H */

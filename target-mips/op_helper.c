@@ -682,7 +682,7 @@ static void sync_c0_tcstatus(CPUMIPSState *cpu, int tc,
 
     tcu = (v >> CP0TCSt_TCU0) & 0xf;
     tmx = (v >> CP0TCSt_TMX) & 0x1;
-    tasid = v & 0xff;
+    tasid = v & cpu->CP0_EntryHi_ASID_mask;
     tksu = (v >> CP0TCSt_TKSU) & 0x3;
 
     status = tcu << CP0St_CU0;
@@ -693,7 +693,7 @@ static void sync_c0_tcstatus(CPUMIPSState *cpu, int tc,
     cpu->CP0_Status |= status;
 
     /* Sync the TASID with EntryHi.  */
-    cpu->CP0_EntryHi &= ~0xff;
+    cpu->CP0_EntryHi &= ~cpu->CP0_EntryHi_ASID_mask;
     cpu->CP0_EntryHi |= tasid;
 
     compute_hflags(cpu);
@@ -705,7 +705,7 @@ static void sync_c0_entryhi(CPUMIPSState *cpu, int tc)
     int32_t *tcst;
     uint32_t asid, v = cpu->CP0_EntryHi;
 
-    asid = v & 0xff;
+    asid = v & cpu->CP0_EntryHi_ASID_mask;
 
     if (tc == cpu->current_tc) {
         tcst = &cpu->active_tc.CP0_TCStatus;
@@ -713,7 +713,7 @@ static void sync_c0_entryhi(CPUMIPSState *cpu, int tc)
         tcst = &cpu->tcs[tc].CP0_TCStatus;
     }
 
-    *tcst &= ~0xff;
+    *tcst &= ~cpu->CP0_EntryHi_ASID_mask;
     *tcst |= asid;
 }
 
@@ -1406,7 +1406,7 @@ void helper_mtc0_count(CPUMIPSState *env, target_ulong arg1)
 void helper_mtc0_entryhi(CPUMIPSState *env, target_ulong arg1)
 {
     target_ulong old, val, mask;
-    mask = (TARGET_PAGE_MASK << 1) | 0xFF;
+    mask = (TARGET_PAGE_MASK << 1) | env->CP0_EntryHi_ASID_mask;
     if (((env->CP0_Config4 >> CP0C4_IE) & 0x3) >= 2) {
         mask |= 1 << CP0EnHi_EHINV;
     }
@@ -1432,8 +1432,10 @@ void helper_mtc0_entryhi(CPUMIPSState *env, target_ulong arg1)
         sync_c0_entryhi(env, env->current_tc);
     }
     /* If the ASID changes, flush qemu's TLB.  */
-    if ((old & 0xFF) != (val & 0xFF))
+    if ((old & env->CP0_EntryHi_ASID_mask) !=
+        (val & env->CP0_EntryHi_ASID_mask)) {
         cpu_mips_tlb_flush(env, 1);
+    }
 }
 
 void helper_mttc0_entryhi(CPUMIPSState *env, target_ulong arg1)
@@ -1634,7 +1636,8 @@ void helper_mtc0_watchlo(CPUMIPSState *env, target_ulong arg1, uint32_t sel)
 
 void helper_mtc0_watchhi(CPUMIPSState *env, target_ulong arg1, uint32_t sel)
 {
-    env->CP0_WatchHi[sel] = (arg1 & 0x40FF0FF8);
+    int mask = 0x40000FF8 | (env->CP0_EntryHi_ASID_mask << CP0WH_ASID);
+    env->CP0_WatchHi[sel] = arg1 & mask;
     env->CP0_WatchHi[sel] &= ~(env->CP0_WatchHi[sel] & arg1 & 0x7);
 }
 
@@ -1994,7 +1997,7 @@ static void r4k_fill_tlb(CPUMIPSState *env, int idx)
 #if defined(TARGET_MIPS64)
     tlb->VPN &= env->SEGMask;
 #endif
-    tlb->ASID = env->CP0_EntryHi & 0xFF;
+    tlb->ASID = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask;
     tlb->PageMask = env->CP0_PageMask;
     tlb->G = env->CP0_EntryLo0 & env->CP0_EntryLo1 & 1;
     tlb->V0 = (env->CP0_EntryLo0 & 2) != 0;
@@ -2015,7 +2018,7 @@ void r4k_helper_tlbinv(CPUMIPSState *env)
 {
     int idx;
     r4k_tlb_t *tlb;
-    uint8_t ASID = env->CP0_EntryHi & 0xFF;
+    uint16_t ASID = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask;
 
     for (idx = 0; idx < env->tlb->nb_tlb; idx++) {
         tlb = &env->tlb->mmu.r4k.tlb[idx];
@@ -2041,7 +2044,7 @@ void r4k_helper_tlbwi(CPUMIPSState *env)
     r4k_tlb_t *tlb;
     int idx;
     target_ulong VPN;
-    uint8_t ASID;
+    uint16_t ASID;
     bool G, V0, D0, V1, D1;
 
     idx = (env->CP0_Index & ~0x80000000) % env->tlb->nb_tlb;
@@ -2050,7 +2053,7 @@ void r4k_helper_tlbwi(CPUMIPSState *env)
 #if defined(TARGET_MIPS64)
     VPN &= env->SEGMask;
 #endif
-    ASID = env->CP0_EntryHi & 0xff;
+    ASID = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask;
     G = env->CP0_EntryLo0 & env->CP0_EntryLo1 & 1;
     V0 = (env->CP0_EntryLo0 & 2) != 0;
     D0 = (env->CP0_EntryLo0 & 4) != 0;
@@ -2083,10 +2086,10 @@ void r4k_helper_tlbp(CPUMIPSState *env)
     target_ulong mask;
     target_ulong tag;
     target_ulong VPN;
-    uint8_t ASID;
+    uint16_t ASID;
     int i;
 
-    ASID = env->CP0_EntryHi & 0xFF;
+    ASID = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask;
     for (i = 0; i < env->tlb->nb_tlb; i++) {
         tlb = &env->tlb->mmu.r4k.tlb[i];
         /* 1k pages are not supported. */
@@ -2138,10 +2141,10 @@ static inline uint64_t get_entrylo_pfn_from_tlb(uint64_t tlb_pfn)
 void r4k_helper_tlbr(CPUMIPSState *env)
 {
     r4k_tlb_t *tlb;
-    uint8_t ASID;
+    uint16_t ASID;
     int idx;
 
-    ASID = env->CP0_EntryHi & 0xFF;
+    ASID = env->CP0_EntryHi & env->CP0_EntryHi_ASID_mask;
     idx = (env->CP0_Index & ~0x80000000) % env->tlb->nb_tlb;
     tlb = &env->tlb->mmu.r4k.tlb[idx];
 
@@ -2388,8 +2391,8 @@ void QEMU_NORETURN helper_wait(CPUMIPSState *env)
 #if !defined(CONFIG_USER_ONLY)
 
 void QEMU_NORETURN mips_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
-                                  int access_type, int is_user,
-                                  uintptr_t retaddr)
+                                                MMUAccessType access_type,
+                                                int mmu_idx, uintptr_t retaddr)
 {
     MIPSCPU *cpu = MIPS_CPU(cs);
     CPUMIPSState *env = &cpu->env;
@@ -2410,12 +2413,12 @@ void QEMU_NORETURN mips_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     do_raise_exception_err(env, excp, error_code, retaddr);
 }
 
-void tlb_fill(CPUState *cs, target_ulong addr, int is_write, int mmu_idx,
-              uintptr_t retaddr)
+void tlb_fill(CPUState *cs, target_ulong addr, MMUAccessType access_type,
+              int mmu_idx, uintptr_t retaddr)
 {
     int ret;
 
-    ret = mips_cpu_handle_mmu_fault(cs, addr, is_write, mmu_idx);
+    ret = mips_cpu_handle_mmu_fault(cs, addr, access_type, mmu_idx);
     if (ret) {
         MIPSCPU *cpu = MIPS_CPU(cs);
         CPUMIPSState *env = &cpu->env;

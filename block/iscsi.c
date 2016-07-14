@@ -46,7 +46,6 @@
 
 #ifdef __linux__
 #include <scsi/sg.h>
-#include <block/scsi.h>
 #endif
 
 typedef struct IscsiLun {
@@ -153,7 +152,7 @@ static void iscsi_co_generic_bh_cb(void *opaque)
     struct IscsiTask *iTask = opaque;
     iTask->complete = 1;
     qemu_bh_delete(iTask->bh);
-    qemu_coroutine_enter(iTask->co, NULL);
+    qemu_coroutine_enter(iTask->co);
 }
 
 static void iscsi_retry_timer_expired(void *opaque)
@@ -161,7 +160,7 @@ static void iscsi_retry_timer_expired(void *opaque)
     struct IscsiTask *iTask = opaque;
     iTask->complete = 1;
     if (iTask->co) {
-        qemu_coroutine_enter(iTask->co, NULL);
+        qemu_coroutine_enter(iTask->co);
     }
 }
 
