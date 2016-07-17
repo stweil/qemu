@@ -609,10 +609,10 @@ int cpu_exec(CPUState *cpu)
 
     for(;;) {
         TranslationBlock *tb, *last_tb;
-        int tb_exit = 0;
 
         /* prepare setjmp context for exception handling */
         if (sigsetjmp(cpu->jmp_env, 0) == 0) {
+            int tb_exit = 0;
             /* if an exception is pending, we execute it here */
             if (cpu_handle_exception(cpu, &ret)) {
                 break;
