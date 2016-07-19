@@ -4640,6 +4640,7 @@ int main(int argc, char **argv)
 
     os_setup_post();
 
+    trace_init_vcpu_events();
     main_loop();
     replay_disable_events();
 
