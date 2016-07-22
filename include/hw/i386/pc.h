@@ -72,6 +72,10 @@ struct PCMachineState {
     /* NUMA information: */
     uint64_t numa_nodes;
     uint64_t *node_mem;
+
+    /* Address space used by IOAPIC device. All IOAPIC interrupts
+     * will be translated to MSI messages in the address space. */
+    AddressSpace *ioapic_as;
 };
 
 #define PC_MACHINE_ACPI_DEVICE_PROP "acpi-device"
@@ -377,6 +381,16 @@ bool e820_get_entry(int, uint32_t, uint64_t *, uint64_t *);
         .driver   = "vmxnet3",\
         .property = "romfile",\
         .value    = "",\
+    },\
+    {\
+        .driver = TYPE_X86_CPU,\
+        .property = "fill-mtrr-mask",\
+        .value = "off",\
+    },\
+    {\
+        .driver   = "apic",\
+        .property = "legacy-instance-id",\
+        .value    = "on",\
     },
 
 #define PC_COMPAT_2_5 \

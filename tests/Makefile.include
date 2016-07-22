@@ -284,6 +284,10 @@ qapi-schema += args-alternate.json
 qapi-schema += args-any.json
 qapi-schema += args-array-empty.json
 qapi-schema += args-array-unknown.json
+qapi-schema += args-bad-boxed.json
+qapi-schema += args-boxed-anon.json
+qapi-schema += args-boxed-empty.json
+qapi-schema += args-boxed-string.json
 qapi-schema += args-int.json
 qapi-schema += args-invalid.json
 qapi-schema += args-member-array-bad.json
@@ -317,6 +321,7 @@ qapi-schema += enum-wrong-data.json
 qapi-schema += escape-outside-string.json
 qapi-schema += escape-too-big.json
 qapi-schema += escape-too-short.json
+qapi-schema += event-boxed-empty.json
 qapi-schema += event-case.json
 qapi-schema += event-nest-struct.json
 qapi-schema += flat-union-array-branch.json
@@ -326,6 +331,7 @@ qapi-schema += flat-union-base-any.json
 qapi-schema += flat-union-base-union.json
 qapi-schema += flat-union-clash-member.json
 qapi-schema += flat-union-empty.json
+qapi-schema += flat-union-incomplete-branch.json
 qapi-schema += flat-union-inline.json
 qapi-schema += flat-union-int-branch.json
 qapi-schema += flat-union-invalid-branch-key.json
@@ -620,6 +626,18 @@ tests/test-filter-mirror$(EXESUF): tests/test-filter-mirror.o $(qtest-obj-y)
 tests/test-filter-redirector$(EXESUF): tests/test-filter-redirector.o $(qtest-obj-y)
 tests/ivshmem-test$(EXESUF): tests/ivshmem-test.o contrib/ivshmem-server/ivshmem-server.o $(libqos-pc-obj-y)
 tests/vhost-user-bridge$(EXESUF): tests/vhost-user-bridge.o
+
+tests/migration/stress$(EXESUF): tests/migration/stress.o
+	$(call quiet-command, $(LINKPROG) -static -O3 $(PTHREAD_LIB) -o $@ $< ,"  LINK  $(TARGET_DIR)$@")
+
+INITRD_WORK_DIR=tests/migration/initrd
+
+tests/migration/initrd-stress.img: tests/migration/stress$(EXESUF)
+	mkdir -p $(INITRD_WORK_DIR)
+	cp $< $(INITRD_WORK_DIR)/init
+	(cd $(INITRD_WORK_DIR) && (find | cpio --quiet -o -H newc | gzip -9)) > $@
+	rm $(INITRD_WORK_DIR)/init
+	rmdir $(INITRD_WORK_DIR)
 
 ifeq ($(CONFIG_POSIX),y)
 LIBS += -lutil

@@ -35,6 +35,8 @@
 #include "hw/i386/apic.h"
 #include "hw/i386/apic_internal.h"
 #include "hw/i386/apic-msidef.h"
+#include "hw/i386/intel_iommu.h"
+#include "hw/i386/x86-iommu.h"
 
 #include "exec/ioport.h"
 #include "standard-headers/asm-x86/hyperv.h"
@@ -42,6 +44,7 @@
 #include "hw/pci/msi.h"
 #include "migration/migration.h"
 #include "exec/memattrs.h"
+#include "trace.h"
 
 //#define DEBUG_KVM
 
@@ -1718,6 +1721,8 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
             }
         }
         if (has_msr_mtrr) {
+            uint64_t phys_mask = MAKE_64BIT_MASK(0, cpu->phys_bits);
+
             kvm_msr_entry_add(cpu, MSR_MTRRdefType, env->mtrr_deftype);
             kvm_msr_entry_add(cpu, MSR_MTRRfix64K_00000, env->mtrr_fixed[0]);
             kvm_msr_entry_add(cpu, MSR_MTRRfix16K_80000, env->mtrr_fixed[1]);
@@ -1731,10 +1736,15 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
             kvm_msr_entry_add(cpu, MSR_MTRRfix4K_F0000, env->mtrr_fixed[9]);
             kvm_msr_entry_add(cpu, MSR_MTRRfix4K_F8000, env->mtrr_fixed[10]);
             for (i = 0; i < MSR_MTRRcap_VCNT; i++) {
+                /* The CPU GPs if we write to a bit above the physical limit of
+                 * the host CPU (and KVM emulates that)
+                 */
+                uint64_t mask = env->mtrr_var[i].mask;
+                mask &= phys_mask;
+
                 kvm_msr_entry_add(cpu, MSR_MTRRphysBase(i),
                                   env->mtrr_var[i].base);
-                kvm_msr_entry_add(cpu, MSR_MTRRphysMask(i),
-                                  env->mtrr_var[i].mask);
+                kvm_msr_entry_add(cpu, MSR_MTRRphysMask(i), mask);
             }
         }
 
@@ -1972,6 +1982,7 @@ static int kvm_get_msrs(X86CPU *cpu)
     CPUX86State *env = &cpu->env;
     struct kvm_msr_entry *msrs = cpu->kvm_msr_buf->entries;
     int ret, i;
+    uint64_t mtrr_top_bits;
 
     kvm_msr_buf_reset(cpu);
 
@@ -2124,6 +2135,30 @@ static int kvm_get_msrs(X86CPU *cpu)
     }
 
     assert(ret == cpu->kvm_msr_buf->nmsrs);
+    /*
+     * MTRR masks: Each mask consists of 5 parts
+     * a  10..0: must be zero
+     * b  11   : valid bit
+     * c n-1.12: actual mask bits
+     * d  51..n: reserved must be zero
+     * e  63.52: reserved must be zero
+     *
+     * 'n' is the number of physical bits supported by the CPU and is
+     * apparently always <= 52.   We know our 'n' but don't know what
+     * the destinations 'n' is; it might be smaller, in which case
+     * it masks (c) on loading. It might be larger, in which case
+     * we fill 'd' so that d..c is consistent irrespetive of the 'n'
+     * we're migrating to.
+     */
+
+    if (cpu->fill_mtrr_mask) {
+        QEMU_BUILD_BUG_ON(TARGET_PHYS_ADDR_SPACE_BITS > 52);
+        assert(cpu->phys_bits <= TARGET_PHYS_ADDR_SPACE_BITS);
+        mtrr_top_bits = MAKE_64BIT_MASK(cpu->phys_bits, 52 - cpu->phys_bits);
+    } else {
+        mtrr_top_bits = 0;
+    }
+
     for (i = 0; i < ret; i++) {
         uint32_t index = msrs[i].index;
         switch (index) {
@@ -2322,7 +2357,8 @@ static int kvm_get_msrs(X86CPU *cpu)
             break;
         case MSR_MTRRphysBase(0) ... MSR_MTRRphysMask(MSR_MTRRcap_VCNT - 1):
             if (index & 1) {
-                env->mtrr_var[MSR_MTRRphysIndex(index)].mask = msrs[i].data;
+                env->mtrr_var[MSR_MTRRphysIndex(index)].mask = msrs[i].data |
+                                                               mtrr_top_bits;
             } else {
                 env->mtrr_var[MSR_MTRRphysIndex(index)].base = msrs[i].data;
             }
@@ -3202,8 +3238,7 @@ void kvm_arch_init_irq_routing(KVMState *s)
         /* If the ioapic is in QEMU and the lapics are in KVM, reserve
            MSI routes for signaling interrupts to the local apics. */
         for (i = 0; i < IOAPIC_NUM_PINS; i++) {
-            struct MSIMessage msg = { 0x0, 0x0 };
-            if (kvm_irqchip_add_msi_route(s, msg, NULL) < 0) {
+            if (kvm_irqchip_add_msi_route(s, 0, NULL) < 0) {
                 error_report("Could not enable split IRQ mode.");
                 exit(1);
             }
@@ -3373,6 +3408,109 @@ int kvm_device_msix_deassign(KVMState *s, uint32_t dev_id)
 int kvm_arch_fixup_msi_route(struct kvm_irq_routing_entry *route,
                              uint64_t address, uint32_t data, PCIDevice *dev)
 {
+    X86IOMMUState *iommu = x86_iommu_get_default();
+
+    if (iommu) {
+        int ret;
+        MSIMessage src, dst;
+        X86IOMMUClass *class = X86_IOMMU_GET_CLASS(iommu);
+
+        src.address = route->u.msi.address_hi;
+        src.address <<= VTD_MSI_ADDR_HI_SHIFT;
+        src.address |= route->u.msi.address_lo;
+        src.data = route->u.msi.data;
+
+        ret = class->int_remap(iommu, &src, &dst, dev ? \
+                               pci_requester_id(dev) : \
+                               X86_IOMMU_SID_INVALID);
+        if (ret) {
+            trace_kvm_x86_fixup_msi_error(route->gsi);
+            return 1;
+        }
+
+        route->u.msi.address_hi = dst.address >> VTD_MSI_ADDR_HI_SHIFT;
+        route->u.msi.address_lo = dst.address & VTD_MSI_ADDR_LO_MASK;
+        route->u.msi.data = dst.data;
+    }
+
+    return 0;
+}
+
+typedef struct MSIRouteEntry MSIRouteEntry;
+
+struct MSIRouteEntry {
+    PCIDevice *dev;             /* Device pointer */
+    int vector;                 /* MSI/MSIX vector index */
+    int virq;                   /* Virtual IRQ index */
+    QLIST_ENTRY(MSIRouteEntry) list;
+};
+
+/* List of used GSI routes */
+static QLIST_HEAD(, MSIRouteEntry) msi_route_list = \
+    QLIST_HEAD_INITIALIZER(msi_route_list);
+
+static void kvm_update_msi_routes_all(void *private, bool global,
+                                      uint32_t index, uint32_t mask)
+{
+    int cnt = 0;
+    MSIRouteEntry *entry;
+    MSIMessage msg;
+    /* TODO: explicit route update */
+    QLIST_FOREACH(entry, &msi_route_list, list) {
+        cnt++;
+        msg = pci_get_msi_message(entry->dev, entry->vector);
+        kvm_irqchip_update_msi_route(kvm_state, entry->virq,
+                                     msg, entry->dev);
+    }
+    kvm_irqchip_commit_routes(kvm_state);
+    trace_kvm_x86_update_msi_routes(cnt);
+}
+
+int kvm_arch_add_msi_route_post(struct kvm_irq_routing_entry *route,
+                                int vector, PCIDevice *dev)
+{
+    static bool notify_list_inited = false;
+    MSIRouteEntry *entry;
+
+    if (!dev) {
+        /* These are (possibly) IOAPIC routes only used for split
+         * kernel irqchip mode, while what we are housekeeping are
+         * PCI devices only. */
+        return 0;
+    }
+
+    entry = g_new0(MSIRouteEntry, 1);
+    entry->dev = dev;
+    entry->vector = vector;
+    entry->virq = route->gsi;
+    QLIST_INSERT_HEAD(&msi_route_list, entry, list);
+
+    trace_kvm_x86_add_msi_route(route->gsi);
+
+    if (!notify_list_inited) {
+        /* For the first time we do add route, add ourselves into
+         * IOMMU's IEC notify list if needed. */
+        X86IOMMUState *iommu = x86_iommu_get_default();
+        if (iommu) {
+            x86_iommu_iec_register_notifier(iommu,
+                                            kvm_update_msi_routes_all,
+                                            NULL);
+        }
+        notify_list_inited = true;
+    }
+    return 0;
+}
+
+int kvm_arch_release_virq_post(int virq)
+{
+    MSIRouteEntry *entry, *next;
+    QLIST_FOREACH_SAFE(entry, &msi_route_list, list, next) {
+        if (entry->virq == virq) {
+            trace_kvm_x86_remove_msi_route(virq);
+            QLIST_REMOVE(entry, list);
+            break;
+        }
+    }
     return 0;
 }
 
