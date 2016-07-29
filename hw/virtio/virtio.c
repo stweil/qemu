@@ -458,6 +458,11 @@ static void virtqueue_map_desc(unsigned int *p_num_sg, hwaddr *addr, struct iove
     unsigned num_sg = *p_num_sg;
     assert(num_sg <= max_num_sg);
 
+    if (!sz) {
+        error_report("virtio: zero sized buffers are not allowed");
+        exit(1);
+    }
+
     while (sz) {
         hwaddr len = sz;
 
@@ -561,6 +566,11 @@ void *virtqueue_pop(VirtQueue *vq, size_t sz)
     out_num = in_num = 0;
 
     max = vq->vring.num;
+
+    if (vq->inuse >= vq->vring.num) {
+        error_report("Virtqueue size exceeded");
+        exit(1);
+    }
 
     i = head = virtqueue_get_head(vq, vq->last_avail_idx++);
     if (virtio_vdev_has_feature(vdev, VIRTIO_RING_F_EVENT_IDX)) {
