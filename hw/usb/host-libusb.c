@@ -448,7 +448,8 @@ static void usb_host_req_abort(USBHostRequest *r)
 
 /* ------------------------------------------------------------------------ */
 
-static void LIBUSB_CALL usb_host_req_complete_iso(struct libusb_transfer *transfer)
+static void LIBUSB_CALL
+usb_host_req_complete_iso(struct libusb_transfer *transfer)
 {
     USBHostIsoXfer *xfer = transfer->user_data;
 
