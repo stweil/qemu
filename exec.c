@@ -1231,7 +1231,7 @@ static void *file_ram_alloc(RAMBlock *block,
     char *filename;
     char *sanitized_name;
     char *c;
-    void * volatile area = NULL;
+    void * volatile area = MAP_FAILED;
     int fd = -1;
     int64_t page_size;
 
@@ -1319,13 +1319,19 @@ static void *file_ram_alloc(RAMBlock *block,
     }
 
     if (mem_prealloc) {
-        os_mem_prealloc(fd, area, memory);
+        os_mem_prealloc(fd, area, memory, errp);
+        if (errp && *errp) {
+            goto error;
+        }
     }
 
     block->fd = fd;
     return area;
 
 error:
+    if (area != MAP_FAILED) {
+        qemu_ram_munmap(area, memory);
+    }
     if (unlink_on_error) {
         unlink(path);
     }
