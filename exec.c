@@ -255,7 +255,7 @@ static void phys_page_set(AddressSpaceDispatch *d,
 /* Compact a non leaf page entry. Simply detect that the entry has a single child,
  * and update our entry so we can skip it and go directly to the destination.
  */
-static void phys_page_compact(PhysPageEntry *lp, Node *nodes, unsigned long *compacted)
+static void phys_page_compact(PhysPageEntry *lp, Node *nodes)
 {
     unsigned valid_ptr = P_L2_SIZE;
     int valid = 0;
@@ -275,7 +275,7 @@ static void phys_page_compact(PhysPageEntry *lp, Node *nodes, unsigned long *com
         valid_ptr = i;
         valid++;
         if (p[i].skip) {
-            phys_page_compact(&p[i], nodes, compacted);
+            phys_page_compact(&p[i], nodes);
         }
     }
 
@@ -307,10 +307,8 @@ static void phys_page_compact(PhysPageEntry *lp, Node *nodes, unsigned long *com
 
 static void phys_page_compact_all(AddressSpaceDispatch *d, int nodes_nb)
 {
-    DECLARE_BITMAP(compacted, nodes_nb);
-
     if (d->phys_map.skip) {
-        phys_page_compact(&d->phys_map, d->map.nodes, compacted);
+        phys_page_compact(&d->phys_map, d->map.nodes);
     }
 }
 
@@ -598,32 +596,11 @@ AddressSpace *cpu_get_address_space(CPUState *cpu, int asidx)
 }
 #endif
 
-static int cpu_get_free_index(void)
-{
-    CPUState *some_cpu;
-    int cpu_index = 0;
-
-    CPU_FOREACH(some_cpu) {
-        cpu_index++;
-    }
-    return cpu_index;
-}
-
 void cpu_exec_exit(CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
 
-    cpu_list_lock();
-    if (cpu->node.tqe_prev == NULL) {
-        /* there is nothing to undo since cpu_exec_init() hasn't been called */
-        cpu_list_unlock();
-        return;
-    }
-
-    QTAILQ_REMOVE(&cpus, cpu, node);
-    cpu->node.tqe_prev = NULL;
-    cpu->cpu_index = UNASSIGNED_CPU_INDEX;
-    cpu_list_unlock();
+    cpu_list_remove(cpu);
 
     if (cc->vmsd != NULL) {
         vmstate_unregister(NULL, cc->vmsd, cpu);
@@ -664,13 +641,7 @@ void cpu_exec_init(CPUState *cpu, Error **errp)
     object_ref(OBJECT(cpu->memory));
 #endif
 
-    cpu_list_lock();
-    if (cpu->cpu_index == UNASSIGNED_CPU_INDEX) {
-        cpu->cpu_index = cpu_get_free_index();
-        assert(cpu->cpu_index != UNASSIGNED_CPU_INDEX);
-    }
-    QTAILQ_INSERT_TAIL(&cpus, cpu, node);
-    cpu_list_unlock();
+    cpu_list_add(cpu);
 
 #ifndef CONFIG_USER_ONLY
     if (qdev_get_vmsd(DEVICE(cpu)) == NULL) {
@@ -1620,10 +1591,8 @@ static void ram_block_add(RAMBlock *new_block, Error **errp)
     if (new_block->host) {
         qemu_ram_setup_dump(new_block->host, new_block->max_length);
         qemu_madvise(new_block->host, new_block->max_length, QEMU_MADV_HUGEPAGE);
+        /* MADV_DONTFORK is also needed by KVM in absence of synchronous MMU */
         qemu_madvise(new_block->host, new_block->max_length, QEMU_MADV_DONTFORK);
-        if (kvm_enabled()) {
-            kvm_setup_guest_memory(new_block->host, new_block->max_length);
-        }
     }
 }
 

@@ -194,10 +194,10 @@ static void bcm2835_timer_realize(DeviceState *dev, Error **errp)
     s->prediv = 0x7d;
 
     bh = qemu_bh_new(timer_tick, s);
-    s->timer = ptimer_init(bh);
+    s->timer = ptimer_init(bh, PTIMER_POLICY_DEFAULT);
 
     bh = qemu_bh_new(frc_timer_tick, s);
-    s->frc_timer = ptimer_init(bh);
+    s->frc_timer = ptimer_init(bh, PTIMER_POLICY_DEFAULT);
 }
 
 static void bcm2835_timer_class_init(ObjectClass *klass, void *data)

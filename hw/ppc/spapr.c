@@ -47,6 +47,7 @@
 #include "hw/ppc/ppc.h"
 #include "hw/loader.h"
 
+#include "hw/ppc/fdt.h"
 #include "hw/ppc/spapr.h"
 #include "hw/ppc/spapr_vio.h"
 #include "hw/pci-host/spapr.h"
@@ -249,40 +250,6 @@ static int spapr_fixup_cpu_dt(void *fdt, sPAPRMachineState *spapr)
     return ret;
 }
 
-
-static size_t create_page_sizes_prop(CPUPPCState *env, uint32_t *prop,
-                                     size_t maxsize)
-{
-    size_t maxcells = maxsize / sizeof(uint32_t);
-    int i, j, count;
-    uint32_t *p = prop;
-
-    for (i = 0; i < PPC_PAGE_SIZES_MAX_SZ; i++) {
-        struct ppc_one_seg_page_size *sps = &env->sps.sps[i];
-
-        if (!sps->page_shift) {
-            break;
-        }
-        for (count = 0; count < PPC_PAGE_SIZES_MAX_SZ; count++) {
-            if (sps->enc[count].page_shift == 0) {
-                break;
-            }
-        }
-        if ((p - prop) >= (maxcells - 3 - count * 2)) {
-            break;
-        }
-        *(p++) = cpu_to_be32(sps->page_shift);
-        *(p++) = cpu_to_be32(sps->slb_enc);
-        *(p++) = cpu_to_be32(count);
-        for (j = 0; j < count; j++) {
-            *(p++) = cpu_to_be32(sps->enc[j].page_shift);
-            *(p++) = cpu_to_be32(sps->enc[j].pte_enc);
-        }
-    }
-
-    return (p - prop) * sizeof(uint32_t);
-}
-
 static hwaddr spapr_node0_size(void)
 {
     MachineState *machine = MACHINE(qdev_get_machine());
@@ -298,16 +265,6 @@ static hwaddr spapr_node0_size(void)
     }
     return machine->ram_size;
 }
-
-#define _FDT(exp) \
-    do { \
-        int ret = (exp);                                           \
-        if (ret < 0) {                                             \
-            fprintf(stderr, "qemu: error creating device tree: %s: %s\n", \
-                    #exp, fdt_strerror(ret));                      \
-            exit(1);                                               \
-        }                                                          \
-    } while (0)
 
 static void add_str(GString *s, const gchar *s1)
 {
@@ -375,12 +332,7 @@ static void *spapr_create_fdt_skel(hwaddr initrd_base,
         g_free(buf);
     }
 
-    buf = g_strdup_printf(UUID_FMT, qemu_uuid[0], qemu_uuid[1],
-                          qemu_uuid[2], qemu_uuid[3], qemu_uuid[4],
-                          qemu_uuid[5], qemu_uuid[6], qemu_uuid[7],
-                          qemu_uuid[8], qemu_uuid[9], qemu_uuid[10],
-                          qemu_uuid[11], qemu_uuid[12], qemu_uuid[13],
-                          qemu_uuid[14], qemu_uuid[15]);
+    buf = qemu_uuid_unparse_strdup(&qemu_uuid);
 
     _FDT((fdt_property_string(fdt, "vm,uuid", buf)));
     if (qemu_uuid_set) {
@@ -594,6 +546,51 @@ static int spapr_populate_memory(sPAPRMachineState *spapr, void *fdt)
     return 0;
 }
 
+/* Populate the "ibm,pa-features" property */
+static void spapr_populate_pa_features(CPUPPCState *env, void *fdt, int offset)
+{
+    uint8_t pa_features_206[] = { 6, 0,
+        0xf6, 0x1f, 0xc7, 0x00, 0x80, 0xc0 };
+    uint8_t pa_features_207[] = { 24, 0,
+        0xf6, 0x1f, 0xc7, 0xc0, 0x80, 0xf0,
+        0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x80, 0x00,
+        0x80, 0x00, 0x80, 0x00, 0x00, 0x00 };
+    uint8_t *pa_features;
+    size_t pa_size;
+
+    switch (env->mmu_model) {
+    case POWERPC_MMU_2_06:
+    case POWERPC_MMU_2_06a:
+        pa_features = pa_features_206;
+        pa_size = sizeof(pa_features_206);
+        break;
+    case POWERPC_MMU_2_07:
+    case POWERPC_MMU_2_07a:
+        pa_features = pa_features_207;
+        pa_size = sizeof(pa_features_207);
+        break;
+    default:
+        return;
+    }
+
+    if (env->ci_large_pages) {
+        /*
+         * Note: we keep CI large pages off by default because a 64K capable
+         * guest provisioned with large pages might otherwise try to map a qemu
+         * framebuffer (or other kind of memory mapped PCI BAR) using 64K pages
+         * even if that qemu runs on a 4k host.
+         * We dd this bit back here if we are confident this is not an issue
+         */
+        pa_features[3] |= 0x20;
+    }
+    if (kvmppc_has_cap_htm() && pa_size > 24) {
+        pa_features[24] |= 0x80;    /* Transactional memory support */
+    }
+
+    _FDT((fdt_setprop(fdt, offset, "ibm,pa-features", pa_features, pa_size)));
+}
+
 static void spapr_populate_cpu_dt(CPUState *cs, void *fdt, int offset,
                                   sPAPRMachineState *spapr)
 {
@@ -621,24 +618,6 @@ static void spapr_populate_cpu_dt(CPUState *cs, void *fdt, int offset,
         _FDT((fdt_setprop_cell(fdt, offset, "ibm,my-drc-index", drc_index)));
     }
 
-    /* Note: we keep CI large pages off for now because a 64K capable guest
-     * provisioned with large pages might otherwise try to map a qemu
-     * framebuffer (or other kind of memory mapped PCI BAR) using 64K pages
-     * even if that qemu runs on a 4k host.
-     *
-     * We can later add this bit back when we are confident this is not
-     * an issue (!HV KVM or 64K host)
-     */
-    uint8_t pa_features_206[] = { 6, 0,
-        0xf6, 0x1f, 0xc7, 0x00, 0x80, 0xc0 };
-    uint8_t pa_features_207[] = { 24, 0,
-        0xf6, 0x1f, 0xc7, 0xc0, 0x80, 0xf0,
-        0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x80, 0x00,
-        0x80, 0x00, 0x80, 0x00, 0x80, 0x00 };
-    uint8_t *pa_features;
-    size_t pa_size;
-
     _FDT((fdt_setprop_cell(fdt, offset, "reg", index)));
     _FDT((fdt_setprop_string(fdt, offset, "device_type", "cpu")));
 
@@ -656,13 +635,13 @@ static void spapr_populate_cpu_dt(CPUState *cs, void *fdt, int offset,
         _FDT((fdt_setprop_cell(fdt, offset, "d-cache-size",
                                pcc->l1_dcache_size)));
     } else {
-        fprintf(stderr, "Warning: Unknown L1 dcache size for cpu\n");
+        error_report("Warning: Unknown L1 dcache size for cpu");
     }
     if (pcc->l1_icache_size) {
         _FDT((fdt_setprop_cell(fdt, offset, "i-cache-size",
                                pcc->l1_icache_size)));
     } else {
-        fprintf(stderr, "Warning: Unknown L1 icache size for cpu\n");
+        error_report("Warning: Unknown L1 icache size for cpu");
     }
 
     _FDT((fdt_setprop_cell(fdt, offset, "timebase-frequency", tbfreq)));
@@ -698,25 +677,14 @@ static void spapr_populate_cpu_dt(CPUState *cs, void *fdt, int offset,
         _FDT((fdt_setprop_cell(fdt, offset, "ibm,dfp", 1)));
     }
 
-    page_sizes_prop_size = create_page_sizes_prop(env, page_sizes_prop,
+    page_sizes_prop_size = ppc_create_page_sizes_prop(env, page_sizes_prop,
                                                   sizeof(page_sizes_prop));
     if (page_sizes_prop_size) {
         _FDT((fdt_setprop(fdt, offset, "ibm,segment-page-sizes",
                           page_sizes_prop, page_sizes_prop_size)));
     }
 
-    /* Do the ibm,pa-features property, adjust it for ci-large-pages */
-    if (env->mmu_model == POWERPC_MMU_2_06) {
-        pa_features = pa_features_206;
-        pa_size = sizeof(pa_features_206);
-    } else /* env->mmu_model == POWERPC_MMU_2_07 */ {
-        pa_features = pa_features_207;
-        pa_size = sizeof(pa_features_207);
-    }
-    if (env->ci_large_pages) {
-        pa_features[3] |= 0x20;
-    }
-    _FDT((fdt_setprop(fdt, offset, "ibm,pa-features", pa_features, pa_size)));
+    spapr_populate_pa_features(env, fdt, offset);
 
     _FDT((fdt_setprop_cell(fdt, offset, "ibm,chip-id",
                            cs->cpu_index / vcpus_per_socket)));
@@ -954,20 +922,20 @@ static void spapr_finalize_fdt(sPAPRMachineState *spapr,
 
     ret = spapr_populate_memory(spapr, fdt);
     if (ret < 0) {
-        fprintf(stderr, "couldn't setup memory nodes in fdt\n");
+        error_report("couldn't setup memory nodes in fdt");
         exit(1);
     }
 
     ret = spapr_populate_vdevice(spapr->vio_bus, fdt);
     if (ret < 0) {
-        fprintf(stderr, "couldn't setup vio devices in fdt\n");
+        error_report("couldn't setup vio devices in fdt");
         exit(1);
     }
 
     if (object_resolve_path_type("", TYPE_SPAPR_RNG, NULL)) {
         ret = spapr_rng_populate_dt(fdt);
         if (ret < 0) {
-            fprintf(stderr, "could not set up rng device in the fdt\n");
+            error_report("could not set up rng device in the fdt");
             exit(1);
         }
     }
@@ -983,7 +951,7 @@ static void spapr_finalize_fdt(sPAPRMachineState *spapr,
     /* RTAS */
     ret = spapr_rtas_device_tree_setup(fdt, rtas_addr, rtas_size);
     if (ret < 0) {
-        fprintf(stderr, "Couldn't set up RTAS device tree properties\n");
+        error_report("Couldn't set up RTAS device tree properties");
     }
 
     /* cpus */
@@ -1158,7 +1126,7 @@ static void spapr_reallocate_hpt(sPAPRMachineState *spapr, int shift,
     }
 }
 
-static int find_unknown_sysbus_device(SysBusDevice *sbdev, void *opaque)
+static void find_unknown_sysbus_device(SysBusDevice *sbdev, void *opaque)
 {
     bool matched = false;
 
@@ -1171,8 +1139,6 @@ static int find_unknown_sysbus_device(SysBusDevice *sbdev, void *opaque)
                      qdev_fw_name(DEVICE(sbdev)));
         exit(1);
     }
-
-    return 0;
 }
 
 static void ppc_spapr_reset(void)
@@ -1809,7 +1775,7 @@ static void ppc_spapr_init(MachineState *machine)
 
     /* init CPUs */
     if (machine->cpu_model == NULL) {
-        machine->cpu_model = kvm_enabled() ? "host" : "POWER7";
+        machine->cpu_model = kvm_enabled() ? "host" : smc->tcg_default_cpu;
     }
 
     ppc_cpu_parse_features(machine->cpu_model);
@@ -1857,6 +1823,9 @@ static void ppc_spapr_init(MachineState *machine)
         /* Enable H_LOGICAL_CI_* so SLOF can talk to in-kernel devices */
         kvmppc_enable_logical_ci_hcalls();
         kvmppc_enable_set_mode_hcall();
+
+        /* H_CLEAR_MOD/_REF are mandatory in PAPR, but off by default */
+        kvmppc_enable_clear_ref_mod_hcalls();
     }
 
     /* allocate RAM */
@@ -2179,10 +2148,8 @@ static void spapr_machine_finalizefn(Object *obj)
     g_free(spapr->kvm_type);
 }
 
-static void ppc_cpu_do_nmi_on_cpu(void *arg)
+static void ppc_cpu_do_nmi_on_cpu(CPUState *cs, void *arg)
 {
-    CPUState *cs = arg;
-
     cpu_synchronize_state(cs);
     ppc_cpu_do_system_reset(cs);
 }
@@ -2192,7 +2159,7 @@ static void spapr_nmi(NMIState *n, int cpu_index, Error **errp)
     CPUState *cs;
 
     CPU_FOREACH(cs) {
-        async_run_on_cpu(cs, ppc_cpu_do_nmi_on_cpu, cs);
+        async_run_on_cpu(cs, ppc_cpu_do_nmi_on_cpu, NULL);
     }
 }
 
@@ -2355,8 +2322,8 @@ static void spapr_machine_device_pre_plug(HotplugHandler *hotplug_dev,
     }
 }
 
-static HotplugHandler *spapr_get_hotpug_handler(MachineState *machine,
-                                             DeviceState *dev)
+static HotplugHandler *spapr_get_hotplug_handler(MachineState *machine,
+                                                 DeviceState *dev)
 {
     if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM) ||
         object_dynamic_cast(OBJECT(dev), TYPE_SPAPR_CPU_CORE)) {
@@ -2428,13 +2395,14 @@ static void spapr_machine_class_init(ObjectClass *oc, void *data)
     mc->kvm_type = spapr_kvm_type;
     mc->has_dynamic_sysbus = true;
     mc->pci_allow_0_address = true;
-    mc->get_hotplug_handler = spapr_get_hotpug_handler;
+    mc->get_hotplug_handler = spapr_get_hotplug_handler;
     hc->pre_plug = spapr_machine_device_pre_plug;
     hc->plug = spapr_machine_device_plug;
     hc->unplug = spapr_machine_device_unplug;
     mc->cpu_index_to_socket_id = spapr_cpu_index_to_socket_id;
 
     smc->dr_lmb_enabled = true;
+    smc->tcg_default_cpu = "POWER8";
     mc->query_hotpluggable_cpus = spapr_query_hotpluggable_cpus;
     fwc->get_dev_path = spapr_get_fw_dev_path;
     nc->nmi_monitor_handler = spapr_nmi;
@@ -2486,18 +2454,39 @@ static const TypeInfo spapr_machine_info = {
     type_init(spapr_machine_register_##suffix)
 
 /*
+ * pseries-2.8
+ */
+static void spapr_machine_2_8_instance_options(MachineState *machine)
+{
+}
+
+static void spapr_machine_2_8_class_options(MachineClass *mc)
+{
+    /* Defaults for the latest behaviour inherited from the base class */
+}
+
+DEFINE_SPAPR_MACHINE(2_8, "2.8", true);
+
+/*
  * pseries-2.7
  */
+#define SPAPR_COMPAT_2_7 \
+    HW_COMPAT_2_7 \
+
 static void spapr_machine_2_7_instance_options(MachineState *machine)
 {
 }
 
 static void spapr_machine_2_7_class_options(MachineClass *mc)
 {
-    /* Defaults for the latest behaviour inherited from the base class */
+    sPAPRMachineClass *smc = SPAPR_MACHINE_CLASS(mc);
+
+    spapr_machine_2_8_class_options(mc);
+    smc->tcg_default_cpu = "POWER7";
+    SET_MACHINE_COMPAT(mc, SPAPR_COMPAT_2_7);
 }
 
-DEFINE_SPAPR_MACHINE(2_7, "2.7", true);
+DEFINE_SPAPR_MACHINE(2_7, "2.7", false);
 
 /*
  * pseries-2.6

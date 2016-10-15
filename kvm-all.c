@@ -119,6 +119,7 @@ bool kvm_readonly_mem_allowed;
 bool kvm_vm_attributes_allowed;
 bool kvm_direct_msi_allowed;
 bool kvm_ioeventfd_any_length_allowed;
+bool kvm_msi_use_devid;
 
 static const KVMCapabilityInfo kvm_required_capabilites[] = {
     KVM_CAP_INFO(USER_MEMORY),
@@ -1275,6 +1276,10 @@ int kvm_irqchip_add_msi_route(KVMState *s, int vector, PCIDevice *dev)
     kroute.u.msi.address_lo = (uint32_t)msg.address;
     kroute.u.msi.address_hi = msg.address >> 32;
     kroute.u.msi.data = le32_to_cpu(msg.data);
+    if (kvm_msi_devid_required()) {
+        kroute.flags = KVM_MSI_VALID_DEVID;
+        kroute.u.msi.devid = pci_requester_id(dev);
+    }
     if (kvm_arch_fixup_msi_route(&kroute, msg.address, msg.data, dev)) {
         kvm_irqchip_release_virq(s, virq);
         return -EINVAL;
@@ -1308,6 +1313,10 @@ int kvm_irqchip_update_msi_route(KVMState *s, int virq, MSIMessage msg,
     kroute.u.msi.address_lo = (uint32_t)msg.address;
     kroute.u.msi.address_hi = msg.address >> 32;
     kroute.u.msi.data = le32_to_cpu(msg.data);
+    if (kvm_msi_devid_required()) {
+        kroute.flags = KVM_MSI_VALID_DEVID;
+        kroute.u.msi.devid = pci_requester_id(dev);
+    }
     if (kvm_arch_fixup_msi_route(&kroute, msg.address, msg.data, dev)) {
         return -EINVAL;
     }
@@ -1847,10 +1856,8 @@ void kvm_flush_coalesced_mmio_buffer(void)
     s->coalesced_flush_in_progress = false;
 }
 
-static void do_kvm_cpu_synchronize_state(void *arg)
+static void do_kvm_cpu_synchronize_state(CPUState *cpu, void *arg)
 {
-    CPUState *cpu = arg;
-
     if (!cpu->kvm_vcpu_dirty) {
         kvm_arch_get_registers(cpu);
         cpu->kvm_vcpu_dirty = true;
@@ -1860,34 +1867,30 @@ static void do_kvm_cpu_synchronize_state(void *arg)
 void kvm_cpu_synchronize_state(CPUState *cpu)
 {
     if (!cpu->kvm_vcpu_dirty) {
-        run_on_cpu(cpu, do_kvm_cpu_synchronize_state, cpu);
+        run_on_cpu(cpu, do_kvm_cpu_synchronize_state, NULL);
     }
 }
 
-static void do_kvm_cpu_synchronize_post_reset(void *arg)
+static void do_kvm_cpu_synchronize_post_reset(CPUState *cpu, void *arg)
 {
-    CPUState *cpu = arg;
-
     kvm_arch_put_registers(cpu, KVM_PUT_RESET_STATE);
     cpu->kvm_vcpu_dirty = false;
 }
 
 void kvm_cpu_synchronize_post_reset(CPUState *cpu)
 {
-    run_on_cpu(cpu, do_kvm_cpu_synchronize_post_reset, cpu);
+    run_on_cpu(cpu, do_kvm_cpu_synchronize_post_reset, NULL);
 }
 
-static void do_kvm_cpu_synchronize_post_init(void *arg)
+static void do_kvm_cpu_synchronize_post_init(CPUState *cpu, void *arg)
 {
-    CPUState *cpu = arg;
-
     kvm_arch_put_registers(cpu, KVM_PUT_FULL_STATE);
     cpu->kvm_vcpu_dirty = false;
 }
 
 void kvm_cpu_synchronize_post_init(CPUState *cpu)
 {
-    run_on_cpu(cpu, do_kvm_cpu_synchronize_post_init, cpu);
+    run_on_cpu(cpu, do_kvm_cpu_synchronize_post_init, NULL);
 }
 
 int kvm_cpu_exec(CPUState *cpu)
@@ -2148,6 +2151,7 @@ void kvm_device_access(int fd, int group, uint64_t attr,
     }
 }
 
+/* Return 1 on success, 0 on failure */
 int kvm_has_sync_mmu(void)
 {
     return kvm_check_extension(kvm_state, KVM_CAP_SYNC_MMU);
@@ -2190,20 +2194,6 @@ int kvm_has_intx_set_mask(void)
     return kvm_state->intx_set_mask;
 }
 
-void kvm_setup_guest_memory(void *start, size_t size)
-{
-    if (!kvm_has_sync_mmu()) {
-        int ret = qemu_madvise(start, size, QEMU_MADV_DONTFORK);
-
-        if (ret) {
-            perror("qemu_madvise");
-            fprintf(stderr,
-                    "Need MADV_DONTFORK in absence of synchronous KVM MMU\n");
-            exit(1);
-        }
-    }
-}
-
 #ifdef KVM_CAP_SET_GUEST_DEBUG
 struct kvm_sw_breakpoint *kvm_find_sw_breakpoint(CPUState *cpu,
                                                  target_ulong pc)
@@ -2229,7 +2219,7 @@ struct kvm_set_guest_debug_data {
     int err;
 };
 
-static void kvm_invoke_set_guest_debug(void *data)
+static void kvm_invoke_set_guest_debug(CPUState *unused_cpu, void *data)
 {
     struct kvm_set_guest_debug_data *dbg_data = data;
 
@@ -2247,7 +2237,6 @@ int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_trap)
         data.dbg.control |= KVM_GUESTDBG_ENABLE | KVM_GUESTDBG_SINGLESTEP;
     }
     kvm_arch_update_guest_debug(cpu, &data.dbg);
-    data.cpu = cpu;
 
     run_on_cpu(cpu, kvm_invoke_set_guest_debug, &data);
     return data.err;

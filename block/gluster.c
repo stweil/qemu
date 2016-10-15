@@ -30,13 +30,14 @@
 #define GLUSTER_DEFAULT_PORT        24007
 #define GLUSTER_DEBUG_DEFAULT       4
 #define GLUSTER_DEBUG_MAX           9
+#define GLUSTER_OPT_LOGFILE         "logfile"
+#define GLUSTER_LOGFILE_DEFAULT     "-" /* handled in libgfapi as /dev/stderr */
 
 #define GERR_INDEX_HINT "hint: check in 'server' array index '%d'\n"
 
 typedef struct GlusterAIOCB {
     int64_t size;
     int ret;
-    QEMUBH *bh;
     Coroutine *coroutine;
     AioContext *aio_context;
 } GlusterAIOCB;
@@ -44,6 +45,7 @@ typedef struct GlusterAIOCB {
 typedef struct BDRVGlusterState {
     struct glfs *glfs;
     struct glfs_fd *fd;
+    char *logfile;
     bool supports_seek_data;
     int debug_level;
 } BDRVGlusterState;
@@ -73,6 +75,11 @@ static QemuOptsList qemu_gluster_create_opts = {
             .type = QEMU_OPT_NUMBER,
             .help = "Gluster log level, valid range is 0-9",
         },
+        {
+            .name = GLUSTER_OPT_LOGFILE,
+            .type = QEMU_OPT_STRING,
+            .help = "Logfile path of libgfapi",
+        },
         { /* end of list */ }
     }
 };
@@ -90,6 +97,11 @@ static QemuOptsList runtime_opts = {
             .name = GLUSTER_OPT_DEBUG,
             .type = QEMU_OPT_NUMBER,
             .help = "Gluster log level, valid range is 0-9",
+        },
+        {
+            .name = GLUSTER_OPT_LOGFILE,
+            .type = QEMU_OPT_STRING,
+            .help = "Logfile path of libgfapi",
         },
         { /* end of list */ }
     },
@@ -341,7 +353,7 @@ static struct glfs *qemu_gluster_glfs_init(BlockdevOptionsGluster *gconf,
         }
     }
 
-    ret = glfs_set_logging(glfs, "-", gconf->debug_level);
+    ret = glfs_set_logging(glfs, gconf->logfile, gconf->debug_level);
     if (ret < 0) {
         goto out;
     }
@@ -576,7 +588,9 @@ static struct glfs *qemu_gluster_init(BlockdevOptionsGluster *gconf,
         if (ret < 0) {
             error_setg(errp, "invalid URI");
             error_append_hint(errp, "Usage: file=gluster[+transport]://"
-                                    "[host[:port]]/volume/path[?socket=...]\n");
+                                    "[host[:port]]volume/path[?socket=...]"
+                                    "[,file.debug=N]"
+                                    "[,file.logfile=/path/filename.log]\n");
             errno = -ret;
             return NULL;
         }
@@ -586,7 +600,9 @@ static struct glfs *qemu_gluster_init(BlockdevOptionsGluster *gconf,
             error_append_hint(errp, "Usage: "
                              "-drive driver=qcow2,file.driver=gluster,"
                              "file.volume=testvol,file.path=/path/a.qcow2"
-                             "[,file.debug=9],file.server.0.type=tcp,"
+                             "[,file.debug=9]"
+                             "[,file.logfile=/path/filename.log],"
+                             "file.server.0.type=tcp,"
                              "file.server.0.host=1.2.3.4,"
                              "file.server.0.port=24007,"
                              "file.server.1.transport=unix,"
@@ -605,8 +621,6 @@ static void qemu_gluster_complete_aio(void *opaque)
 {
     GlusterAIOCB *acb = (GlusterAIOCB *)opaque;
 
-    qemu_bh_delete(acb->bh);
-    acb->bh = NULL;
     qemu_coroutine_enter(acb->coroutine);
 }
 
@@ -625,8 +639,7 @@ static void gluster_finish_aiocb(struct glfs_fd *fd, ssize_t ret, void *arg)
         acb->ret = -EIO; /* Partial read/write - fail it */
     }
 
-    acb->bh = aio_bh_new(acb->aio_context, qemu_gluster_complete_aio, acb);
-    qemu_bh_schedule(acb->bh);
+    aio_bh_schedule_oneshot(acb->aio_context, qemu_gluster_complete_aio, acb);
 }
 
 static void qemu_gluster_parse_flags(int bdrv_flags, int *open_flags)
@@ -677,7 +690,7 @@ static int qemu_gluster_open(BlockDriverState *bs,  QDict *options,
     BlockdevOptionsGluster *gconf = NULL;
     QemuOpts *opts;
     Error *local_err = NULL;
-    const char *filename;
+    const char *filename, *logfile;
 
     opts = qemu_opts_create(&runtime_opts, NULL, 0, &error_abort);
     qemu_opts_absorb_qdict(opts, options, &local_err);
@@ -700,6 +713,13 @@ static int qemu_gluster_open(BlockDriverState *bs,  QDict *options,
     gconf = g_new0(BlockdevOptionsGluster, 1);
     gconf->debug_level = s->debug_level;
     gconf->has_debug_level = true;
+
+    logfile = qemu_opt_get(opts, GLUSTER_OPT_LOGFILE);
+    s->logfile = g_strdup(logfile ? logfile : GLUSTER_LOGFILE_DEFAULT);
+
+    gconf->logfile = g_strdup(s->logfile);
+    gconf->has_logfile = true;
+
     s->glfs = qemu_gluster_init(gconf, filename, options, errp);
     if (!s->glfs) {
         ret = -errno;
@@ -738,6 +758,7 @@ out:
     if (!ret) {
         return ret;
     }
+    g_free(s->logfile);
     if (s->fd) {
         glfs_close(s->fd);
     }
@@ -769,6 +790,8 @@ static int qemu_gluster_reopen_prepare(BDRVReopenState *state,
     gconf = g_new0(BlockdevOptionsGluster, 1);
     gconf->debug_level = s->debug_level;
     gconf->has_debug_level = true;
+    gconf->logfile = g_strdup(s->logfile);
+    gconf->has_logfile = true;
     reop_s->glfs = qemu_gluster_init(gconf, state->bs->filename, NULL, errp);
     if (reop_s->glfs == NULL) {
         ret = -errno;
@@ -914,6 +937,12 @@ static int qemu_gluster_create(const char *filename,
     }
     gconf->has_debug_level = true;
 
+    gconf->logfile = qemu_opt_get_del(opts, GLUSTER_OPT_LOGFILE);
+    if (!gconf->logfile) {
+        gconf->logfile = g_strdup(GLUSTER_LOGFILE_DEFAULT);
+    }
+    gconf->has_logfile = true;
+
     glfs = qemu_gluster_init(gconf, filename, NULL, errp);
     if (!glfs) {
         ret = -errno;
@@ -1025,6 +1054,7 @@ static void qemu_gluster_close(BlockDriverState *bs)
 {
     BDRVGlusterState *s = bs->opaque;
 
+    g_free(s->logfile);
     if (s->fd) {
         glfs_close(s->fd);
         s->fd = NULL;

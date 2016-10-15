@@ -34,13 +34,11 @@
 
 static void balloon_page(void *addr, int deflate)
 {
-#if defined(__linux__)
     if (!qemu_balloon_is_inhibited() && (!kvm_enabled() ||
                                          kvm_has_sync_mmu())) {
         qemu_madvise(addr, BALLOON_PAGE_SIZE,
                 deflate ? QEMU_MADV_WILLNEED : QEMU_MADV_DONTNEED);
     }
-#endif
 }
 
 static const char *balloon_stat_names[] = {
@@ -404,11 +402,6 @@ static void virtio_balloon_save_device(VirtIODevice *vdev, QEMUFile *f)
     qemu_put_be32(f, s->actual);
 }
 
-static int virtio_balloon_load(QEMUFile *f, void *opaque, size_t size)
-{
-    return virtio_load(VIRTIO_DEVICE(opaque), f, 1);
-}
-
 static int virtio_balloon_load_device(VirtIODevice *vdev, QEMUFile *f,
                                       int version_id)
 {
@@ -463,8 +456,21 @@ static void virtio_balloon_device_reset(VirtIODevice *vdev)
     VirtIOBalloon *s = VIRTIO_BALLOON(vdev);
 
     if (s->stats_vq_elem != NULL) {
+        virtqueue_discard(s->svq, s->stats_vq_elem, 0);
         g_free(s->stats_vq_elem);
         s->stats_vq_elem = NULL;
+    }
+}
+
+static void virtio_balloon_set_status(VirtIODevice *vdev, uint8_t status)
+{
+    VirtIOBalloon *s = VIRTIO_BALLOON(vdev);
+
+    if (!s->stats_vq_elem && vdev->vm_running &&
+        (status & VIRTIO_CONFIG_S_DRIVER_OK) && virtqueue_rewind(s->svq, 1)) {
+        /* poll stats queue for the element we have discarded when the VM
+         * was stopped */
+        virtio_balloon_receive_stats(vdev, s->svq);
     }
 }
 
@@ -481,7 +487,15 @@ static void virtio_balloon_instance_init(Object *obj)
                         NULL, s, NULL);
 }
 
-VMSTATE_VIRTIO_DEVICE(balloon, 1, virtio_balloon_load, virtio_vmstate_save);
+static const VMStateDescription vmstate_virtio_balloon = {
+    .name = "virtio-balloon",
+    .minimum_version_id = 1,
+    .version_id = 1,
+    .fields = (VMStateField[]) {
+        VMSTATE_VIRTIO_DEVICE,
+        VMSTATE_END_OF_LIST()
+    },
+};
 
 static Property virtio_balloon_properties[] = {
     DEFINE_PROP_BIT("deflate-on-oom", VirtIOBalloon, host_features,
@@ -505,6 +519,7 @@ static void virtio_balloon_class_init(ObjectClass *klass, void *data)
     vdc->get_features = virtio_balloon_get_features;
     vdc->save = virtio_balloon_save_device;
     vdc->load = virtio_balloon_load_device;
+    vdc->set_status = virtio_balloon_set_status;
 }
 
 static const TypeInfo virtio_balloon_info = {

@@ -533,6 +533,7 @@ int main(int argc, char **argv)
     sa_sigterm.sa_handler = termsig_handler;
     sigaction(SIGTERM, &sa_sigterm, NULL);
 
+    module_call_init(MODULE_INIT_TRACE);
     qcrypto_init(&error_fatal);
 
     module_call_init(MODULE_INIT_QOM);
@@ -901,6 +902,14 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    if (dev_offset >= fd_size) {
+        error_report("Offset (%lld) has to be smaller than the image size "
+                     "(%lld)",
+                     (long long int)dev_offset, (long long int)fd_size);
+        exit(EXIT_FAILURE);
+    }
+    fd_size -= dev_offset;
+
     if (partition != -1) {
         ret = find_partition(blk, partition, &dev_offset, &fd_size);
         if (ret < 0) {
@@ -910,8 +919,8 @@ int main(int argc, char **argv)
         }
     }
 
-    exp = nbd_export_new(blk, dev_offset, fd_size, nbdflags, nbd_export_closed,
-                         &local_err);
+    exp = nbd_export_new(bs, dev_offset, fd_size, nbdflags, nbd_export_closed,
+                         writethrough, NULL, &local_err);
     if (!exp) {
         error_report_err(local_err);
         exit(EXIT_FAILURE);

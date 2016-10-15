@@ -75,6 +75,8 @@ struct sPAPRPHBState {
     bool ddw_enabled;
     uint64_t page_size_mask;
     uint64_t dma64_win_addr;
+
+    uint32_t numa_node;
 };
 
 #define SPAPR_PCI_MAX_INDEX          255
@@ -105,8 +107,6 @@ PCIHostState *spapr_create_phb(sPAPRMachineState *spapr, int index);
 int spapr_populate_pci_dt(sPAPRPHBState *phb,
                           uint32_t xics_phandle,
                           void *fdt);
-
-void spapr_pci_msi_init(sPAPRMachineState *spapr, hwaddr addr);
 
 void spapr_pci_rtas_init(void);
 

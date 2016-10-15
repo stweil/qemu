@@ -1,6 +1,21 @@
 #ifndef HW_COMPAT_H
 #define HW_COMPAT_H
 
+#define HW_COMPAT_2_7 \
+    {\
+        .driver   = "virtio-pci",\
+        .property = "page-per-vq",\
+        .value    = "on",\
+    },{\
+        .driver   = "virtio-serial-device",\
+        .property = "emergency-write",\
+        .value    = "off",\
+    },{\
+        .driver   = "ioapic",\
+        .property = "version",\
+        .value    = "0x11",\
+    },
+
 #define HW_COMPAT_2_6 \
     {\
         .driver   = "virtio-mmio",\

@@ -58,7 +58,8 @@
 ##
 # @BlockdevSnapshotInternal
 #
-# @device: the name of the device to generate the snapshot from
+# @device: the device name or node-name of a root node to generate the snapshot
+#          from
 #
 # @name: the name of the internal snapshot to be created
 #
@@ -80,7 +81,7 @@
 # For the arguments, see the documentation of BlockdevSnapshotInternal.
 #
 # Returns: nothing on success
-#          If @device is not a valid block device, DeviceNotFound
+#          If @device is not a valid block device, GenericError
 #          If any snapshot matching @name exists, or @name is empty,
 #          GenericError
 #          If the format of the image used does not support it,
@@ -99,14 +100,15 @@
 # both. One of the name or id is required. Return SnapshotInfo for the
 # successfully deleted snapshot.
 #
-# @device: the name of the device to delete the snapshot from
+# @device: the device name or node-name of a root node to delete the snapshot
+#          from
 #
 # @id: optional the snapshot's ID to be deleted
 #
 # @name: optional the snapshot's name to be deleted
 #
 # Returns: SnapshotInfo on success
-#          If @device is not a valid block device, DeviceNotFound
+#          If @device is not a valid block device, GenericError
 #          If snapshot not found, GenericError
 #          If the format of the image used does not support it,
 #          BlockFormatFeatureNotSupported
@@ -123,7 +125,9 @@
 #
 # Ejects a device from a removable drive.
 #
-# @device:  The name of the device
+# @device:  #optional Block device name (deprecated, use @id instead)
+#
+# @id:      #optional The name or QOM path of the guest device (since: 2.8)
 #
 # @force:   @optional If true, eject regardless of whether the drive is locked.
 #           If not specified, the default value is false.
@@ -135,7 +139,10 @@
 #
 # Since: 0.14.0
 ##
-{ 'command': 'eject', 'data': {'device': 'str', '*force': 'bool'} }
+{ 'command': 'eject',
+  'data': { '*device': 'str',
+            '*id': 'str',
+            '*force': 'bool' } }
 
 ##
 # @nbd-server-start:
@@ -159,9 +166,9 @@
 ##
 # @nbd-server-add:
 #
-# Export a device to QEMU's embedded NBD server.
+# Export a block node to QEMU's embedded NBD server.
 #
-# @device: Block device to be exported
+# @device: The device name or node name of the node to be exported
 #
 # @writable: Whether clients should be able to write to the device via the
 #     NBD connection (default false). #optional
@@ -188,14 +195,18 @@
 # Emitted whenever the tray of a removable device is moved by the guest or by
 # HMP/QMP commands
 #
-# @device: device name
+# @device: Block device name. This is always present for compatibility
+#          reasons, but it can be empty ("") if the image does not
+#          have a device name associated.
+#
+# @id: The name or QOM path of the guest device
 #
 # @tray-open: true if the tray has been opened or false if it has been closed
 #
 # Since: 1.1
 ##
 { 'event': 'DEVICE_TRAY_MOVED',
-  'data': { 'device': 'str', 'tray-open': 'bool' } }
+  'data': { 'device': 'str', 'id': 'str', 'tray-open': 'bool' } }
 
 ##
 # @QuorumOpType

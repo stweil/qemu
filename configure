@@ -213,7 +213,6 @@ sdlabi=""
 virtfs=""
 vnc="yes"
 sparse="no"
-uuid=""
 vde=""
 vnc_sasl=""
 vnc_jpeg=""
@@ -230,6 +229,7 @@ xfs=""
 
 vhost_net="no"
 vhost_scsi="no"
+vhost_vsock="no"
 kvm="no"
 rdma=""
 gprof="no"
@@ -298,6 +298,7 @@ libiscsi=""
 libnfs=""
 coroutine=""
 coroutine_pool=""
+debug_stack_usage="no"
 seccomp=""
 glusterfs=""
 glusterfs_xlator_opt="no"
@@ -318,10 +319,10 @@ vte=""
 virglrenderer=""
 tpm="yes"
 libssh2=""
-vhdx=""
 numa=""
 tcmalloc="no"
 jemalloc="no"
+replication="yes"
 
 # parse CC options first
 for opt do
@@ -390,7 +391,11 @@ sdl2_config="${SDL2_CONFIG-${cross_prefix}sdl2-config}"
 ARFLAGS="${ARFLAGS-rv}"
 
 # default flags for all hosts
-QEMU_CFLAGS="-fno-strict-aliasing -fno-common $QEMU_CFLAGS"
+# We use -fwrapv to tell the compiler that we require a C dialect where
+# left shift of signed integers is well defined and has the expected
+# 2s-complement style results. (Both clang and gcc agree that it
+# provides these semantics.)
+QEMU_CFLAGS="-fno-strict-aliasing -fno-common -fwrapv $QEMU_CFLAGS"
 QEMU_CFLAGS="-Wall -Wundef -Wwrite-strings -Wmissing-prototypes $QEMU_CFLAGS"
 QEMU_CFLAGS="-Wmissing-format-attribute $QEMU_CFLAGS"
 QEMU_CFLAGS="-Wstrict-prototypes -Wredundant-decls $QEMU_CFLAGS"
@@ -523,8 +528,6 @@ elif check_define __arm__ ; then
   cpu="arm"
 elif check_define __aarch64__ ; then
   cpu="aarch64"
-elif check_define __hppa__ ; then
-  cpu="hppa"
 else
   cpu=$(uname -m)
 fi
@@ -698,6 +701,7 @@ Haiku)
   kvm="yes"
   vhost_net="yes"
   vhost_scsi="yes"
+  vhost_vsock="yes"
   QEMU_INCLUDES="-I\$(SRC_PATH)/linux-headers -I$(pwd)/linux-headers $QEMU_INCLUDES"
 ;;
 esac
@@ -909,10 +913,6 @@ for opt do
   ;;
   --disable-slirp) slirp="no"
   ;;
-  --disable-uuid) uuid="no"
-  ;;
-  --enable-uuid) uuid="yes"
-  ;;
   --disable-vde) vde="no"
   ;;
   --enable-vde) vde="yes"
@@ -1032,6 +1032,8 @@ for opt do
   ;;
   --enable-coroutine-pool) coroutine_pool="yes"
   ;;
+  --enable-debug-stack-usage) debug_stack_usage="yes"
+  ;;
   --disable-docs) docs="no"
   ;;
   --enable-docs) docs="yes"
@@ -1043,6 +1045,10 @@ for opt do
   --disable-vhost-scsi) vhost_scsi="no"
   ;;
   --enable-vhost-scsi) vhost_scsi="yes"
+  ;;
+  --disable-vhost-vsock) vhost_vsock="no"
+  ;;
+  --enable-vhost-vsock) vhost_vsock="yes"
   ;;
   --disable-opengl) opengl="no"
   ;;
@@ -1121,6 +1127,12 @@ for opt do
   --disable-virtio-blk-data-plane|--enable-virtio-blk-data-plane)
       echo "$0: $opt is obsolete, virtio-blk data-plane is always on" >&2
   ;;
+  --enable-vhdx|--disable-vhdx)
+      echo "$0: $opt is obsolete, VHDX driver is always built" >&2
+  ;;
+  --enable-uuid|--disable-uuid)
+      echo "$0: $opt is obsolete, UUID support is always built" >&2
+  ;;
   --disable-gtk) gtk="no"
   ;;
   --enable-gtk) gtk="yes"
@@ -1161,10 +1173,6 @@ for opt do
   ;;
   --enable-libssh2) libssh2="yes"
   ;;
-  --enable-vhdx) vhdx="yes"
-  ;;
-  --disable-vhdx) vhdx="no"
-  ;;
   --disable-numa) numa="no"
   ;;
   --enable-numa) numa="yes"
@@ -1176,6 +1184,10 @@ for opt do
   --disable-jemalloc) jemalloc="no"
   ;;
   --enable-jemalloc) jemalloc="yes"
+  ;;
+  --disable-replication) replication="no"
+  ;;
+  --enable-replication) replication="yes"
   ;;
   *)
       echo "ERROR: unknown option $opt"
@@ -1379,7 +1391,6 @@ disabled with --disable-FEATURE, default is enabled if available:
   bluez           bluez stack connectivity
   kvm             KVM acceleration support
   rdma            RDMA-based migration support
-  uuid            uuid support
   vde             support for vde network
   netmap          support for netmap network
   linux-aio       Linux AIO support
@@ -1403,10 +1414,10 @@ disabled with --disable-FEATURE, default is enabled if available:
   archipelago     Archipelago backend
   tpm             TPM support
   libssh2         ssh block device support
-  vhdx            support for the Microsoft VHDX image format
   numa            libnuma support
   tcmalloc        tcmalloc support
   jemalloc        jemalloc support
+  replication     replication support
 
 NOTE: The object files are built at the place where configure is launched
 EOF
@@ -1745,6 +1756,19 @@ if test "$cocoa" = "yes"; then
     sdl=no
 fi
 
+# Some versions of Mac OS X incorrectly define SIZE_MAX
+cat > $TMPC << EOF
+#include <stdint.h>
+#include <stdio.h>
+int main(int argc, char *argv[]) {
+    return printf("%zu", SIZE_MAX);
+}
+EOF
+have_broken_size_max=no
+if ! compile_object -Werror ; then
+    have_broken_size_max=yes
+fi
+
 ##########################################
 # L2TPV3 probe
 
@@ -1819,28 +1843,19 @@ fi
 ##########################################
 # avx2 optimization requirement check
 
-
-if test "$static" = "no" ; then
-  cat > $TMPC << EOF
+cat > $TMPC << EOF
 #pragma GCC push_options
 #pragma GCC target("avx2")
 #include <cpuid.h>
 #include <immintrin.h>
-
 static int bar(void *a) {
-    return _mm256_movemask_epi8(_mm256_cmpeq_epi8(*(__m256i *)a, (__m256i){0}));
+    __m256i x = *(__m256i *)a;
+    return _mm256_testz_si256(x, x);
 }
-static void *bar_ifunc(void) {return (void*) bar;}
-int foo(void *a) __attribute__((ifunc("bar_ifunc")));
-int main(int argc, char *argv[]) { return foo(argv[0]);}
+int main(int argc, char *argv[]) { return bar(argv[0]); }
 EOF
-  if compile_object "" ; then
-      if has readelf; then
-          if readelf --syms $TMPO 2>/dev/null |grep -q "IFUNC.*foo"; then
-              avx2_opt="yes"
-          fi
-      fi
-  fi
+if compile_object "" ; then
+  avx2_opt="yes"
 fi
 
 #########################################
@@ -1982,6 +1997,61 @@ EOF
     xen=no
 
   # Xen unstable
+  elif
+      cat > $TMPC <<EOF &&
+/*
+ * If we have stable libs the we don't want the libxc compat
+ * layers, regardless of what CFLAGS we may have been given.
+ *
+ * Also, check if xengnttab_grant_copy_segment_t is defined and
+ * grant copy operation is implemented.
+ */
+#undef XC_WANT_COMPAT_EVTCHN_API
+#undef XC_WANT_COMPAT_GNTTAB_API
+#undef XC_WANT_COMPAT_MAP_FOREIGN_API
+#include <xenctrl.h>
+#include <xenstore.h>
+#include <xenevtchn.h>
+#include <xengnttab.h>
+#include <xenforeignmemory.h>
+#include <stdint.h>
+#include <xen/hvm/hvm_info_table.h>
+#if !defined(HVM_MAX_VCPUS)
+# error HVM_MAX_VCPUS not defined
+#endif
+int main(void) {
+  xc_interface *xc = NULL;
+  xenforeignmemory_handle *xfmem;
+  xenevtchn_handle *xe;
+  xengnttab_handle *xg;
+  xen_domain_handle_t handle;
+  xengnttab_grant_copy_segment_t* seg = NULL;
+
+  xs_daemon_open();
+
+  xc = xc_interface_open(0, 0, 0);
+  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
+  xc_domain_add_to_physmap(0, 0, XENMAPSPACE_gmfn, 0, 0);
+  xc_hvm_inject_msi(xc, 0, 0xf0000000, 0x00000000);
+  xc_hvm_create_ioreq_server(xc, 0, HVM_IOREQSRV_BUFIOREQ_ATOMIC, NULL);
+  xc_domain_create(xc, 0, handle, 0, NULL, NULL);
+
+  xfmem = xenforeignmemory_open(0, 0);
+  xenforeignmemory_map(xfmem, 0, 0, 0, 0, 0);
+
+  xe = xenevtchn_open(0, 0);
+  xenevtchn_fd(xe);
+
+  xg = xengnttab_open(0, 0);
+  xengnttab_grant_copy(xg, 0, seg);
+
+  return 0;
+}
+EOF
+      compile_prog "" "$xen_libs $xen_stable_libs"
+    then
+    xen_ctrl_version=480
+    xen=yes
   elif
       cat > $TMPC <<EOF &&
 /*
@@ -2687,47 +2757,6 @@ if compile_prog "" "" ; then
 fi
 
 ##########################################
-# uuid_generate() probe, used for vdi block driver
-# Note that on some systems (notably MacOSX) no extra library
-# need be linked to get the uuid functions.
-if test "$uuid" != "no" ; then
-  uuid_libs="-luuid"
-  cat > $TMPC << EOF
-#include <uuid/uuid.h>
-int main(void)
-{
-    uuid_t my_uuid;
-    uuid_generate(my_uuid);
-    return 0;
-}
-EOF
-  if compile_prog "" "" ; then
-    uuid="yes"
-  elif compile_prog "" "$uuid_libs" ; then
-    uuid="yes"
-    libs_softmmu="$uuid_libs $libs_softmmu"
-    libs_tools="$uuid_libs $libs_tools"
-  else
-    if test "$uuid" = "yes" ; then
-      feature_not_found "uuid" "Install libuuid devel"
-    fi
-    uuid=no
-  fi
-fi
-
-if test "$vhdx" = "yes" ; then
-    if test "$uuid" = "no" ; then
-        error_exit "uuid required for VHDX support"
-    fi
-elif test "$vhdx" != "no" ; then
-    if test "$uuid" = "yes" ; then
-        vhdx=yes
-    else
-        vhdx=no
-    fi
-fi
-
-##########################################
 # xfsctl() probe, used for raw-posix
 if test "$xfs" != "no" ; then
   cat > $TMPC << EOF
@@ -3006,7 +3035,7 @@ for i in $glib_modules; do
     if $pkg_config --atleast-version=$glib_req_ver $i; then
         glib_cflags=$($pkg_config --cflags $i)
         glib_libs=$($pkg_config --libs $i)
-        CFLAGS="$glib_cflags $CFLAGS"
+        QEMU_CFLAGS="$glib_cflags $QEMU_CFLAGS"
         LIBS="$glib_libs $LIBS"
         libs_qga="$glib_libs $libs_qga"
     else
@@ -3040,7 +3069,7 @@ fi
 
 # g_test_trap_subprocess added in 2.38. Used by some tests.
 glib_subprocess=yes
-if ! $pkg_config --atleast-version=2.38 glib-2.0; then
+if test "$mingw32" = "yes" || ! $pkg_config --atleast-version=2.38 glib-2.0; then
     glib_subprocess=no
 fi
 
@@ -4109,7 +4138,7 @@ EOF
   if compile_prog "$vss_win32_include" "" ; then
     guest_agent_with_vss="yes"
     QEMU_CFLAGS="$QEMU_CFLAGS $vss_win32_include"
-    libs_qga="-lole32 -loleaut32 -lshlwapi -luuid -lstdc++ -Wl,--enable-stdcall-fixup $libs_qga"
+    libs_qga="-lole32 -loleaut32 -lshlwapi -lstdc++ -Wl,--enable-stdcall-fixup $libs_qga"
     qga_vss_provider="qga/vss-win32/qga-vss.dll qga/vss-win32/qga-vss.tlb"
   else
     if test "$vss_win32_sdk" != "" ; then
@@ -4231,6 +4260,18 @@ if compile_prog "" "" ; then
 fi
 
 ##########################################
+# check if we have posix_syslog
+
+posix_syslog=no
+cat > $TMPC << EOF
+#include <syslog.h>
+int main(void) { openlog("qemu", LOG_PID, LOG_DAEMON); syslog(LOG_INFO, "configure"); return 0; }
+EOF
+if compile_prog "" "" ; then
+    posix_syslog=yes
+fi
+
+##########################################
 # check if trace backend exists
 
 $python "$source_path/scripts/tracetool.py" "--backends=$trace_backends" --check-backends  > /dev/null 2> /dev/null
@@ -4344,6 +4385,17 @@ fi
 if test "$coroutine" = "gthread" -a "$coroutine_pool" = "yes"; then
   error_exit "'gthread' coroutine backend does not support pool (use --disable-coroutine-pool)"
 fi
+
+if test "$debug_stack_usage" = "yes"; then
+  if test "$cpu" = "ia64" -o "$cpu" = "hppa"; then
+    error_exit "stack usage debugging is not supported for $cpu"
+  fi
+  if test "$coroutine_pool" = "yes"; then
+    echo "WARN: disabling coroutine pool for stack usage debugging"
+    coroutine_pool=no
+  fi
+fi
+
 
 ##########################################
 # check if we have open_by_handle_at
@@ -4598,7 +4650,6 @@ if test "$libnfs" != "no" ; then
   if $pkg_config --atleast-version=1.9.3 libnfs; then
     libnfs="yes"
     libnfs_libs=$($pkg_config --libs libnfs)
-    LIBS="$LIBS $libnfs_libs"
   else
     if test "$libnfs" = "yes" ; then
       feature_not_found "libnfs" "Install libnfs devel >= 1.9.3"
@@ -4911,10 +4962,10 @@ echo "preadv support    $preadv"
 echo "fdatasync         $fdatasync"
 echo "madvise           $madvise"
 echo "posix_madvise     $posix_madvise"
-echo "uuid support      $uuid"
 echo "libcap-ng support $cap_ng"
 echo "vhost-net support $vhost_net"
 echo "vhost-scsi support $vhost_scsi"
+echo "vhost-vsock support $vhost_vsock"
 echo "Trace backends    $trace_backends"
 if have_backend "simple"; then
 echo "Trace output file $trace_file-<pid>"
@@ -4936,6 +4987,7 @@ echo "QGA MSI support   $guest_agent_msi"
 echo "seccomp support   $seccomp"
 echo "coroutine backend $coroutine"
 echo "coroutine pool    $coroutine_pool"
+echo "debug stack usage $debug_stack_usage"
 echo "GlusterFS support $glusterfs"
 echo "Archipelago support $archipelago"
 echo "gcov              $gcov_tool"
@@ -4944,7 +4996,6 @@ echo "TPM support       $tpm"
 echo "libssh2 support   $libssh2"
 echo "TPM passthrough   $tpm_passthrough"
 echo "QOM debugging     $qom_cast_debug"
-echo "vhdx              $vhdx"
 echo "lzo support       $lzo"
 echo "snappy support    $snappy"
 echo "bzip2 support     $bzip2"
@@ -4952,6 +5003,7 @@ echo "NUMA host support $numa"
 echo "tcmalloc support  $tcmalloc"
 echo "jemalloc support  $jemalloc"
 echo "avx2 optimization $avx2_opt"
+echo "replication support $replication"
 
 if test "$sdl_too_old" = "yes"; then
 echo "-> Your SDL version is too old - please upgrade to have SDL support"
@@ -5101,9 +5153,6 @@ fi
 if test "$fnmatch" = "yes" ; then
   echo "CONFIG_FNMATCH=y" >> $config_host_mak
 fi
-if test "$uuid" = "yes" ; then
-  echo "CONFIG_UUID=y" >> $config_host_mak
-fi
 if test "$xfs" = "yes" ; then
   echo "CONFIG_XFS=y" >> $config_host_mak
 fi
@@ -5222,7 +5271,6 @@ fi
 if test "$glib_subprocess" = "yes" ; then
   echo "CONFIG_HAS_GLIB_SUBPROCESS_TESTS=y" >> $config_host_mak
 fi
-echo "GLIB_CFLAGS=$glib_cflags" >> $config_host_mak
 if test "$gtk" = "yes" ; then
   echo "CONFIG_GTK=y" >> $config_host_mak
   echo "CONFIG_GTKABI=$gtkabi" >> $config_host_mak
@@ -5257,6 +5305,9 @@ if test "$tasn1" = "yes" ; then
 fi
 if test "$have_ifaddrs_h" = "yes" ; then
     echo "HAVE_IFADDRS_H=y" >> $config_host_mak
+fi
+if test "$have_broken_size_max" = "yes" ; then
+    echo "HAVE_BROKEN_SIZE_MAX=y" >> $config_host_mak
 fi
 
 # Work around a system header bug with some kernel/XFS header
@@ -5299,6 +5350,9 @@ if test "$vhost_scsi" = "yes" ; then
 fi
 if test "$vhost_net" = "yes" ; then
   echo "CONFIG_VHOST_NET_USED=y" >> $config_host_mak
+fi
+if test "$vhost_vsock" = "yes" ; then
+  echo "CONFIG_VHOST_VSOCK=y" >> $config_host_mak
 fi
 if test "$blobs" = "yes" ; then
   echo "INSTALL_BLOBS=yes" >> $config_host_mak
@@ -5377,7 +5431,8 @@ if test "$libiscsi" = "yes" ; then
 fi
 
 if test "$libnfs" = "yes" ; then
-  echo "CONFIG_LIBNFS=y" >> $config_host_mak
+  echo "CONFIG_LIBNFS=m" >> $config_host_mak
+  echo "LIBNFS_LIBS=$libnfs_libs" >> $config_host_mak
 fi
 
 if test "$seccomp" = "yes"; then
@@ -5406,6 +5461,10 @@ if test "$coroutine_pool" = "yes" ; then
   echo "CONFIG_COROUTINE_POOL=1" >> $config_host_mak
 else
   echo "CONFIG_COROUTINE_POOL=0" >> $config_host_mak
+fi
+
+if test "$debug_stack_usage" = "yes" ; then
+  echo "CONFIG_DEBUG_STACK_USAGE=y" >> $config_host_mak
 fi
 
 if test "$open_by_handle_at" = "yes" ; then
@@ -5469,10 +5528,6 @@ if test "$libssh2" = "yes" ; then
   echo "LIBSSH2_LIBS=$libssh2_libs" >> $config_host_mak
 fi
 
-if test "$vhdx" = "yes" ; then
-  echo "CONFIG_VHDX=y" >> $config_host_mak
-fi
-
 # USB host support
 if test "$libusb" = "yes"; then
   echo "HOST_USB=libusb legacy" >> $config_host_mak
@@ -5516,6 +5571,13 @@ if have_backend "ftrace"; then
     feature_not_found "ftrace(trace backend)" "ftrace requires Linux"
   fi
 fi
+if have_backend "syslog"; then
+  if test "$posix_syslog" = "yes" ; then
+    echo "CONFIG_TRACE_SYSLOG=y" >> $config_host_mak
+  else
+    feature_not_found "syslog(trace backend)" "syslog not available"
+  fi
+fi
 echo "CONFIG_TRACE_FILE=$trace_file" >> $config_host_mak
 
 if test "$rdma" = "yes" ; then
@@ -5524,6 +5586,10 @@ fi
 
 if test "$have_rtnetlink" = "yes" ; then
   echo "CONFIG_RTNETLINK=y" >> $config_host_mak
+fi
+
+if test "$replication" = "yes" ; then
+  echo "CONFIG_REPLICATION=y" >> $config_host_mak
 fi
 
 # Hold two types of flag:
@@ -5911,9 +5977,6 @@ for i in $ARCH $TARGET_BASE_ARCH ; do
   ;;
   cris)
     disas_config "CRIS"
-  ;;
-  hppa)
-    disas_config "HPPA"
   ;;
   i386|x86_64|x32)
     disas_config "I386"

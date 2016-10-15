@@ -171,7 +171,6 @@ static void bdrv_drain_recurse(BlockDriverState *bs)
 typedef struct {
     Coroutine *co;
     BlockDriverState *bs;
-    QEMUBH *bh;
     bool done;
 } BdrvCoDrainData;
 
@@ -191,7 +190,6 @@ static void bdrv_co_drain_bh_cb(void *opaque)
     BdrvCoDrainData *data = opaque;
     Coroutine *co = data->co;
 
-    qemu_bh_delete(data->bh);
     bdrv_drain_poll(data->bs);
     data->done = true;
     qemu_coroutine_enter(co);
@@ -210,9 +208,9 @@ static void coroutine_fn bdrv_co_yield_to_drain(BlockDriverState *bs)
         .co = qemu_coroutine_self(),
         .bs = bs,
         .done = false,
-        .bh = aio_bh_new(bdrv_get_aio_context(bs), bdrv_co_drain_bh_cb, &data),
     };
-    qemu_bh_schedule(data.bh);
+    aio_bh_schedule_oneshot(bdrv_get_aio_context(bs),
+                            bdrv_co_drain_bh_cb, &data);
 
     qemu_coroutine_yield();
     /* If we are resumed from some other event (such as an aio completion or a
@@ -538,17 +536,6 @@ static int bdrv_check_byte_request(BlockDriverState *bs, int64_t offset,
     }
 
     return 0;
-}
-
-static int bdrv_check_request(BlockDriverState *bs, int64_t sector_num,
-                              int nb_sectors)
-{
-    if (nb_sectors < 0 || nb_sectors > BDRV_REQUEST_MAX_SECTORS) {
-        return -EIO;
-    }
-
-    return bdrv_check_byte_request(bs, sector_num * BDRV_SECTOR_SIZE,
-                                   nb_sectors * BDRV_SECTOR_SIZE);
 }
 
 typedef struct RwCo {
@@ -895,6 +882,19 @@ emulate_flags:
     }
 
     return ret;
+}
+
+static int coroutine_fn
+bdrv_driver_pwritev_compressed(BlockDriverState *bs, uint64_t offset,
+                               uint64_t bytes, QEMUIOVector *qiov)
+{
+    BlockDriver *drv = bs->drv;
+
+    if (!drv->bdrv_co_pwritev_compressed) {
+        return -ENOTSUP;
+    }
+
+    return drv->bdrv_co_pwritev_compressed(bs, offset, bytes, qiov);
 }
 
 static int coroutine_fn bdrv_co_do_copy_on_readv(BlockDriverState *bs,
@@ -1315,6 +1315,8 @@ static int coroutine_fn bdrv_aligned_pwritev(BlockDriverState *bs,
     } else if (flags & BDRV_REQ_ZERO_WRITE) {
         bdrv_debug_event(bs, BLKDBG_PWRITEV_ZERO);
         ret = bdrv_co_do_pwrite_zeroes(bs, offset, bytes, flags);
+    } else if (flags & BDRV_REQ_WRITE_COMPRESSED) {
+        ret = bdrv_driver_pwritev_compressed(bs, offset, bytes, qiov);
     } else if (bytes <= max_transfer) {
         bdrv_debug_event(bs, BLKDBG_PWRITEV);
         ret = bdrv_driver_pwritev(bs, offset, bytes, qiov, flags);
@@ -1615,6 +1617,31 @@ int coroutine_fn bdrv_co_pwrite_zeroes(BdrvChild *child, int64_t offset,
                            BDRV_REQ_ZERO_WRITE | flags);
 }
 
+/*
+ * Flush ALL BDSes regardless of if they are reachable via a BlkBackend or not.
+ */
+int bdrv_flush_all(void)
+{
+    BdrvNextIterator it;
+    BlockDriverState *bs = NULL;
+    int result = 0;
+
+    for (bs = bdrv_first(&it); bs; bs = bdrv_next(&it)) {
+        AioContext *aio_context = bdrv_get_aio_context(bs);
+        int ret;
+
+        aio_context_acquire(aio_context);
+        ret = bdrv_flush(bs);
+        if (ret < 0 && !result) {
+            result = ret;
+        }
+        aio_context_release(aio_context);
+    }
+
+    return result;
+}
+
+
 typedef struct BdrvCoGetBlockStatusData {
     BlockDriverState *bs;
     BlockDriverState *base;
@@ -1879,28 +1906,6 @@ int bdrv_is_allocated_above(BlockDriverState *top,
     return 0;
 }
 
-int bdrv_write_compressed(BlockDriverState *bs, int64_t sector_num,
-                          const uint8_t *buf, int nb_sectors)
-{
-    BlockDriver *drv = bs->drv;
-    int ret;
-
-    if (!drv) {
-        return -ENOMEDIUM;
-    }
-    if (!drv->bdrv_write_compressed) {
-        return -ENOTSUP;
-    }
-    ret = bdrv_check_request(bs, sector_num, nb_sectors);
-    if (ret < 0) {
-        return ret;
-    }
-
-    assert(QLIST_EMPTY(&bs->dirty_bitmaps));
-
-    return drv->bdrv_write_compressed(bs, sector_num, buf, nb_sectors);
-}
-
 typedef struct BdrvVmstateCo {
     BlockDriverState    *bs;
     QEMUIOVector        *qiov;
@@ -2088,7 +2093,6 @@ typedef struct BlockAIOCBCoroutine {
     bool is_write;
     bool need_bh;
     bool *done;
-    QEMUBH* bh;
 } BlockAIOCBCoroutine;
 
 static const AIOCBInfo bdrv_em_co_aiocb_info = {
@@ -2108,7 +2112,6 @@ static void bdrv_co_em_bh(void *opaque)
     BlockAIOCBCoroutine *acb = opaque;
 
     assert(!acb->need_bh);
-    qemu_bh_delete(acb->bh);
     bdrv_co_complete(acb);
 }
 
@@ -2118,8 +2121,7 @@ static void bdrv_co_maybe_schedule_bh(BlockAIOCBCoroutine *acb)
     if (acb->req.error != -EINPROGRESS) {
         BlockDriverState *bs = acb->common.bs;
 
-        acb->bh = aio_bh_new(bdrv_get_aio_context(bs), bdrv_co_em_bh, acb);
-        qemu_bh_schedule(acb->bh);
+        aio_bh_schedule_oneshot(bdrv_get_aio_context(bs), bdrv_co_em_bh, acb);
     }
 }
 

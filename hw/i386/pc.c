@@ -161,13 +161,15 @@ int cpu_get_pic_interrupt(CPUX86State *env)
     X86CPU *cpu = x86_env_get_cpu(env);
     int intno;
 
-    intno = apic_get_interrupt(cpu->apic_state);
-    if (intno >= 0) {
-        return intno;
-    }
-    /* read the irq from the PIC */
-    if (!apic_accept_pic_intr(cpu->apic_state)) {
-        return -1;
+    if (!kvm_irqchip_in_kernel()) {
+        intno = apic_get_interrupt(cpu->apic_state);
+        if (intno >= 0) {
+            return intno;
+        }
+        /* read the irq from the PIC */
+        if (!apic_accept_pic_intr(cpu->apic_state)) {
+            return -1;
+        }
     }
 
     intno = pic_read_irq(isa_pic);
@@ -180,7 +182,7 @@ static void pic_irq_request(void *opaque, int irq, int level)
     X86CPU *cpu = X86_CPU(cs);
 
     DPRINTF("pic_irqs: %s irq %d\n", level? "raise" : "lower", irq);
-    if (cpu->apic_state) {
+    if (cpu->apic_state && !kvm_irqchip_in_kernel()) {
         CPU_FOREACH(cs) {
             cpu = X86_CPU(cs);
             if (apic_accept_pic_intr(cpu->apic_state)) {
@@ -530,9 +532,9 @@ static uint64_t port92_read(void *opaque, hwaddr addr,
     return ret;
 }
 
-static void port92_init(ISADevice *dev, qemu_irq *a20_out)
+static void port92_init(ISADevice *dev, qemu_irq a20_out)
 {
-    qdev_connect_gpio_out_named(DEVICE(dev), PORT92_A20_LINE, 0, *a20_out);
+    qdev_connect_gpio_out_named(DEVICE(dev), PORT92_A20_LINE, 0, a20_out);
 }
 
 static const VMStateDescription vmstate_port92_isa = {
@@ -777,11 +779,9 @@ static FWCfgState *bochs_bios_init(AddressSpace *as, PCMachineState *pcms)
     for (i = 0; i < max_cpus; i++) {
         unsigned int apic_id = x86_cpu_apic_id_from_index(i);
         assert(apic_id < pcms->apic_id_limit);
-        for (j = 0; j < nb_numa_nodes; j++) {
-            if (test_bit(i, numa_info[j].node_cpu)) {
-                numa_fw_cfg[apic_id + 1] = cpu_to_le64(j);
-                break;
-            }
+        j = numa_get_node_for_cpu(i);
+        if (j < nb_numa_nodes) {
+            numa_fw_cfg[apic_id + 1] = cpu_to_le64(j);
         }
     }
     for (i = 0; i < nb_numa_nodes; i++) {
@@ -1594,7 +1594,7 @@ void pc_basic_device_init(ISABus *isa_bus, qemu_irq *gsi,
 
     a20_line = qemu_allocate_irqs(handle_a20_line_change, first_cpu, 2);
     i8042 = isa_create_simple(isa_bus, "i8042");
-    i8042_setup_a20_line(i8042, &a20_line[0]);
+    i8042_setup_a20_line(i8042, a20_line[0]);
     if (!no_vmport) {
         vmport_init(isa_bus);
         vmmouse = isa_try_create(isa_bus, "vmmouse");
@@ -1607,7 +1607,8 @@ void pc_basic_device_init(ISABus *isa_bus, qemu_irq *gsi,
         qdev_init_nofail(dev);
     }
     port92 = isa_create_simple(isa_bus, "port92");
-    port92_init(port92, &a20_line[1]);
+    port92_init(port92, a20_line[1]);
+    g_free(a20_line);
 
     DMA_init(isa_bus, 0);
 

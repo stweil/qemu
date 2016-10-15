@@ -7497,7 +7497,7 @@ static bool get_phys_addr_lpae(CPUARMState *env, target_ulong address,
          * is unpredictable. Flag this as a guest error.  */
         if (sign != sext) {
             qemu_log_mask(LOG_GUEST_ERROR,
-                          "AArch32: VTCR.S / VTCR.T0SZ[3] missmatch\n");
+                          "AArch32: VTCR.S / VTCR.T0SZ[3] mismatch\n");
         }
     }
     t1sz = extract32(tcr->raw_tcr, 16, 6);
@@ -8309,12 +8309,12 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
              * this purpose use the actual register value passed to us
              * so that we get the fault address right.
              */
-            helper_ret_stb_mmu(env, vaddr_in, 0, oi, GETRA());
+            helper_ret_stb_mmu(env, vaddr_in, 0, oi, GETPC());
             /* Now we can populate the other TLB entries, if any */
             for (i = 0; i < maxidx; i++) {
                 uint64_t va = vaddr + TARGET_PAGE_SIZE * i;
                 if (va != (vaddr_in & TARGET_PAGE_MASK)) {
-                    helper_ret_stb_mmu(env, va, 0, oi, GETRA());
+                    helper_ret_stb_mmu(env, va, 0, oi, GETPC());
                 }
             }
         }
@@ -8331,7 +8331,7 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
          *    bounce buffer was in use
          */
         for (i = 0; i < blocklen; i++) {
-            helper_ret_stb_mmu(env, vaddr + i, 0, oi, GETRA());
+            helper_ret_stb_mmu(env, vaddr + i, 0, oi, GETPC());
         }
     }
 #else

@@ -1320,6 +1320,16 @@ sub process {
 			my $herevet = "$here\n" . cat_vet($rawline) . "\n";
 			ERROR("DOS line endings\n" . $herevet);
 
+		} elsif ($realfile =~ /^docs\/.+\.txt/ ||
+			 $realfile =~ /^docs\/.+\.md/) {
+		    if ($rawline =~ /^\+\s+$/ && $rawline !~ /^\+ {4}$/) {
+			# TODO: properly check we're in a code block
+			#       (surrounding text is 4-column aligned)
+			my $herevet = "$here\n" . cat_vet($rawline) . "\n";
+			ERROR("code blocks in documentation should have " .
+			      "empty lines with exactly 4 columns of " .
+			      "whitespace\n" . $herevet);
+		    }
 		} elsif ($rawline =~ /^\+.*\S\s+$/ || $rawline =~ /^\+\s+$/) {
 			my $herevet = "$here\n" . cat_vet($rawline) . "\n";
 			ERROR("trailing whitespace\n" . $herevet);
@@ -2397,7 +2407,7 @@ sub process {
 # we have e.g. CONFIG_LINUX and CONFIG_WIN32 for common cases
 # where they might be necessary.
 		if ($line =~ m@^.\s*\#\s*if.*\b__@) {
-			ERROR("architecture specific defines should be avoided\n" .  $herecurr);
+			WARN("architecture specific defines should be avoided\n" .  $herecurr);
 		}
 
 # Check that the storage class is at the beginning of a declaration

@@ -204,7 +204,7 @@ static int syborg_timer_init(SysBusDevice *sbd)
     sysbus_init_mmio(sbd, &s->iomem);
 
     bh = qemu_bh_new(syborg_timer_tick, s);
-    s->timer = ptimer_init(bh);
+    s->timer = ptimer_init(bh, PTIMER_POLICY_DEFAULT);
     ptimer_set_freq(s->timer, s->freq);
     vmstate_register(&dev->qdev, -1, &vmstate_syborg_timer, s);
     return 0;
