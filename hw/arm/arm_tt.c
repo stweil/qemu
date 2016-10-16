@@ -79,6 +79,7 @@ typedef struct {
     const char *name;
 } OffsetNamePair;
 
+#if 0
 static const char *offset2name(const OffsetNamePair *o2n, unsigned offset)
 {
     static char buffer[12];
@@ -92,6 +93,7 @@ static const char *offset2name(const OffsetNamePair *o2n, unsigned offset)
     }
     return name;
 }
+#endif
 
 #define MP_MISC_BASE            0x80002000
 #define MP_MISC_SIZE            0x00001000
@@ -366,6 +368,7 @@ static const TypeInfo tt_lcd_info = {
 #define SYSCON_MPLLCON          0x10
 #define SYSCON_CLKDIV0          0x24
 
+#if 0
 static const OffsetNamePair tt_syscon_names[] = {
     {}
 };
@@ -403,6 +406,7 @@ static const MemoryRegionOps tt_syscon_ops = {
         .max_access_size = 4
     }
 };
+#endif
 
 /******************************************************************************/
 
@@ -422,6 +426,7 @@ tt_ioport_write: 0x00000010
 tt_ioport_write: 0x00000018
 */
 
+#if 0
 static const OffsetNamePair tt_ioport_names[] = {
     {}
 };
@@ -489,6 +494,7 @@ static const MemoryRegionOps tt_ioport_ops = {
         .max_access_size = 4
     }
 };
+#endif
 
 /******************************************************************************/
 

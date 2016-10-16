@@ -412,9 +412,11 @@ int ar7_afe_clock = 35328000;
 int ar7_ref_clock = 25000000;
 int ar7_xtal_clock = 24000000;
 
+#if 0
 static const unsigned ar7_cpu_clock = 150000000;
 static const unsigned ar7_bus_clock = 125000000;
 static const unsigned ar7_dsp_clock = 0;
+#endif
 static const unsigned io_frequency = 125000000 / 2;
 
 /* Global variable avalanche can be used in debugger. */
