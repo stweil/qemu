@@ -1858,23 +1858,6 @@ if compile_object "" ; then
   avx2_opt="yes"
 fi
 
-#########################################
-# zlib check
-
-if test "$zlib" != "no" ; then
-    cat > $TMPC << EOF
-#include <zlib.h>
-int main(void) { zlibVersion(); return 0; }
-EOF
-    if compile_prog "" "-lz" ; then
-        :
-    else
-        error_exit "zlib check failed" \
-            "Make sure to have the zlib libs and headers installed."
-    fi
-fi
-LIBS="$LIBS -lz"
-
 ##########################################
 # lzo check
 
@@ -2690,22 +2673,28 @@ fi
 ##########################################
 # VNC JPEG detection
 if test "$vnc" = "yes" -a "$vnc_jpeg" != "no" ; then
-cat > $TMPC <<EOF
+  if $pkg_config --exists libjpeg; then
+    vnc_jpeg=yes
+    libs_softmmu="$libs_softmmu $($pkg_config --libs libjpeg)"
+    QEMU_CFLAGS="$QEMU_CFLAGS $($pkg_config --cflags libjpeg)"
+  else
+    cat > $TMPC <<EOF
 #include <stdio.h>
 #include <jpeglib.h>
 int main(void) { struct jpeg_compress_struct s; jpeg_create_compress(&s); return 0; }
 EOF
     vnc_jpeg_cflags=""
     vnc_jpeg_libs="-ljpeg"
-  if compile_prog "$vnc_jpeg_cflags" "$vnc_jpeg_libs" ; then
-    vnc_jpeg=yes
-    libs_softmmu="$vnc_jpeg_libs $libs_softmmu"
-    QEMU_CFLAGS="$QEMU_CFLAGS $vnc_jpeg_cflags"
-  else
-    if test "$vnc_jpeg" = "yes" ; then
-      feature_not_found "vnc-jpeg" "Install libjpeg-turbo devel"
+    if compile_prog "$vnc_jpeg_cflags" "$vnc_jpeg_libs" ; then
+      vnc_jpeg=yes
+      libs_softmmu="$vnc_jpeg_libs $libs_softmmu"
+      QEMU_CFLAGS="$QEMU_CFLAGS $vnc_jpeg_cflags"
+    else
+      if test "$vnc_jpeg" = "yes" ; then
+        feature_not_found "vnc-jpeg" "Install libjpeg-turbo devel"
+      fi
+      vnc_jpeg=no
     fi
-    vnc_jpeg=no
   fi
 fi
 
@@ -2944,13 +2933,18 @@ fi
 ##########################################
 # curses probe
 if test "$curses" != "no" ; then
-  if test "$mingw32" = "yes" ; then
-    curses_list="$($pkg_config --libs ncurses 2>/dev/null):-lpdcurses"
-  else
-    curses_list="$($pkg_config --libs ncurses 2>/dev/null):-lncurses:-lcurses"
-  fi
   curses_found=no
-  cat > $TMPC << EOF
+  if $pkg_config --exists ncurses; then
+    curses_found=yes
+    QEMU_CFLAGS="$QEMU_CFLAGS $($pkg_config --cflags ncurses)"
+    libs_softmmu="$libs_softmmu $($pkg_config --libs ncurses)"
+  else
+    if test "$mingw32" = "yes" ; then
+      curses_list="-lpdcurses"
+    else
+      curses_list="-lncurses:-lcurses"
+    fi
+    cat > $TMPC << EOF
 #include <curses.h>
 int main(void) {
   const char *s = curses_version();
@@ -2958,16 +2952,17 @@ int main(void) {
   return s != 0;
 }
 EOF
-  IFS=:
-  for curses_lib in $curses_list; do
+    IFS=:
+    for curses_lib in $curses_list; do
+      unset IFS
+      if compile_prog "" "$curses_lib" ; then
+        curses_found=yes
+        libs_softmmu="$curses_lib $libs_softmmu"
+        break
+      fi
+    done
     unset IFS
-    if compile_prog "" "$curses_lib" ; then
-      curses_found=yes
-      libs_softmmu="$curses_lib $libs_softmmu"
-      break
-    fi
-  done
-  unset IFS
+  fi
   if test "$curses_found" = "yes" ; then
     curses=yes
   else
@@ -3082,6 +3077,29 @@ if ! compile_prog "$glib_cflags -Werror" "$glib_libs" ; then
     if cc_has_warning_flag "-Wno-unknown-attributes"; then
         glib_cflags="-Wno-unknown-attributes $glib_cflags"
         CFLAGS="-Wno-unknown-attributes $CFLAGS"
+    fi
+fi
+
+#########################################
+# zlib check
+
+if test "$zlib" != "no" ; then
+    if $pkg_config --exists zlib; then
+        zlib_cflags=$($pkg_config --cflags zlib)
+        zlib_libs=$($pkg_config --libs zlib)
+        QEMU_CFLAGS="$zlib_cflags $QEMU_CFLAGS"
+        LIBS="$zlib_libs $LIBS"
+    else
+        cat > $TMPC << EOF
+#include <zlib.h>
+int main(void) { zlibVersion(); return 0; }
+EOF
+        if compile_prog "" "-lz" ; then
+            LIBS="$LIBS -lz"
+        else
+            error_exit "zlib check failed" \
+                "Make sure to have the zlib libs and headers installed."
+        fi
     fi
 fi
 
