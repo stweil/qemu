@@ -160,6 +160,15 @@ SectionGroup "System Emulations" SectionSystem
 
 SectionGroupEnd
 
+Section "Desktop icons" SectionGnome
+    SetOutPath "$INSTDIR\share"
+!ifdef W64
+    File /r /usr/x86_64-w64-mingw32/sys-root/mingw/share/icons
+!else
+    File /r /usr/i686-w64-mingw32/sys-root/mingw/share/icons
+!endif
+SectionEnd
+
 !ifdef DLLDIR
 Section "Libraries (DLL)" SectionDll
     SetOutPath "$INSTDIR"
@@ -231,6 +240,7 @@ SectionEnd
 
 ; Descriptions (mouse-over).
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionGnome}   "GNOME desktop icon theme."
     !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "System emulation."
     !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "Alpha system emulation."
     !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "PC i386 system emulation."
