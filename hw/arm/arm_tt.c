@@ -965,7 +965,7 @@ static void tt_init(MachineState *machine)
         if (serial_hds[i] == NULL) {
             char name[32];
             snprintf(name, sizeof(name), "serial%u", i);
-            serial_hds[i] = qemu_chr_new(name, "vc:80Cx24C", NULL);
+            serial_hds[i] = qemu_chr_new(name, "vc:80Cx24C");
         }
     }
 

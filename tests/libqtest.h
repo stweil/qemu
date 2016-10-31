@@ -410,6 +410,14 @@ int64_t qtest_clock_step(QTestState *s, int64_t step);
 int64_t qtest_clock_set(QTestState *s, int64_t val);
 
 /**
+ * qtest_big_endian:
+ * @s: QTestState instance to operate on.
+ *
+ * Returns: True if the architecture under test has a big endian configuration.
+ */
+bool qtest_big_endian(QTestState *s);
+
+/**
  * qtest_get_arch:
  *
  * Returns: The architecture for the QEMU executable under test.
@@ -872,14 +880,6 @@ static inline int64_t clock_set(int64_t val)
 {
     return qtest_clock_set(global_qtest, val);
 }
-
-/**
- * qtest_big_endian:
- *
- * Returns: True if the architecture under test has a big endian configuration.
- */
-bool qtest_big_endian(void);
-
 
 QDict *qmp_fd_receive(int fd);
 void qmp_fd_sendv(int fd, const char *fmt, va_list ap);

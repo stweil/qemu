@@ -61,7 +61,7 @@ typedef struct s3c24xx_serial_dev_s {
     unsigned char rx_byte;
     /* Byte is available to be read */
     unsigned int rx_available : 1;
-    CharDriverState *chr;
+    CharBackend chr;
     qemu_irq tx_irq;
     qemu_irq rx_irq;
     qemu_irq tx_level;
@@ -115,8 +115,8 @@ static void s3c24xx_serial_write(void *opaque, hwaddr addr,
 
     case S3C_SERIAL_UTXH: {
         unsigned char ch = value & 0xff;
-        if (s->chr && ((s->ucon & 1<<5)==0)) {
-            qemu_chr_fe_write(s->chr, &ch, 1);
+        if ((s->ucon & 1 << 5) == 0) {
+            qemu_chr_fe_write(&s->chr, &ch, 1);
         } else {
             s->rx_byte = ch;
             s->rx_available = 1;
@@ -259,15 +259,11 @@ s3c24xx_serial_init(S3CState *soc,
                           "s3c24xx.serial", 44);
     memory_region_add_subregion(get_system_memory(), base_addr, &s->mmio);
 
-    if (chr) {
-        /* If the port is present add to the character device's IO handlers. */
-        s->chr = chr;
+    qemu_chr_fe_set_handlers(&s->chr,
+                             s3c24xx_serial_can_receive,
+                             s3c24xx_serial_receive,
+                             s3c24xx_serial_event,
+                             s, NULL, true);
 
-        qemu_chr_add_handlers(s->chr,
-                              s3c24xx_serial_can_receive,
-                              s3c24xx_serial_receive,
-                              s3c24xx_serial_event,
-                              s);
-    }
     return s;
 }

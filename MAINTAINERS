@@ -63,6 +63,17 @@ W: http://wiki.qemu.org/SecurityProcess
 M: Michael S. Tsirkin <mst@redhat.com>
 L: secalert@redhat.com
 
+Trivial patches
+---------------
+Trivial patches
+M: Michael Tokarev <mjt@tls.msk.ru>
+M: Laurent Vivier <laurent@vivier.eu>
+S: Maintained
+L: qemu-trivial@nongnu.org
+K: ^Subject:.*(?i)trivial
+T: git git://git.corpit.ru/qemu.git trivial-patches
+T: git git://github.com/vivier/qemu.git trivial-patches
+
 Guest CPU cores (TCG):
 ----------------------
 Overall
@@ -133,7 +144,8 @@ F: include/hw/lm32/
 F: tests/tcg/lm32/
 
 M68K
-S: Orphan
+M: Laurent Vivier <laurent@vivier.eu>
+S: Maintained
 F: target-m68k/
 F: hw/m68k/
 
@@ -656,6 +668,7 @@ F: include/hw/*/xics*
 F: pc-bios/spapr-rtas/*
 F: pc-bios/spapr-rtas.bin
 F: pc-bios/slof.bin
+F: pc-bios/skiboot.lid
 F: docs/specs/ppc-spapr-hcalls.txt
 F: docs/specs/ppc-spapr-hotplug.txt
 F: tests/spapr*
@@ -1412,6 +1425,14 @@ S: Supported
 F: util/uuid.c
 F: include/qemu/uuid.h
 F: tests/test-uuid.c
+
+COLO Framework
+M: zhanghailiang <zhang.zhanghailiang@huawei.com>
+S: Maintained
+F: migration/colo*
+F: include/migration/colo.h
+F: include/migration/failover.h
+F: docs/COLO-FT.txt
 
 COLO Proxy
 M: Zhang Chen <zhangchen.fnst@cn.fujitsu.com>

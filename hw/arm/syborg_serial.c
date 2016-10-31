@@ -66,7 +66,7 @@ typedef struct {
     uint32_t *read_fifo;
     int read_pos;
     int read_count;
-    CharDriverState *chr;
+    CharBackend chr;
     qemu_irq irq;
     uint32_t dma_tx_ptr;
     uint32_t dma_rx_ptr;
@@ -300,10 +300,9 @@ static int syborg_serial_init(SysBusDevice *sbd)
                           "serial", 0x1000);
     sysbus_init_mmio(sbd, &s->iomem);
     s->chr = qemu_char_get_next_serial();
-    if (s->chr) {
-        qemu_chr_add_handlers(s->chr, syborg_serial_can_receive,
-                              syborg_serial_receive, syborg_serial_event, s);
-    }
+    qemu_chr_fe_set_handlers(&s->chr, syborg_serial_can_receive,
+                             syborg_serial_receive, syborg_serial_event,
+                             s, NULL);
     if (s->fifo_size <= 0) {
         fprintf(stderr, "syborg_serial: fifo too small\n");
         s->fifo_size = 16;

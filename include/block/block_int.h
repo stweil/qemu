@@ -62,8 +62,6 @@
 enum BdrvTrackedRequestType {
     BDRV_TRACKED_READ,
     BDRV_TRACKED_WRITE,
-    BDRV_TRACKED_FLUSH,
-    BDRV_TRACKED_IOCTL,
     BDRV_TRACKED_DISCARD,
 };
 
@@ -245,6 +243,8 @@ struct BlockDriver {
     BlockAIOCB *(*bdrv_aio_ioctl)(BlockDriverState *bs,
         unsigned long int req, void *buf,
         BlockCompletionFunc *cb, void *opaque);
+    int coroutine_fn (*bdrv_co_ioctl)(BlockDriverState *bs,
+                                      unsigned long int req, void *buf);
 
     /* List of options for creating images, terminated by name == NULL */
     QemuOptsList *create_opts;
@@ -444,7 +444,7 @@ struct BlockDriverState {
                          note this is a reference count */
 
     CoQueue flush_queue;            /* Serializing flush queue */
-    BdrvTrackedRequest *active_flush_req; /* Flush request in flight */
+    bool active_flush_req;          /* Flush request in flight? */
     unsigned int write_gen;         /* Current data generation */
     unsigned int flushed_gen;       /* Flushed write generation */
 
@@ -472,8 +472,11 @@ struct BlockDriverState {
     /* Callback before write request is processed */
     NotifierWithReturnList before_write_notifiers;
 
-    /* number of in-flight serialising requests */
+    /* number of in-flight requests; overall and serialising */
+    unsigned int in_flight;
     unsigned int serialising_in_flight;
+
+    bool wakeup;
 
     /* Offset after the highest byte written to */
     uint64_t wr_highest_offset;
@@ -633,6 +636,21 @@ void bdrv_remove_aio_context_notifier(BlockDriverState *bs,
                                       void (*aio_context_detached)(void *),
                                       void *opaque);
 
+/**
+ * bdrv_wakeup:
+ * @bs: The BlockDriverState for which an I/O operation has been completed.
+ *
+ * Wake up the main thread if it is waiting on BDRV_POLL_WHILE.  During
+ * synchronous I/O on a BlockDriverState that is attached to another
+ * I/O thread, the main thread lets the I/O thread's event loop run,
+ * waiting for the I/O operation to complete.  A bdrv_wakeup will wake
+ * up the main thread if necessary.
+ *
+ * Manual calls to bdrv_wakeup are rarely necessary, because
+ * bdrv_dec_in_flight already calls it.
+ */
+void bdrv_wakeup(BlockDriverState *bs);
+
 #ifdef _WIN32
 int is_windows_drive(const char *filename);
 #endif
@@ -785,6 +803,9 @@ bool bdrv_requests_pending(BlockDriverState *bs);
 
 void bdrv_clear_dirty_bitmap(BdrvDirtyBitmap *bitmap, HBitmap **out);
 void bdrv_undo_clear_dirty_bitmap(BdrvDirtyBitmap *bitmap, HBitmap *in);
+
+void bdrv_inc_in_flight(BlockDriverState *bs);
+void bdrv_dec_in_flight(BlockDriverState *bs);
 
 void blockdev_close_all_bdrv_states(void);
 

@@ -398,7 +398,8 @@ typedef struct {
     uint8_t phyaddr;
     /* VLYNQ index for TNETW1130. Set to >1 to disable WLAN. */
     uint8_t vlynq_tnetw1130;
-    CharDriverState *gpio_display;
+    CharBackend gpio_display;
+    bool gpio_display_inited;
     SerialState *serial[2];
     CpmacState *cpmac[2];
     ar7_timer_t timer[2];
@@ -556,7 +557,8 @@ static void reg_set(uint8_t * reg, uint32_t addr, uint32_t value)
 
 typedef struct {
     uint32_t leds;
-    CharDriverState *display;
+    CharBackend display;
+    bool display_inited;
     char display_text[9];
 } MaltaFPGAState;
 
@@ -577,8 +579,8 @@ static void malta_fpga_update_display(void *opaque)
     }
     leds_text[8] = '\0';
 
-    qemu_chr_fe_printf(s->display, "\e[3;2H\e[0;32m%-8.8s", leds_text);
-    qemu_chr_fe_printf(s->display, "\e[8;2H\e[0;31m%-8.8s\r\n\n\e[0;37m", s->display_text);
+    qemu_chr_fe_printf(&s->display, "\e[3;2H\e[0;32m%-8.8s", leds_text);
+    qemu_chr_fe_printf(&s->display, "\e[8;2H\e[0;31m%-8.8s\r\n\n\e[0;37m", s->display_text);
 }
 
 /*****************************************************************************
@@ -1970,7 +1972,7 @@ typedef enum {
 static void ar7_led_display(unsigned led_index, int on)
 {
   static const uint8_t x[] = { 1, 7, 14, 23, 29 };
-  qemu_chr_fe_printf(ar7->gpio_display, "\e[10;%uH\e[%dm \e[m", x[led_index], (on) ? 42 : 40);
+  qemu_chr_fe_printf(&ar7->gpio_display, "\e[10;%uH\e[%dm \e[m", x[led_index], (on) ? 42 : 40);
 }
 
 static void ar7_gpio_display(void)
@@ -1984,22 +1986,22 @@ static void ar7_gpio_display(void)
     for (bit_index = 0; bit_index < 32; bit_index++) {
         text[bit_index] = (in & BIT(bit_index)) ? '*' : '.';
     }
-    qemu_chr_fe_printf(ar7->gpio_display, "\e[5;1H%32.32s (in  0x%08x)",
+    qemu_chr_fe_printf(&ar7->gpio_display, "\e[5;1H%32.32s (in  0x%08x)",
                        text, in);
     for (bit_index = 0; bit_index < 32; bit_index++) {
         text[bit_index] = (out & BIT(bit_index)) ? '*' : '.';
     }
-    qemu_chr_fe_printf(ar7->gpio_display, "\e[6;1H%32.32s (out 0x%08x)",
+    qemu_chr_fe_printf(&ar7->gpio_display, "\e[6;1H%32.32s (out 0x%08x)",
                        text, out);
     for (bit_index = 0; bit_index < 32; bit_index++) {
         text[bit_index] = (dir & BIT(bit_index)) ? '*' : '.';
     }
-    qemu_chr_fe_printf(ar7->gpio_display, "\e[7;1H%32.32s (dir 0x%08x)",
+    qemu_chr_fe_printf(&ar7->gpio_display, "\e[7;1H%32.32s (dir 0x%08x)",
                        text, dir);
     for (bit_index = 0; bit_index < 32; bit_index++) {
         text[bit_index] = (enable & BIT(bit_index)) ? '*' : '.';
     }
-    qemu_chr_fe_printf(ar7->gpio_display, "\e[8;1H%32.32s (ena 0x%08x)",
+    qemu_chr_fe_printf(&ar7->gpio_display, "\e[8;1H%32.32s (ena 0x%08x)",
                        text, enable);
 
     /* LAN LED. */
@@ -2018,7 +2020,7 @@ static void ar7_gpio_display(void)
     ar7_led_display(4, 1);
 
     /* Hide cursor. */
-    qemu_chr_fe_printf(ar7->gpio_display, "\e[20;1H");
+    qemu_chr_fe_printf(&ar7->gpio_display, "\e[20;1H");
 }
 
 #undef ENTRY
@@ -3347,7 +3349,7 @@ static void ar7_serial_init(CPUMIPSState * env)
      */
     unsigned uart_index;
     if (serial_hds[1] == 0) {
-        serial_hds[1] = qemu_chr_new("serial1", "vc:80Cx24C", NULL);
+        serial_hds[1] = qemu_chr_new("serial1", "vc:80Cx24C");
     }
     for (uart_index = 0; uart_index < 2; uart_index++) {
         ar7->serial[uart_index] = serial_mm_init(get_system_memory(),
@@ -3582,43 +3584,58 @@ static void ar7_display_event(void *opaque, int event)
     /* Wird gleich am Anfang mit (NULL, 2) aufgerufen. */
     TRACE(OTHER, logout("%p, %d\n", opaque, event));
     //~ if (event == CHR_EVENT_BREAK)
+    AR7State *s = opaque;
+
+    if (event == CHR_EVENT_OPENED && !s->gpio_display_inited) {
+        CharBackend *chr = &s->gpio_display;
+        qemu_chr_fe_printf(chr,
+                           "\e[1;1HGPIO Status"
+                           "\e[2;1H0         1         2         3"
+                           "\e[3;1H01234567890123456789012345678901"
+                           "\e[10;1H* lan * wlan * online * dsl * power"
+                           "\e[12;1HPress 'r' to toggle the reset button");
+        ar7_gpio_display();
+        s->gpio_display_inited = true;
+    }
 }
 
-static void malta_fpga_led_init(CharDriverState *chr)
+static void malta_fpga_display_event(void *opaque, int event)
 {
-    qemu_chr_fe_printf(chr, "\e[HMalta LEDBAR\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
-    qemu_chr_fe_printf(chr, "+        +\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
-    qemu_chr_fe_printf(chr, "\n");
-    qemu_chr_fe_printf(chr, "Malta ASCII\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
-    qemu_chr_fe_printf(chr, "+        +\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
+    MaltaFPGAState *s = opaque;
+    CharBackend *chr = &s->display;
+    if (event == CHR_EVENT_OPENED && !s->display_inited) {
+        qemu_chr_fe_printf(chr, "\e[HMalta LEDBAR\r\n");
+        qemu_chr_fe_printf(chr, "+--------+\r\n");
+        qemu_chr_fe_printf(chr, "+        +\r\n");
+        qemu_chr_fe_printf(chr, "+--------+\r\n");
+        qemu_chr_fe_printf(chr, "\n");
+        qemu_chr_fe_printf(chr, "Malta ASCII\r\n");
+        qemu_chr_fe_printf(chr, "+--------+\r\n");
+        qemu_chr_fe_printf(chr, "+        +\r\n");
+        qemu_chr_fe_printf(chr, "+--------+\r\n");
 
-    /* Select 1st serial console as default (because we don't have VGA). */
-    console_select(1);
-}
+        s->display_inited = true;
 
-static void ar7_gpio_display_init(CharDriverState *chr)
-{
-    qemu_chr_fe_printf(chr,
-                       "\e[1;1HGPIO Status"
-                       "\e[2;1H0         1         2         3"
-                       "\e[3;1H01234567890123456789012345678901"
-                       "\e[10;1H* lan * wlan * online * dsl * power"
-                       "\e[12;1HPress 'r' to toggle the reset button");
-    ar7_gpio_display();
+        /* Select 1st serial console as default (because we don't have VGA). */
+        console_select(1);
+    }
 }
 
 static void ar7_display_init(CPUMIPSState *env)
 {
-    ar7->gpio_display = qemu_chr_new("gpio", "vc:400x300",
-                                     ar7_gpio_display_init);
-    qemu_chr_add_handlers(ar7->gpio_display, ar7_display_can_receive,
-                          ar7_display_receive, ar7_display_event, 0);
+    CharDriverState *chr;
 
-    malta_display.display = qemu_chr_new("led-display", "vc:320x200", malta_fpga_led_init);
+    chr = qemu_chr_new("gpio", "vc:400x300");
+    qemu_chr_fe_init(&ar7->gpio_display, chr, NULL);
+    qemu_chr_fe_set_handlers(&ar7->gpio_display, ar7_display_can_receive,
+                             ar7_display_receive, ar7_display_event, ar7,
+                             NULL, true);
+
+    chr = qemu_chr_new("led-display", "vc:320x200");
+    qemu_chr_fe_init(&malta_display.display , chr, NULL);
+    qemu_chr_fe_set_handlers(&malta_display.display, NULL, NULL,
+                             malta_fpga_display_event, &malta_display,
+                             NULL, true);
 }
 
 static void ar7_reset(DeviceState *d)

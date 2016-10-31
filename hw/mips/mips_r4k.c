@@ -287,7 +287,7 @@ void mips_init(MachineState *machine)
 
     pit = pit_init(isa_bus, 0x40, 0, NULL);
 
-    serial_hds_isa_init(isa_bus, MAX_SERIAL_PORTS);
+    serial_hds_isa_init(isa_bus, 0, MAX_SERIAL_PORTS);
 
     isa_vga_init(isa_bus);
 

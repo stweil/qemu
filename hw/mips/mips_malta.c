@@ -47,7 +47,6 @@
 #include "elf.h"
 #include "hw/timer/mc146818rtc.h"
 #include "hw/timer/i8254.h"
-#include "sysemu/block-backend.h"
 #include "sysemu/blockdev.h"
 #include "exec/address-spaces.h"
 #include "hw/sysbus.h"             /* SysBusDevice */
@@ -99,10 +98,11 @@ typedef struct {
     uint32_t i2coe;
     uint32_t i2cout;
     uint32_t i2csel;
-    CharDriverState *display;
+    CharBackend display;
     char display_text[9];
     SerialState *uart;
     int bigendian;
+    bool display_inited;
 } MaltaFPGAState;
 
 #define TYPE_MIPS_MALTA "mips-malta"
@@ -139,8 +139,8 @@ static void malta_fpga_update_display(void *opaque)
     }
     leds_text[8] = '\0';
 
-    qemu_chr_fe_printf(s->display, "\e[3;2H\e[0;32m%-8.8s", leds_text);
-    qemu_chr_fe_printf(s->display, "\e[8;2H\e[0;31m%-8.8s\r\n\n\e[0;37m", s->display_text);
+    qemu_chr_fe_printf(&s->display, "\e[3;2H\e[0;32m%-8.8s", leds_text);
+    qemu_chr_fe_printf(&s->display, "\e[8;2H\e[0;31m%-8.8s\r\n\n\e[0;37m", s->display_text);
 }
 
 /*
@@ -544,17 +544,22 @@ static void malta_fpga_reset(void *opaque)
     snprintf(s->display_text, 9, "        ");
 }
 
-static void malta_fpga_led_init(CharDriverState *chr)
+static void malta_fgpa_display_event(void *opaque, int event)
 {
-    qemu_chr_fe_printf(chr, "\e[HMalta LEDBAR\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
-    qemu_chr_fe_printf(chr, "+        +\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
-    qemu_chr_fe_printf(chr, "\n");
-    qemu_chr_fe_printf(chr, "Malta ASCII\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
-    qemu_chr_fe_printf(chr, "+        +\r\n");
-    qemu_chr_fe_printf(chr, "+--------+\r\n");
+    MaltaFPGAState *s = opaque;
+
+    if (event == CHR_EVENT_OPENED && !s->display_inited) {
+        qemu_chr_fe_printf(&s->display, "\e[HMalta LEDBAR\r\n");
+        qemu_chr_fe_printf(&s->display, "+--------+\r\n");
+        qemu_chr_fe_printf(&s->display, "+        +\r\n");
+        qemu_chr_fe_printf(&s->display, "+--------+\r\n");
+        qemu_chr_fe_printf(&s->display, "\n");
+        qemu_chr_fe_printf(&s->display, "Malta ASCII\r\n");
+        qemu_chr_fe_printf(&s->display, "+--------+\r\n");
+        qemu_chr_fe_printf(&s->display, "+        +\r\n");
+        qemu_chr_fe_printf(&s->display, "+--------+\r\n");
+        s->display_inited = true;
+    }
 }
 
 static MaltaFPGAState *malta_fpga_init(MemoryRegion *address_space,
@@ -562,6 +567,7 @@ static MaltaFPGAState *malta_fpga_init(MemoryRegion *address_space,
          int bigendian)
 {
     MaltaFPGAState *s;
+    CharDriverState *chr;
 
     s = (MaltaFPGAState *)g_malloc0(sizeof(MaltaFPGAState));
 
@@ -576,7 +582,10 @@ static MaltaFPGAState *malta_fpga_init(MemoryRegion *address_space,
     memory_region_add_subregion(address_space, base + 0xa00, &s->iomem_hi);
 
     s->bigendian = bigendian;
-    s->display = qemu_chr_new("fpga", "vc:320x200", malta_fpga_led_init);
+    chr = qemu_chr_new("fpga", "vc:320x200");
+    qemu_chr_fe_init(&s->display, chr, NULL);
+    qemu_chr_fe_set_handlers(&s->display, NULL, NULL,
+                             malta_fgpa_display_event, s, NULL, true);
 
     s->uart = serial_mm_init(address_space, base + 0x900, 3, uart_irq,
                              230400, uart_chr, DEVICE_NATIVE_ENDIAN);
@@ -1036,7 +1045,7 @@ void mips_malta_init(MachineState *machine)
         if (!serial_hds[i]) {
             char label[32];
             snprintf(label, sizeof(label), "serial%d", i);
-            serial_hds[i] = qemu_chr_new(label, "null", NULL);
+            serial_hds[i] = qemu_chr_new(label, "null");
         }
     }
 
@@ -1227,7 +1236,7 @@ void mips_malta_init(MachineState *machine)
     isa_create_simple(isa_bus, "i8042");
 
     rtc_init(isa_bus, 2000, NULL);
-    serial_hds_isa_init(isa_bus, 2);
+    serial_hds_isa_init(isa_bus, 0, 2);
     parallel_hds_isa_init(isa_bus, 1);
 
     for(i = 0; i < MAX_FD; i++) {

@@ -10,6 +10,8 @@
 /**
  * Launch QEMU with the given command line,
  * and then set up interrupts and our guest malloc interface.
+ * Never returns NULL:
+ * Terminates the application in case an error is encountered.
  */
 GCC_FMT_ATTR(2, 0)
 QOSState *qtest_vboot(QOSOps *ops, const char *cmdline_fmt, va_list ap)

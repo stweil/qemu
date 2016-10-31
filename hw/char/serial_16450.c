@@ -136,7 +136,7 @@ struct SerialState {
        it can be reset while reading iir */
     int thr_ipending;
     qemu_irq irq;
-    CharDriverState *chr;
+    CharBackend chr;
     int last_break_enable;
     target_ulong base;
     //~ int it_shift;
@@ -459,9 +459,8 @@ SerialState *serial_16450_init(int base, qemu_irq irq, CharDriverState *chr)
         register_ioport_read(base, 8, 1, serial_read, s);
     }
 
-    s->chr = chr;
-    qemu_chr_add_handlers(chr, serial_can_receive1, serial_receive1,
-                          serial_event, s);
+    qemu_chr_fe_set_handlers(chr, serial_can_receive1, serial_receive1,
+                             serial_event, s, NULL);
     qemu_register_reset(serial_reset, s);
 
     return s;
