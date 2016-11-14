@@ -493,7 +493,7 @@ address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
                                   hwaddr *xlat, hwaddr *plen)
 {
     MemoryRegionSection *section;
-    AddressSpaceDispatch *d = cpu->cpu_ases[asidx].memory_dispatch;
+    AddressSpaceDispatch *d = atomic_rcu_read(&cpu->cpu_ases[asidx].memory_dispatch);
 
     section = address_space_translate_internal(d, addr, xlat, plen, false);
 
@@ -692,7 +692,11 @@ void cpu_exec_realizefn(CPUState *cpu, Error **errp)
 #if defined(CONFIG_USER_ONLY)
 static void breakpoint_invalidate(CPUState *cpu, target_ulong pc)
 {
+    mmap_lock();
+    tb_lock();
     tb_invalidate_phys_page_range(pc, pc + 1, 0);
+    tb_unlock();
+    mmap_unlock();
 }
 #else
 static void breakpoint_invalidate(CPUState *cpu, target_ulong pc)
@@ -701,6 +705,7 @@ static void breakpoint_invalidate(CPUState *cpu, target_ulong pc)
     hwaddr phys = cpu_get_phys_page_attrs_debug(cpu, pc, &attrs);
     int asidx = cpu_asidx_from_attrs(cpu, attrs);
     if (phys != -1) {
+        /* Locks grabbed by tb_invalidate_phys_addr */
         tb_invalidate_phys_addr(cpu->cpu_ases[asidx].as,
                                 phys | (pc & ~TARGET_PAGE_MASK));
     }
@@ -911,11 +916,13 @@ void QEMU_NORETURN cpu_abort(CPUState *cpu, const char *fmt, ...)
     fprintf(stderr, "\n");
     cpu_dump_state(cpu, stderr, fprintf, CPU_DUMP_FPU | CPU_DUMP_CCOP);
     if (qemu_log_separate()) {
+        qemu_log_lock();
         qemu_log("qemu: fatal: ");
         qemu_log_vprintf(fmt, ap2);
         qemu_log("\n");
         log_cpu_state(cpu, CPU_DUMP_FPU | CPU_DUMP_CCOP);
         qemu_log_flush();
+        qemu_log_unlock();
         qemu_log_close();
     }
     va_end(ap2);
@@ -1229,6 +1236,15 @@ void qemu_mutex_unlock_ramlist(void)
 }
 
 #ifdef __linux__
+static int64_t get_file_size(int fd)
+{
+    int64_t size = lseek(fd, 0, SEEK_END);
+    if (size < 0) {
+        return -errno;
+    }
+    return size;
+}
+
 static void *file_ram_alloc(RAMBlock *block,
                             ram_addr_t memory,
                             const char *path,
@@ -1240,6 +1256,7 @@ static void *file_ram_alloc(RAMBlock *block,
     char *c;
     void * volatile area = MAP_FAILED;
     int fd = -1;
+    int64_t file_size;
 
     if (kvm_enabled() && !kvm_has_sync_mmu()) {
         error_setg(errp,
@@ -1302,10 +1319,19 @@ static void *file_ram_alloc(RAMBlock *block,
     }
 #endif
 
+    file_size = get_file_size(fd);
+
     if (memory < block->page_size) {
         error_setg(errp, "memory size 0x" RAM_ADDR_FMT " must be equal to "
                    "or larger than page size 0x%zx",
                    memory, block->page_size);
+        goto error;
+    }
+
+    if (file_size > 0 && file_size < memory) {
+        error_setg(errp, "backing store %s size 0x%" PRIx64
+                   " does not match 'size' option 0x" RAM_ADDR_FMT,
+                   path, file_size, memory);
         goto error;
     }
 
@@ -1316,8 +1342,16 @@ static void *file_ram_alloc(RAMBlock *block,
      * hosts, so don't bother bailing out on errors.
      * If anything goes wrong with it under other filesystems,
      * mmap will fail.
+     *
+     * Do not truncate the non-empty backend file to avoid corrupting
+     * the existing data in the file. Disabling shrinking is not
+     * enough. For example, the current vNVDIMM implementation stores
+     * the guest NVDIMM labels at the end of the backend file. If the
+     * backend file is later extended, QEMU will not be able to find
+     * those labels. Therefore, extending the non-empty backend file
+     * is disabled as well.
      */
-    if (ftruncate(fd, memory)) {
+    if (!file_size && ftruncate(fd, memory)) {
         perror("ftruncate");
     }
 
@@ -1993,7 +2027,11 @@ ram_addr_t qemu_ram_addr_from_host(void *ptr)
 static void notdirty_mem_write(void *opaque, hwaddr ram_addr,
                                uint64_t val, unsigned size)
 {
+    bool locked = false;
+
     if (!cpu_physical_memory_get_dirty_flag(ram_addr, DIRTY_MEMORY_CODE)) {
+        locked = true;
+        tb_lock();
         tb_invalidate_phys_page_fast(ram_addr, size);
     }
     switch (size) {
@@ -2009,6 +2047,11 @@ static void notdirty_mem_write(void *opaque, hwaddr ram_addr,
     default:
         abort();
     }
+
+    if (locked) {
+        tb_unlock();
+    }
+
     /* Set both VGA and migration bits for simplicity and to remove
      * the notdirty callback faster.
      */
@@ -2069,6 +2112,12 @@ static void check_watchpoint(int offset, int len, MemTxAttrs attrs, int flags)
                     continue;
                 }
                 cpu->watchpoint_hit = wp;
+
+                /* The tb_lock will be reset when cpu_loop_exit or
+                 * cpu_loop_exit_noexc longjmp back into the cpu_exec
+                 * main loop.
+                 */
+                tb_lock();
                 tb_check_watchpoint(cpu);
                 if (wp->flags & BP_STOP_BEFORE_ACCESS) {
                     cpu->exception_index = EXCP_DEBUG;
@@ -2361,7 +2410,7 @@ static void tcg_commit(MemoryListener *listener)
      * may have split the RCU critical section.
      */
     d = atomic_rcu_read(&cpuas->as->dispatch);
-    cpuas->memory_dispatch = d;
+    atomic_rcu_set(&cpuas->memory_dispatch, d);
     tlb_flush(cpuas->cpu, 1);
 }
 
@@ -2476,7 +2525,9 @@ static void invalidate_and_set_dirty(MemoryRegion *mr, hwaddr addr,
             cpu_physical_memory_range_includes_clean(addr, length, dirty_log_mask);
     }
     if (dirty_log_mask & (1 << DIRTY_MEMORY_CODE)) {
+        tb_lock();
         tb_invalidate_phys_range(addr, addr + length);
+        tb_unlock();
         dirty_log_mask &= ~(1 << DIRTY_MEMORY_CODE);
     }
     cpu_physical_memory_set_dirty_range(addr, length, dirty_log_mask);

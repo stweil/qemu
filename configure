@@ -2946,7 +2946,7 @@ if test "$curses" != "no" ; then
     curses_inc_list="$($pkg_config --cflags ncurses 2>/dev/null):"
     curses_lib_list="$($pkg_config --libs ncurses 2>/dev/null):-lpdcurses"
   else
-    curses_inc_list="$($pkg_config --cflags ncursesw 2>/dev/null):"
+    curses_inc_list="$($pkg_config --cflags ncursesw 2>/dev/null):-I/usr/include/ncursesw:"
     curses_lib_list="$($pkg_config --libs ncursesw 2>/dev/null):-lncursesw:-lcursesw"
   fi
   curses_found=no
@@ -2961,11 +2961,13 @@ int main(void) {
   resize_term(0, 0);
   addwstr(L"wide chars\n");
   addnwstr(&wch, 1);
+  add_wch(WACS_DEGREE);
   return s != 0;
 }
 EOF
   IFS=:
   for curses_inc in $curses_inc_list; do
+    IFS=:
     for curses_lib in $curses_lib_list; do
       unset IFS
       if compile_prog "$curses_inc" "$curses_lib" ; then
@@ -2975,6 +2977,9 @@ EOF
         break
       fi
     done
+    if test "$curses_found" = yes ; then
+      break
+    fi
   done
   unset IFS
   if test "$curses_found" = "yes" ; then
@@ -4723,6 +4728,33 @@ if compile_prog "" "" ; then
     have_rtnetlink=yes
 fi
 
+##########################################
+# check for usable AF_VSOCK environment
+have_af_vsock=no
+cat > $TMPC << EOF
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#if !defined(AF_VSOCK)
+# error missing AF_VSOCK flag
+#endif
+#include <linux/vm_sockets.h>
+int main(void) {
+    int sock, ret;
+    struct sockaddr_vm svm;
+    socklen_t len = sizeof(svm);
+    sock = socket(AF_VSOCK, SOCK_STREAM, 0);
+    ret = getpeername(sock, (struct sockaddr *)&svm, &len);
+    if ((ret == -1) && (errno == ENOTCONN)) {
+        return 0;
+    }
+    return -1;
+}
+EOF
+if compile_prog "" "" ; then
+    have_af_vsock=yes
+fi
+
 #################################################
 # Sparc implicitly links with --relax, which is
 # incompatible with -r, so --no-relax should be
@@ -5720,6 +5752,10 @@ fi
 
 if test "$replication" = "yes" ; then
   echo "CONFIG_REPLICATION=y" >> $config_host_mak
+fi
+
+if test "$have_af_vsock" = "yes" ; then
+  echo "CONFIG_AF_VSOCK=y" >> $config_host_mak
 fi
 
 # Hold two types of flag:

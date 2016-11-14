@@ -13,7 +13,7 @@
 
 #include "qemu/osdep.h"
 #include "trace.h"
-#include "block/blockjob.h"
+#include "block/blockjob_int.h"
 #include "block/block_int.h"
 #include "sysemu/block-backend.h"
 #include "qapi/error.h"
@@ -530,7 +530,6 @@ static void mirror_exit(BlockJob *job, void *opaque)
         aio_context_release(replace_aio_context);
     }
     g_free(s->replaces);
-    bdrv_op_unblock_all(target_bs, s->common.blocker);
     blk_unref(s->target);
     s->target = NULL;
     block_job_completed(&s->common, data->ret);
@@ -938,9 +937,9 @@ static const BlockJobDriver commit_active_job_driver = {
 };
 
 static void mirror_start_job(const char *job_id, BlockDriverState *bs,
-                             BlockDriverState *target, const char *replaces,
-                             int64_t speed, uint32_t granularity,
-                             int64_t buf_size,
+                             int creation_flags, BlockDriverState *target,
+                             const char *replaces, int64_t speed,
+                             uint32_t granularity, int64_t buf_size,
                              BlockMirrorBackingMode backing_mode,
                              BlockdevOnError on_source_error,
                              BlockdevOnError on_target_error,
@@ -968,7 +967,8 @@ static void mirror_start_job(const char *job_id, BlockDriverState *bs,
         buf_size = DEFAULT_MIRROR_BUF_SIZE;
     }
 
-    s = block_job_create(job_id, driver, bs, speed, cb, opaque, errp);
+    s = block_job_create(job_id, driver, bs, speed, creation_flags,
+                         cb, opaque, errp);
     if (!s) {
         return;
     }
@@ -997,7 +997,15 @@ static void mirror_start_job(const char *job_id, BlockDriverState *bs,
         return;
     }
 
-    bdrv_op_block_all(target, s->common.blocker);
+    block_job_add_bdrv(&s->common, target);
+    /* In commit_active_start() all intermediate nodes disappear, so
+     * any jobs in them must be blocked */
+    if (bdrv_chain_contains(bs, target)) {
+        BlockDriverState *iter;
+        for (iter = backing_bs(bs); iter != target; iter = backing_bs(iter)) {
+            block_job_add_bdrv(&s->common, iter);
+        }
+    }
 
     s->common.co = qemu_coroutine_create(mirror_run, s);
     trace_mirror_start(bs, s, s->common.co, opaque);
@@ -1010,9 +1018,7 @@ void mirror_start(const char *job_id, BlockDriverState *bs,
                   MirrorSyncMode mode, BlockMirrorBackingMode backing_mode,
                   BlockdevOnError on_source_error,
                   BlockdevOnError on_target_error,
-                  bool unmap,
-                  BlockCompletionFunc *cb,
-                  void *opaque, Error **errp)
+                  bool unmap, Error **errp)
 {
     bool is_none_mode;
     BlockDriverState *base;
@@ -1023,17 +1029,16 @@ void mirror_start(const char *job_id, BlockDriverState *bs,
     }
     is_none_mode = mode == MIRROR_SYNC_MODE_NONE;
     base = mode == MIRROR_SYNC_MODE_TOP ? backing_bs(bs) : NULL;
-    mirror_start_job(job_id, bs, target, replaces,
+    mirror_start_job(job_id, bs, BLOCK_JOB_DEFAULT, target, replaces,
                      speed, granularity, buf_size, backing_mode,
-                     on_source_error, on_target_error, unmap, cb, opaque, errp,
+                     on_source_error, on_target_error, unmap, NULL, NULL, errp,
                      &mirror_job_driver, is_none_mode, base, false);
 }
 
 void commit_active_start(const char *job_id, BlockDriverState *bs,
-                         BlockDriverState *base, int64_t speed,
-                         BlockdevOnError on_error,
-                         BlockCompletionFunc *cb,
-                         void *opaque, Error **errp,
+                         BlockDriverState *base, int creation_flags,
+                         int64_t speed, BlockdevOnError on_error,
+                         BlockCompletionFunc *cb, void *opaque, Error **errp,
                          bool auto_complete)
 {
     int64_t length, base_length;
@@ -1072,9 +1077,9 @@ void commit_active_start(const char *job_id, BlockDriverState *bs,
         }
     }
 
-    mirror_start_job(job_id, bs, base, NULL, speed, 0, 0,
+    mirror_start_job(job_id, bs, creation_flags, base, NULL, speed, 0, 0,
                      MIRROR_LEAVE_BACKING_CHAIN,
-                     on_error, on_error, false, cb, opaque, &local_err,
+                     on_error, on_error, true, cb, opaque, &local_err,
                      &commit_active_job_driver, false, base, auto_complete);
     if (local_err) {
         error_propagate(errp, local_err);

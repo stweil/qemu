@@ -7,16 +7,15 @@
 #include "qemu/coroutine.h"
 #include "block/accounting.h"
 #include "block/dirty-bitmap.h"
+#include "block/blockjob.h"
 #include "qapi/qmp/qobject.h"
 #include "qapi-types.h"
 #include "qemu/hbitmap.h"
 
 /* block.c */
 typedef struct BlockDriver BlockDriver;
-typedef struct BlockJob BlockJob;
 typedef struct BdrvChild BdrvChild;
 typedef struct BdrvChildRole BdrvChildRole;
-typedef struct BlockJobTxn BlockJobTxn;
 
 typedef struct BlockDriverInfo {
     /* in bytes, 0 if irrelevant */
@@ -332,6 +331,8 @@ int bdrv_flush_all(void);
 void bdrv_close_all(void);
 void bdrv_drain(BlockDriverState *bs);
 void coroutine_fn bdrv_co_drain(BlockDriverState *bs);
+void bdrv_drain_all_begin(void);
+void bdrv_drain_all_end(void);
 void bdrv_drain_all(void);
 
 #define BDRV_POLL_WHILE(bs, cond) ({                       \

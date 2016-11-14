@@ -2436,11 +2436,13 @@ static void gen_unknown_opcode(CPUX86State *env, DisasContext *s)
 
     if (qemu_loglevel_mask(LOG_UNIMP)) {
         target_ulong pc = s->pc_start, end = s->pc;
+        qemu_log_lock();
         qemu_log("ILLOPC: " TARGET_FMT_lx ":", pc);
         for (; pc < end; ++pc) {
             qemu_log(" %02x", cpu_ldub_code(env, pc));
         }
         qemu_log("\n");
+        qemu_log_unlock();
     }
 }
 
@@ -8483,6 +8485,7 @@ done_generating:
     if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)
         && qemu_log_in_addr_range(pc_start)) {
         int disas_flags;
+        qemu_log_lock();
         qemu_log("----------------\n");
         qemu_log("IN: %s\n", lookup_symbol(pc_start));
 #ifdef TARGET_X86_64
@@ -8493,6 +8496,7 @@ done_generating:
             disas_flags = !dc->code32;
         log_target_disas(cs, pc_start, pc_ptr - pc_start, disas_flags);
         qemu_log("\n");
+        qemu_log_unlock();
     }
 #endif
 

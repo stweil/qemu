@@ -1795,6 +1795,11 @@ void qemu_system_guest_panicked(void)
     }
     qapi_event_send_guest_panicked(GUEST_PANIC_ACTION_PAUSE, &error_abort);
     vm_stop(RUN_STATE_GUEST_PANICKED);
+    if (!no_shutdown) {
+        qapi_event_send_guest_panicked(GUEST_PANIC_ACTION_POWEROFF,
+                                       &error_abort);
+        qemu_system_shutdown_request();
+    }
 }
 
 void qemu_system_reset_request(void)
@@ -4100,6 +4105,11 @@ int main(int argc, char **argv)
 
     os_daemonize();
 
+    if (pid_file && qemu_create_pidfile(pid_file) != 0) {
+        error_report("could not acquire pid file: %s", strerror(errno));
+        exit(1);
+    }
+
     if (qemu_init_main_loop(&main_loop_err)) {
         error_report_err(main_loop_err);
         exit(1);
@@ -4376,11 +4386,6 @@ int main(int argc, char **argv)
         exit(1);
     }
 #endif
-
-    if (pid_file && qemu_create_pidfile(pid_file) != 0) {
-        error_report("could not acquire pid file: %s", strerror(errno));
-        exit(1);
-    }
 
     if (qemu_opts_foreach(qemu_find_opts("device"),
                           device_help_func, NULL, NULL)) {
