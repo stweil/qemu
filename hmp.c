@@ -318,6 +318,7 @@ void hmp_info_migrate_parameters(Monitor *mon, const QDict *qdict)
         monitor_printf(mon, " %s: %" PRId64 " milliseconds",
             MigrationParameter_lookup[MIGRATION_PARAMETER_DOWNTIME_LIMIT],
             params->downtime_limit);
+        assert(params->has_x_checkpoint_delay);
         monitor_printf(mon, " %s: %" PRId64,
             MigrationParameter_lookup[MIGRATION_PARAMETER_X_CHECKPOINT_DELAY],
             params->x_checkpoint_delay);
@@ -1570,7 +1571,7 @@ void hmp_block_stream(Monitor *mon, const QDict *qdict)
     const char *base = qdict_get_try_str(qdict, "base");
     int64_t speed = qdict_get_try_int(qdict, "speed", 0);
 
-    qmp_block_stream(false, NULL, device, base != NULL, base, false, NULL,
+    qmp_block_stream(true, device, device, base != NULL, base, false, NULL,
                      false, NULL, qdict_haskey(qdict, "speed"), speed,
                      true, BLOCKDEV_ON_ERROR_REPORT, &error);
 
