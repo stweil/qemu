@@ -37,7 +37,9 @@
 
 #ifdef CONFIG_SDL
 #if defined(__APPLE__) || defined(main)
+#define SDL_MAIN_HANDLED
 #include <SDL.h>
+#if SDL_MAJOR_VERSION == 1
 int qemu_main(int argc, char **argv);
 int main(int argc, char **argv)
 {
@@ -45,6 +47,11 @@ int main(int argc, char **argv)
 }
 #undef main
 #define main qemu_main
+#elif SDL_MAJOR_VERSION == 2
+#undef main
+#else
+#error undefined SDL version
+#endif
 #endif
 #endif /* CONFIG_SDL */
 
