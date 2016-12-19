@@ -47,9 +47,9 @@
     } while (0)
 
 /* Current version */
-const uint32_t hax_cur_version = 0x3; /* ver 2.0: support fast mmio */
+const uint32_t hax_cur_version = 0x4; /* API v4: unmapping and MMIO moves */
 /* Minimum HAX kernel version */
-const uint32_t hax_min_version = 0x4; /* ver 4.0 supports unmapping */
+const uint32_t hax_min_version = 0x4; /* API v4: supports unmapping */
 
 static bool hax_allowed;
 
@@ -123,8 +123,17 @@ static int hax_version_support(struct hax_state *hax)
         return 0;
     }
 
-    if ((hax_min_version > version.cur_version) ||
-        (hax_cur_version < version.compat_version)) {
+    if (hax_min_version > version.cur_version) {
+        fprintf(stderr, "Incompatible HAX module version %d,",
+                version.cur_version);
+        fprintf(stderr, "requires minimum version %d\n", hax_min_version);
+        return 0;
+    }
+    if (hax_cur_version < version.compat_version) {
+        fprintf(stderr, "Incompatible QEMU HAX API version %x,",
+                hax_cur_version);
+        fprintf(stderr, "requires minimum HAX API version %x\n",
+                version.compat_version);
         return 0;
     }
 
@@ -320,9 +329,6 @@ static int hax_init(ram_addr_t ram_size)
     }
 
     if (!hax_version_support(hax)) {
-        fprintf(stderr, "Incompat HAX version. QEMU current version %x ",
-                hax_cur_version);
-        fprintf(stderr, "requires minimum HAX version %x\n", hax_min_version);
         ret = -EINVAL;
         goto error;
     }
@@ -369,8 +375,19 @@ static int hax_accel_init(MachineState *ms)
 
 static int hax_handle_fastmmio(CPUArchState *env, struct hax_fastmmio *hft)
 {
-    cpu_physical_memory_rw(hft->gpa, (uint8_t *) &hft->value, hft->size,
-                           hft->direction);
+    if (hft->direction < 2) {
+        cpu_physical_memory_rw(hft->gpa, (uint8_t *) &hft->value, hft->size,
+                               hft->direction);
+    } else {
+        /*
+         * HAX API v4 supports transferring data between two MMIO addresses,
+         * hft->gpa and hft->gpa2 (instructions such as MOVS require this):
+         *  hft->direction == 2: gpa ==> gpa2
+         */
+        uint64_t value;
+        cpu_physical_memory_rw(hft->gpa, (uint8_t *) &value, hft->size, 0);
+        cpu_physical_memory_rw(hft->gpa2, (uint8_t *) &value, hft->size, 1);
+    }
 
     return 0;
 }

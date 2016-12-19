@@ -345,7 +345,10 @@ struct hax_capabilityinfo {
 
 struct hax_fastmmio {
     uint64_t gpa;
-    uint64_t value;
+    union {
+        uint64_t value;
+        uint64_t gpa2;  /* since HAX API v4 */
+    };
     uint8_t size;
     uint8_t direction;
     uint16_t reg_index;
