@@ -7,8 +7,8 @@ obj-$(CONFIG_KVM) += kvm.o hyperv.o
 obj-$(call lnot,$(CONFIG_KVM)) += kvm-stub.o
 # HAX support
 ifdef CONFIG_WIN32
-obj-$(CONFIG_HAX) += hax-all.o hax-slot.o hax-windows.o
+obj-$(CONFIG_HAX) += hax-all.o hax-mem.o hax-windows.o
 endif
 ifdef CONFIG_DARWIN
-obj-$(CONFIG_HAX) += hax-all.o hax-slot.o hax-darwin.o
+obj-$(CONFIG_HAX) += hax-all.o hax-mem.o hax-darwin.o
 endif

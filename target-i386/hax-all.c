@@ -25,6 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "exec/address-spaces.h"
 #include "exec/exec-all.h"
 #include "exec/ioport.h"
 
@@ -33,13 +34,8 @@
 #include "hax-i386.h"
 #include "sysemu/accel.h"
 #include "sysemu/sysemu.h"
-#include "exec/address-spaces.h"
 #include "qemu/main-loop.h"
-#include "hax-slot.h"
 #include "hw/boards.h"
-
-static const char kHaxVcpuSyncFailed[] = "Failed to sync HAX vcpu context";
-#define derror(msg) do { fprintf(stderr, (msg)); } while (0)
 
 #define DEBUG_HAX 0
 
@@ -51,46 +47,20 @@ static const char kHaxVcpuSyncFailed[] = "Failed to sync HAX vcpu context";
     } while (0)
 
 /* Current version */
-const uint32_t hax_cur_version = 0x3;    /* ver 2.0: support fast mmio */
-/* Minimum  HAX kernel version */
-const uint32_t hax_min_version = 0x3;
-
-#define TYPE_HAX_ACCEL ACCEL_CLASS_NAME("hax")
-
-#define HAX_EMUL_ONE    0x1
-#define HAX_EMUL_REAL   0x2
-#define HAX_EMUL_HLT    0x4
-#define HAX_EMUL_EXITLOOP    0x5
-
-#define HAX_EMULATE_STATE_MMIO  0x1
-#define HAX_EMULATE_STATE_REAL  0x2
-#define HAX_EMULATE_STATE_NONE  0x3
-#define HAX_EMULATE_STATE_INITIAL       0x4
+const uint32_t hax_cur_version = 0x3; /* ver 2.0: support fast mmio */
+/* Minimum HAX kernel version */
+const uint32_t hax_min_version = 0x4; /* ver 4.0 supports unmapping */
 
 static bool hax_allowed;
 
-static void hax_vcpu_sync_state(CPUArchState *env, int modified);
-static int hax_arch_get_registers(CPUArchState *env);
-static int hax_handle_io(CPUArchState *env, uint32_t df, uint16_t port,
-                         int direction, int size, int count, void *buffer);
-static int hax_handle_fastmmio(CPUArchState *env, struct hax_fastmmio *hft);
-
 struct hax_state hax_global;
 
-/* Called after hax_init */
+static void hax_vcpu_sync_state(CPUArchState *env, int modified);
+static int hax_arch_get_registers(CPUArchState *env);
+
 int hax_enabled(void)
 {
     return hax_allowed;
-}
-
-static int hax_prepare_emulation(CPUArchState *env)
-{
-    /* Flush all emulation states */
-    tlb_flush(ENV_GET_CPU(env), 1);
-    tb_flush(ENV_GET_CPU(env));
-    /* Sync the vcpu state from hax kernel module */
-    hax_vcpu_sync_state(env, 0);
-    return 0;
 }
 
 int valid_hax_tunnel_size(uint16_t size)
@@ -253,7 +223,6 @@ int hax_init_vcpu(CPUState *cpu)
     }
 
     cpu->hax_vcpu = hax_global.vm->vcpus[cpu->cpu_index];
-    cpu->hax_vcpu->emulation_state = HAX_EMULATE_STATE_INITIAL;
     cpu->hax_vcpu_dirty = true;
     qemu_register_reset(hax_reset_vcpu_state, (CPUArchState *) (cpu->env_ptr));
 
@@ -291,7 +260,6 @@ struct hax_vm *hax_vm_create(struct hax_state *hax)
     }
 
     hax->vm = vm;
-    hax_slot_init_registry();
     return vm;
 
   error:
@@ -304,7 +272,6 @@ int hax_vm_destroy(struct hax_vm *vm)
 {
     int i;
 
-    hax_slot_free_registry();
     for (i = 0; i < HAX_MAX_VCPU; i++)
         if (vm->vcpus[i]) {
             fprintf(stderr, "VCPU should be cleaned before vm clean\n");
@@ -315,129 +282,6 @@ int hax_vm_destroy(struct hax_vm *vm)
     hax_global.vm = NULL;
     return 0;
 }
-
-static void hax_set_phys_mem(MemoryRegionSection *section)
-{
-    MemoryRegion *mr = section->mr;
-    hwaddr start_pa = section->offset_within_address_space;
-    ram_addr_t size = int128_get64(section->size);
-    unsigned int delta;
-    void *host_ptr;
-    int flags;
-
-    /* We only care about RAM and ROM */
-    if (!memory_region_is_ram(mr)) {
-        return;
-    }
-
-    /* Adjust start_pa and size so that they are page-aligned. (Cf
-     * kvm_set_phys_mem() in kvm-all.c).
-     */
-    delta = TARGET_PAGE_SIZE - (start_pa & ~TARGET_PAGE_MASK);
-    delta &= ~TARGET_PAGE_MASK;
-    if (delta > size) {
-        return;
-    }
-    start_pa += delta;
-    size -= delta;
-    size &= TARGET_PAGE_MASK;
-    if (!size || start_pa & ~TARGET_PAGE_MASK) {
-        return;
-    }
-
-    host_ptr = memory_region_get_ram_ptr(mr) + section->offset_within_region
-               + delta;
-    flags = memory_region_is_rom(mr) ? 1 : 0;
-    hax_slot_register(start_pa, size, (uintptr_t) host_ptr, flags);
-}
-
-static void hax_region_add(MemoryListener *listener,
-                           MemoryRegionSection *section)
-{
-    hax_set_phys_mem(section);
-}
-
-static void hax_region_del(MemoryListener *listener,
-                           MemoryRegionSection *section)
-{
-    /* Memory mappings will be removed at VM close. */
-}
-
-/* currently we fake the dirty bitmap sync, always dirty */
-/* avoid implicit declaration warning on Windows */
-static void hax_log_sync(MemoryListener *listener,
-                         MemoryRegionSection *section)
-{
-    MemoryRegion *mr = section->mr;
-
-    if (!memory_region_is_ram(mr)) {
-        /* Skip MMIO regions */
-        return;
-    }
-
-    unsigned long c;
-    unsigned int len =
-        ((int128_get64(section->size) / TARGET_PAGE_SIZE) + HOST_LONG_BITS -
-         1) / HOST_LONG_BITS;
-    unsigned long bitmap[len];
-    unsigned int i, j;
-
-    for (i = 0; i < len; i++) {
-        bitmap[i] = 1;
-        c = leul_to_cpu(bitmap[i]);
-        do {
-            j = ctzl(c) - 1;
-            c &= ~(1ul << j);
-
-            memory_region_set_dirty(mr, ((uint64_t)i * HOST_LONG_BITS + j) *
-                                    TARGET_PAGE_SIZE, TARGET_PAGE_SIZE);
-        } while (c != 0);
-    }
-}
-
-static void hax_log_global_start(struct MemoryListener *listener)
-{
-}
-
-static void hax_log_global_stop(struct MemoryListener *listener)
-{
-}
-
-static void hax_log_start(MemoryListener *listener,
-                          MemoryRegionSection *section, int old, int new)
-{
-}
-
-static void hax_log_stop(MemoryListener *listener,
-                         MemoryRegionSection *section, int old, int new)
-{
-}
-
-static void hax_begin(MemoryListener *listener)
-{
-}
-
-static void hax_commit(MemoryListener *listener)
-{
-}
-
-static void hax_region_nop(MemoryListener *listener,
-                           MemoryRegionSection *section)
-{
-}
-
-static MemoryListener hax_memory_listener = {
-    .begin = hax_begin,
-    .commit = hax_commit,
-    .region_add = hax_region_add,
-    .region_del = hax_region_del,
-    .region_nop = hax_region_nop,
-    .log_start = hax_log_start,
-    .log_stop = hax_log_stop,
-    .log_sync = hax_log_sync,
-    .log_global_start = hax_log_global_start,
-    .log_global_stop = hax_log_global_stop,
-};
 
 static void hax_handle_interrupt(CPUState *cpu, int mask)
 {
@@ -490,7 +334,7 @@ static int hax_init(ram_addr_t ram_size)
         goto error;
     }
 
-    memory_listener_register(&hax_memory_listener, &address_space_memory);
+    hax_memory_region_init();
 
     qversion.cur_version = hax_cur_version;
     qversion.min_version = hax_min_version;
@@ -525,27 +369,8 @@ static int hax_accel_init(MachineState *ms)
 
 static int hax_handle_fastmmio(CPUArchState *env, struct hax_fastmmio *hft)
 {
-    uint64_t buf = 0;
-    /*
-     * With fast MMIO, QEMU need not sync vCPU state with HAXM
-     * driver because it will only invoke MMIO handler
-     * However, some MMIO operations utilize virtual address like qemu_pipe
-     * Thus we need to sync the CR0, CR3 and CR4 so that QEMU
-     * can translate the guest virtual address to guest physical
-     * address
-     */
-    env->cr[0] = hft->_cr0;
-    env->cr[2] = hft->_cr2;
-    env->cr[3] = hft->_cr3;
-    env->cr[4] = hft->_cr4;
-
-    buf = hft->value;
-
-    cpu_physical_memory_rw(hft->gpa, (uint8_t *) &buf, hft->size,
+    cpu_physical_memory_rw(hft->gpa, (uint8_t *) &hft->value, hft->size,
                            hft->direction);
-    if (hft->direction == 0) {
-        hft->value = buf;
-    }
 
     return 0;
 }
@@ -555,6 +380,7 @@ static int hax_handle_io(CPUArchState *env, uint32_t df, uint16_t port,
 {
     uint8_t *ptr;
     int i;
+    MemTxAttrs attrs = { 0 };
 
     if (!df) {
         ptr = (uint8_t *) buffer;
@@ -562,31 +388,8 @@ static int hax_handle_io(CPUArchState *env, uint32_t df, uint16_t port,
         ptr = buffer + size * count - size;
     }
     for (i = 0; i < count; i++) {
-        if (direction == HAX_EXIT_IO_IN) {
-            switch (size) {
-            case 1:
-                stb_p(ptr, cpu_inb(port));
-                break;
-            case 2:
-                stw_p(ptr, cpu_inw(port));
-                break;
-            case 4:
-                stl_p(ptr, cpu_inl(port));
-                break;
-            }
-        } else {
-            switch (size) {
-            case 1:
-                cpu_outb(port, ldub_p(ptr));
-                break;
-            case 2:
-                cpu_outw(port, lduw_p(ptr));
-                break;
-            case 4:
-                cpu_outl(port, ldl_p(ptr));
-                break;
-            }
-        }
+        address_space_rw(&address_space_io, port, attrs,
+                         ptr, size, direction == HAX_EXIT_IO_OUT);
         if (!df) {
             ptr += size;
         } else {
@@ -643,8 +446,7 @@ void hax_raise_event(CPUState *cpu)
 /*
  * Ask hax kernel module to run the CPU for us till:
  * 1. Guest crash or shutdown
- * 2. Need QEMU's emulation like guest execute MMIO instruction or guest
- *    enter emulation mode (non-PG mode)
+ * 2. Need QEMU's emulation like guest execute MMIO instruction
  * 3. Guest execute HLT
  * 4. QEMU have Signal/event pending
  * 5. An unknown VMX exit happens
@@ -659,7 +461,7 @@ static int hax_vcpu_hax_exec(CPUArchState *env)
 
     if (!hax_enabled()) {
         DPRINTF("Trying to vcpu execute at eip:" TARGET_FMT_lx "\n", env->eip);
-        return HAX_EMUL_EXITLOOP;
+        return 0;
     }
 
     cpu->halted = 0;
@@ -688,7 +490,7 @@ static int hax_vcpu_hax_exec(CPUArchState *env)
         int hax_ret;
 
         if (cpu->exit_request) {
-            ret = HAX_EMUL_EXITLOOP;
+            ret = 1;
             break;
         }
 
@@ -715,30 +517,23 @@ static int hax_vcpu_hax_exec(CPUArchState *env)
                             ht->pio._direction,
                             ht->pio._size, ht->pio._count, vcpu->iobuf);
             break;
-        case HAX_EXIT_MMIO:
-            ret = HAX_EMUL_ONE;
-            break;
         case HAX_EXIT_FAST_MMIO:
             ret = hax_handle_fastmmio(env, (struct hax_fastmmio *) vcpu->iobuf);
-            break;
-        case HAX_EXIT_REAL:
-            ret = HAX_EMUL_REAL;
             break;
         /* Guest state changed, currently only for shutdown */
         case HAX_EXIT_STATECHANGE:
             fprintf(stdout, "VCPU shutdown request\n");
-            qemu_system_reset_request();
-            hax_prepare_emulation(env);
-            cpu_dump_state(cpu, stderr, fprintf, 0);
-            ret = HAX_EMUL_EXITLOOP;
+            qemu_system_shutdown_request();
+            hax_vcpu_sync_state(env, 0);
+            ret = 1;
             break;
         case HAX_EXIT_UNKNOWN_VMEXIT:
             fprintf(stderr, "Unknown VMX exit %x from guest\n",
                     ht->_exit_reason);
             qemu_system_reset_request();
-            hax_prepare_emulation(env);
+            hax_vcpu_sync_state(env, 0);
             cpu_dump_state(cpu, stderr, fprintf, 0);
-            ret = HAX_EMUL_EXITLOOP;
+            ret = -1;
             break;
         case HAX_EXIT_HLT:
             if (!(cpu->interrupt_request & CPU_INTERRUPT_HARD) &&
@@ -747,19 +542,29 @@ static int hax_vcpu_hax_exec(CPUArchState *env)
                 env->eflags |= IF_MASK;
                 cpu->halted = 1;
                 cpu->exception_index = EXCP_HLT;
-                ret = HAX_EMUL_HLT;
+                ret = 1;
             }
             break;
-        /* these situation will continue to hax module */
+        /* these situations will continue to hax module */
         case HAX_EXIT_INTERRUPT:
         case HAX_EXIT_PAUSED:
             break;
+        case HAX_EXIT_MMIO:
+            /* Should not happen on UG system */
+            fprintf(stderr, "HAX: unsupported MMIO emulation\n");
+            ret = -1;
+            break;
+        case HAX_EXIT_REAL:
+            /* Should not happen on UG system */
+            fprintf(stderr, "HAX: unimplemented real mode emulation\n");
+            ret = -1;
+            break;
         default:
-            fprintf(stderr, "Unknow exit %x from hax\n", ht->_exit_status);
+            fprintf(stderr, "Unknown exit %x from HAX\n", ht->_exit_status);
             qemu_system_reset_request();
-            hax_prepare_emulation(env);
+            hax_vcpu_sync_state(env, 0);
             cpu_dump_state(cpu, stderr, fprintf, 0);
-            ret = HAX_EMUL_EXITLOOP;
+            ret = 1;
             break;
         }
     } while (!ret);
@@ -768,7 +573,7 @@ static int hax_vcpu_hax_exec(CPUArchState *env)
         cpu->exit_request = 0;
         cpu->exception_index = EXCP_INTERRUPT;
     }
-    return ret;
+    return ret < 0;
 }
 
 static void do_hax_cpu_synchronize_state(CPUState *cpu, run_on_cpu_data arg)
@@ -816,7 +621,7 @@ void hax_cpu_synchronize_post_init(CPUState *cpu)
 int hax_smp_cpu_exec(CPUState *cpu)
 {
     CPUArchState *env = (CPUArchState *) (cpu->env_ptr);
-    int why;
+    int fatal;
     int ret;
 
     while (1) {
@@ -826,18 +631,16 @@ int hax_smp_cpu_exec(CPUState *cpu)
             break;
         }
 
-        why = hax_vcpu_hax_exec(env);
+        fatal = hax_vcpu_hax_exec(env);
 
-        if ((why != HAX_EMUL_HLT) && (why != HAX_EMUL_EXITLOOP)) {
-            fprintf(stderr, "Unknown hax vcpu return %x\n", why);
+        if (fatal) {
+            fprintf(stderr, "Unsupported HAX vcpu return\n");
             abort();
         }
     }
 
     return ret;
 }
-
-#define HAX_RAM_INFO_ROM 0x1
 
 static void set_v8086_seg(struct segment_desc_t *lhs, const SegmentCache *rhs)
 {
@@ -1178,8 +981,14 @@ static int hax_get_fpu(CPUArchState *env)
     }
     memcpy(env->fpregs, fpu.st_mm, sizeof(env->fpregs));
 
-    memcpy(env->xmm_regs, fpu.mmx_1, sizeof(fpu.mmx_1));
-    memcpy((ZMMReg *) (env->xmm_regs) + 8, fpu.mmx_2, sizeof(fpu.mmx_2));
+    for (i = 0; i < 8; i++) {
+        env->xmm_regs[i].ZMM_Q(0) = ldq_p(&fpu.mmx_1[i][0]);
+        env->xmm_regs[i].ZMM_Q(1) = ldq_p(&fpu.mmx_1[i][8]);
+        if (CPU_NB_REGS > 8) {
+            env->xmm_regs[i + 8].ZMM_Q(0) = ldq_p(&fpu.mmx_2[i][0]);
+            env->xmm_regs[i + 8].ZMM_Q(1) = ldq_p(&fpu.mmx_2[i][8]);
+        }
+    }
     env->mxcsr = fpu.mxcsr;
 
     return 0;
@@ -1200,8 +1009,14 @@ static int hax_set_fpu(CPUArchState *env)
     }
 
     memcpy(fpu.st_mm, env->fpregs, sizeof(env->fpregs));
-    memcpy(fpu.mmx_1, env->xmm_regs, sizeof(fpu.mmx_1));
-    memcpy(fpu.mmx_2, (ZMMReg *) (env->xmm_regs) + 8, sizeof(fpu.mmx_2));
+    for (i = 0; i < 8; i++) {
+        stq_p(&fpu.mmx_1[i][0], env->xmm_regs[i].ZMM_Q(0));
+        stq_p(&fpu.mmx_1[i][8], env->xmm_regs[i].ZMM_Q(1));
+        if (CPU_NB_REGS > 8) {
+            stq_p(&fpu.mmx_2[i][0], env->xmm_regs[i + 8].ZMM_Q(0));
+            stq_p(&fpu.mmx_2[i][8], env->xmm_regs[i + 8].ZMM_Q(1));
+        }
+    }
 
     fpu.mxcsr = env->mxcsr;
 
@@ -1284,7 +1099,6 @@ int hax_sync_vcpus(void)
 
             ret = hax_arch_set_registers(cpu->env_ptr);
             if (ret < 0) {
-                derror(kHaxVcpuSyncFailed);
                 return ret;
             }
         }
@@ -1297,8 +1111,6 @@ void hax_reset_vcpu_state(void *opaque)
 {
     CPUState *cpu;
     for (cpu = first_cpu; cpu != NULL; cpu = CPU_NEXT(cpu)) {
-        DPRINTF("*********ReSet hax_vcpu->emulation_state\n");
-        cpu->hax_vcpu->emulation_state = HAX_EMULATE_STATE_INITIAL;
         cpu->hax_vcpu->tunnel->user_event_pending = 0;
         cpu->hax_vcpu->tunnel->ready_for_interrupt_injection = 0;
     }
@@ -1313,7 +1125,7 @@ static void hax_accel_class_init(ObjectClass *oc, void *data)
 }
 
 static const TypeInfo hax_accel_type = {
-    .name = TYPE_HAX_ACCEL,
+    .name = ACCEL_CLASS_NAME("hax"),
     .parent = TYPE_ACCEL,
     .class_init = hax_accel_class_init,
 };

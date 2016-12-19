@@ -15,15 +15,6 @@
 #include "exec/exec-all.h"
 #include "hax-i386.h"
 
-#define DEBUG_HAX 0
-
-#define DPRINTF(fmt, ...) \
-    do { \
-        if (DEBUG_HAX) { \
-            fprintf(stdout, fmt, ## __VA_ARGS__); \
-        } \
-    } while (0)
-
 /*
  * return 0 when success, -1 when driver not loaded,
  * other negative value for other failure
@@ -50,7 +41,6 @@ static int hax_open_device(hax_fd *fd)
         return -2;
     }
     *fd = hDevice;
-    DPRINTF("HAX device fd:%p\n", *fd);
     return 0;
 }
 

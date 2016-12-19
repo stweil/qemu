@@ -28,7 +28,6 @@ extern struct hax_state hax_global;
 struct hax_vcpu_state {
     hax_fd fd;
     int vcpu_id;
-    int emulation_state;
     struct hax_tunnel *tunnel;
     unsigned char *iobuf;
 };
@@ -79,7 +78,12 @@ int hax_host_create_vcpu(hax_fd vm_fd, int vcpuid);
 hax_fd hax_host_open_vcpu(int vmid, int vcpuid);
 int hax_host_setup_vcpu_channel(struct hax_vcpu_state *vcpu);
 hax_fd hax_mod_open(void);
+void hax_memory_region_init(void);
 
+
+#ifdef CONFIG_DARWIN
+#include "target-i386/hax-darwin.h"
+#endif
 
 #ifdef CONFIG_WIN32
 #include "target-i386/hax-windows.h"
