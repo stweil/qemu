@@ -44,8 +44,8 @@ int hax_enabled(void);
 int hax_vcpu_destroy(CPUState *cpu);
 void hax_raise_event(CPUState *cpu);
 void hax_reset_vcpu_state(void *opaque);
-#include "target-i386/hax-interface.h"
-#include "target-i386/hax-i386.h"
+#include "target/i386/hax-interface.h"
+#include "target/i386/hax-i386.h"
 
 #else /* CONFIG_HAX */
 

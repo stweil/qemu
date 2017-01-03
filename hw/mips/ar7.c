@@ -82,7 +82,7 @@
 #include "hw/vlynq.h"           /* vlynq_create_bus */
 
 #include "qapi/error.h"          /* error_abort */
-#include "target-mips/cpu-qom.h" /* mips_cpu_do_interrupt */
+#include "target/mips/cpu-qom.h" /* mips_cpu_do_interrupt */
 
 #if 0 /* Support Titan SoC. */
 #define CONFIG_TITAN
