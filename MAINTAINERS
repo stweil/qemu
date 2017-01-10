@@ -508,7 +508,6 @@ M: Shannon Zhao <shannon.zhao@linaro.org>
 L: qemu-arm@nongnu.org
 S: Maintained
 F: hw/arm/virt-acpi-build.c
-F: include/hw/arm/virt-acpi-build.h
 
 STM32F205
 M: Alistair Francis <alistair@alistair23.me>
@@ -885,7 +884,6 @@ F: hw/acpi/*
 F: hw/smbios/*
 F: hw/i386/acpi-build.[hc]
 F: hw/arm/virt-acpi-build.c
-F: include/hw/arm/virt-acpi-build.h
 
 ppc4xx
 M: Alexander Graf <agraf@suse.de>
@@ -1720,9 +1718,9 @@ L: qemu-block@nongnu.org
 S: Supported
 F: block/linux-aio.c
 F: include/block/raw-aio.h
-F: block/raw-posix.c
-F: block/raw-win32.c
-F: block/raw_bsd.c
+F: block/raw-format.c
+F: block/file-posix.c
+F: block/file-win32.c
 F: block/win32-aio.c
 
 qcow2
