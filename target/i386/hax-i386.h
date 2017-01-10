@@ -78,7 +78,7 @@ int hax_host_create_vcpu(hax_fd vm_fd, int vcpuid);
 hax_fd hax_host_open_vcpu(int vmid, int vcpuid);
 int hax_host_setup_vcpu_channel(struct hax_vcpu_state *vcpu);
 hax_fd hax_mod_open(void);
-void hax_memory_region_init(void);
+void hax_memory_init(void);
 
 
 #ifdef CONFIG_DARWIN

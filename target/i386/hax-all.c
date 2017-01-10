@@ -340,7 +340,7 @@ static int hax_init(ram_addr_t ram_size)
         goto error;
     }
 
-    hax_memory_region_init();
+    hax_memory_init();
 
     qversion.cur_version = hax_cur_version;
     qversion.min_version = hax_min_version;

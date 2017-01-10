@@ -1248,12 +1248,19 @@ static void *qemu_hax_cpu_thread_fn(void *arg)
         while (cpu_thread_is_idle(cpu)) {
             qemu_cond_wait(cpu->halt_cond, &qemu_global_mutex);
         }
-
+#ifdef _WIN32
+        SleepEx(0, TRUE);
+#endif
         qemu_wait_io_event_common(cpu);
     }
     return NULL;
 }
 
+#ifdef _WIN32
+static void CALLBACK dummy_apc_func(ULONG_PTR unused)
+{
+}
+#endif
 
 static void qemu_cpu_kick_thread(CPUState *cpu)
 {
@@ -1276,29 +1283,9 @@ static void qemu_cpu_kick_thread(CPUState *cpu)
     }
 #else /* _WIN32 */
     if (!qemu_cpu_is_self(cpu)) {
-        CONTEXT context;
-
-        if (SuspendThread(cpu->hThread) == (DWORD)(-1)) {
-            fprintf(stderr, "qemu:%s: GetLastError:%lu\n", __func__,
-                    GetLastError());
-            exit(1);
-        }
-
-        /* On multi-core systems, we are not sure that the thread is actually
-         * suspended until we can get the context.
-         */
-        context.ContextFlags = CONTEXT_CONTROL;
-        while (GetThreadContext(cpu->hThread, &context) != 0) {
-            continue;
-        }
-
-        if (hax_enabled()) {
-            cpu->exit_request = 1;
-        }
-
-        if (ResumeThread(cpu->hThread) == (DWORD)(-1)) {
-            fprintf(stderr, "qemu:%s: GetLastError:%lu\n", __func__,
-                    GetLastError());
+        if (!QueueUserAPC(dummy_apc_func, cpu->hThread, 0)) {
+            fprintf(stderr, "%s: QueueUserAPC failed with error %lu\n",
+                    __func__, GetLastError());
             exit(1);
         }
     }
@@ -1324,6 +1311,13 @@ void qemu_cpu_kick(CPUState *cpu)
     if (tcg_enabled()) {
         qemu_cpu_kick_no_halt();
     } else {
+        if (hax_enabled()) {
+            /*
+             * FIXME: race condition with the exit_request check in
+             * hax_vcpu_hax_exec
+             */
+            cpu->exit_request = 1;
+        }
         qemu_cpu_kick_thread(cpu);
     }
 }

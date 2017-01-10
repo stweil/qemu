@@ -265,7 +265,25 @@ static MemoryListener hax_memory_listener = {
     .priority = 10,
 };
 
-void hax_memory_region_init(void)
+static void hax_ram_block_added(RAMBlockNotifier *n, void *host, size_t size)
 {
+    /*
+     * In HAX, QEMU allocates the virtual address, and HAX kernel
+     * populates the memory with physical memory. Currently we have no
+     * paging, so user should make sure enough free memory in advance.
+     */
+    if (hax_populate_ram((uint64_t)(uintptr_t)host, size) < 0) {
+        fprintf(stderr, "HAX failed to populate RAM");
+        abort();
+    }
+}
+
+static struct RAMBlockNotifier hax_ram_notifier = {
+    .ram_block_added = hax_ram_block_added,
+};
+
+void hax_memory_init(void)
+{
+    ram_block_notifier_add(&hax_ram_notifier);
     memory_listener_register(&hax_memory_listener, &address_space_memory);
 }

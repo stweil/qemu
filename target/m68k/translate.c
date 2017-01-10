@@ -1224,8 +1224,6 @@ DISAS_INSN(undef_fpu)
     gen_exception(s, s->pc - 2, EXCP_LINEF);
 }
 
-static void QEMU_NORETURN disas_undef(CPUM68KState *env,
-                                      DisasContext *s, uint16_t insn);
 DISAS_INSN(undef)
 {
     /* ??? This is both instructions that are as yet unimplemented
