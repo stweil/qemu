@@ -226,6 +226,7 @@ static const uint8_t cc_op_live[CC_OP_NB] = {
     [CC_OP_ADOX] = USES_CC_SRC | USES_CC_SRC2,
     [CC_OP_ADCOX] = USES_CC_DST | USES_CC_SRC | USES_CC_SRC2,
     [CC_OP_CLR] = 0,
+    [CC_OP_POPCNT] = USES_CC_SRC,
 };
 
 static void set_cc_op(DisasContext *s, CCOp op)
@@ -387,8 +388,7 @@ static void gen_op_mov_reg_v(TCGMemOp ot, int reg, TCGv t0)
 static inline void gen_op_mov_v_reg(TCGMemOp ot, TCGv t0, int reg)
 {
     if (ot == MO_8 && byte_reg_is_xH(reg)) {
-        tcg_gen_shri_tl(t0, cpu_regs[reg - 4], 8);
-        tcg_gen_ext8u_tl(t0, t0);
+        tcg_gen_extract_tl(t0, cpu_regs[reg - 4], 8, 8);
     } else {
         tcg_gen_mov_tl(t0, cpu_regs[reg]);
     }
@@ -762,6 +762,7 @@ static CCPrepare gen_prepare_eflags_c(DisasContext *s, TCGv reg)
 
     case CC_OP_LOGICB ... CC_OP_LOGICQ:
     case CC_OP_CLR:
+    case CC_OP_POPCNT:
         return (CCPrepare) { .cond = TCG_COND_NEVER, .mask = -1 };
 
     case CC_OP_INCB ... CC_OP_INCQ:
@@ -829,6 +830,7 @@ static CCPrepare gen_prepare_eflags_s(DisasContext *s, TCGv reg)
         return (CCPrepare) { .cond = TCG_COND_NE, .reg = cpu_cc_src,
                              .mask = CC_S };
     case CC_OP_CLR:
+    case CC_OP_POPCNT:
         return (CCPrepare) { .cond = TCG_COND_NEVER, .mask = -1 };
     default:
         {
@@ -848,6 +850,7 @@ static CCPrepare gen_prepare_eflags_o(DisasContext *s, TCGv reg)
         return (CCPrepare) { .cond = TCG_COND_NE, .reg = cpu_cc_src2,
                              .mask = -1, .no_setcond = true };
     case CC_OP_CLR:
+    case CC_OP_POPCNT:
         return (CCPrepare) { .cond = TCG_COND_NEVER, .mask = -1 };
     default:
         gen_compute_eflags(s);
@@ -871,6 +874,9 @@ static CCPrepare gen_prepare_eflags_z(DisasContext *s, TCGv reg)
                              .mask = CC_Z };
     case CC_OP_CLR:
         return (CCPrepare) { .cond = TCG_COND_ALWAYS, .mask = -1 };
+    case CC_OP_POPCNT:
+        return (CCPrepare) { .cond = TCG_COND_EQ, .reg = cpu_cc_src,
+                             .mask = -1 };
     default:
         {
             TCGMemOp size = (s->cc_op - CC_OP_ADDB) & 3;
@@ -3772,8 +3778,7 @@ static void gen_sse(CPUX86State *env, DisasContext *s, int b,
 
                     /* Extract the LEN into a mask.  Lengths larger than
                        operand size get all ones.  */
-                    tcg_gen_shri_tl(cpu_A0, cpu_regs[s->vex_v], 8);
-                    tcg_gen_ext8u_tl(cpu_A0, cpu_A0);
+                    tcg_gen_extract_tl(cpu_A0, cpu_regs[s->vex_v], 8, 8);
                     tcg_gen_movcond_tl(TCG_COND_LEU, cpu_A0, cpu_A0, bound,
                                        cpu_A0, bound);
                     tcg_temp_free(bound);
@@ -3924,9 +3929,8 @@ static void gen_sse(CPUX86State *env, DisasContext *s, int b,
                             gen_compute_eflags(s);
                         }
                         carry_in = cpu_tmp0;
-                        tcg_gen_shri_tl(carry_in, cpu_cc_src,
-                                        ctz32(b == 0x1f6 ? CC_C : CC_O));
-                        tcg_gen_andi_tl(carry_in, carry_in, 1);
+                        tcg_gen_extract_tl(carry_in, cpu_cc_src,
+                                           ctz32(b == 0x1f6 ? CC_C : CC_O), 1);
                     }
 
                     switch (ot) {
@@ -5451,21 +5455,25 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
             rm = (modrm & 7) | REX_B(s);
 
             if (mod == 3) {
-                gen_op_mov_v_reg(ot, cpu_T0, rm);
-                switch (s_ot) {
-                case MO_UB:
-                    tcg_gen_ext8u_tl(cpu_T0, cpu_T0);
-                    break;
-                case MO_SB:
-                    tcg_gen_ext8s_tl(cpu_T0, cpu_T0);
-                    break;
-                case MO_UW:
-                    tcg_gen_ext16u_tl(cpu_T0, cpu_T0);
-                    break;
-                default:
-                case MO_SW:
-                    tcg_gen_ext16s_tl(cpu_T0, cpu_T0);
-                    break;
+                if (s_ot == MO_SB && byte_reg_is_xH(rm)) {
+                    tcg_gen_sextract_tl(cpu_T0, cpu_regs[rm - 4], 8, 8);
+                } else {
+                    gen_op_mov_v_reg(ot, cpu_T0, rm);
+                    switch (s_ot) {
+                    case MO_UB:
+                        tcg_gen_ext8u_tl(cpu_T0, cpu_T0);
+                        break;
+                    case MO_SB:
+                        tcg_gen_ext8s_tl(cpu_T0, cpu_T0);
+                        break;
+                    case MO_UW:
+                        tcg_gen_ext16u_tl(cpu_T0, cpu_T0);
+                        break;
+                    default:
+                    case MO_SW:
+                        tcg_gen_ext16s_tl(cpu_T0, cpu_T0);
+                        break;
+                    }
                 }
                 gen_op_mov_reg_v(d_ot, reg, cpu_T0);
             } else {
@@ -6810,21 +6818,18 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
                 ? s->cpuid_ext3_features & CPUID_EXT3_ABM
                 : s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_BMI1)) {
             int size = 8 << ot;
+            /* For lzcnt/tzcnt, C bit is defined related to the input. */
             tcg_gen_mov_tl(cpu_cc_src, cpu_T0);
             if (b & 1) {
                 /* For lzcnt, reduce the target_ulong result by the
                    number of zeros that we expect to find at the top.  */
-                gen_helper_clz(cpu_T0, cpu_T0);
+                tcg_gen_clzi_tl(cpu_T0, cpu_T0, TARGET_LONG_BITS);
                 tcg_gen_subi_tl(cpu_T0, cpu_T0, TARGET_LONG_BITS - size);
             } else {
-                /* For tzcnt, a zero input must return the operand size:
-                   force all bits outside the operand size to 1.  */
-                target_ulong mask = (target_ulong)-2 << (size - 1);
-                tcg_gen_ori_tl(cpu_T0, cpu_T0, mask);
-                gen_helper_ctz(cpu_T0, cpu_T0);
+                /* For tzcnt, a zero input must return the operand size.  */
+                tcg_gen_ctzi_tl(cpu_T0, cpu_T0, size);
             }
-            /* For lzcnt/tzcnt, C and Z bits are defined and are
-               related to the result.  */
+            /* For lzcnt/tzcnt, Z bit is defined related to the result.  */
             gen_op_update1_cc();
             set_cc_op(s, CC_OP_BMILGB + ot);
         } else {
@@ -6832,20 +6837,20 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
                to the input and not the result.  */
             tcg_gen_mov_tl(cpu_cc_dst, cpu_T0);
             set_cc_op(s, CC_OP_LOGICB + ot);
+
+            /* ??? The manual says that the output is undefined when the
+               input is zero, but real hardware leaves it unchanged, and
+               real programs appear to depend on that.  Accomplish this
+               by passing the output as the value to return upon zero.  */
             if (b & 1) {
                 /* For bsr, return the bit index of the first 1 bit,
                    not the count of leading zeros.  */
-                gen_helper_clz(cpu_T0, cpu_T0);
+                tcg_gen_xori_tl(cpu_T1, cpu_regs[reg], TARGET_LONG_BITS - 1);
+                tcg_gen_clz_tl(cpu_T0, cpu_T0, cpu_T1);
                 tcg_gen_xori_tl(cpu_T0, cpu_T0, TARGET_LONG_BITS - 1);
             } else {
-                gen_helper_ctz(cpu_T0, cpu_T0);
+                tcg_gen_ctz_tl(cpu_T0, cpu_T0, cpu_regs[reg]);
             }
-            /* ??? The manual says that the output is undefined when the
-               input is zero, but real hardware leaves it unchanged, and
-               real programs appear to depend on that.  */
-            tcg_gen_movi_tl(cpu_tmp0, 0);
-            tcg_gen_movcond_tl(TCG_COND_EQ, cpu_T0, cpu_cc_dst, cpu_tmp0,
-                               cpu_regs[reg], cpu_T0);
         }
         gen_op_mov_reg_v(ot, reg, cpu_T0);
         break;
@@ -8211,10 +8216,12 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
         }
 
         gen_ldst_modrm(env, s, modrm, ot, OR_TMP0, 0);
-        gen_helper_popcnt(cpu_T0, cpu_env, cpu_T0, tcg_const_i32(ot));
+        gen_extu(ot, cpu_T0);
+        tcg_gen_mov_tl(cpu_cc_src, cpu_T0);
+        tcg_gen_ctpop_tl(cpu_T0, cpu_T0);
         gen_op_mov_reg_v(ot, reg, cpu_T0);
 
-        set_cc_op(s, CC_OP_EFLAGS);
+        set_cc_op(s, CC_OP_POPCNT);
         break;
     case 0x10e ... 0x10f:
         /* 3DNow! instructions, ignore prefixes */
