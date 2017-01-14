@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: QEMU 2.0.50\n"
 "Report-Msgid-Bugs-To: qemu-devel@nongnu.org\n"
-"POT-Creation-Date: 2016-12-13 21:46+0000\n"
+"POT-Creation-Date: 2017-01-13 20:42+0100\n"
 "PO-Revision-Date: 2014-07-29 08:25+0200\n"
 "Last-Translator: Paolo Bonzini <pbonzini@redhat.com>\n"
 "Language-Team: Italian <it@li.org>\n"
@@ -16,74 +16,74 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
 
-#: ui/gtk.c:275
+#: ui/gtk.c:278
 msgid " - Press Ctrl+Alt+G to release grab"
 msgstr " - Premere Ctrl+Alt+G per rilasciare l'input"
 
-#: ui/gtk.c:279
+#: ui/gtk.c:282
 msgid " [Paused]"
 msgstr " [Pausa]"
 
-#: ui/gtk.c:1922
+#: ui/gtk.c:1937
 msgid "_Pause"
 msgstr "_Pausa"
 
-#: ui/gtk.c:1928
+#: ui/gtk.c:1943
 msgid "_Reset"
 msgstr "_Reset"
 
-#: ui/gtk.c:1931
+#: ui/gtk.c:1946
 msgid "Power _Down"
 msgstr "_Spegni"
 
-#: ui/gtk.c:1937
+#: ui/gtk.c:1952
 msgid "_Quit"
 msgstr "_Esci"
 
-#: ui/gtk.c:2029
+#: ui/gtk.c:2044
 msgid "_Fullscreen"
 msgstr "A t_utto schermo"
 
-#: ui/gtk.c:2032
+#: ui/gtk.c:2047
 msgid "_Copy"
 msgstr "_Copia"
 
-#: ui/gtk.c:2048
+#: ui/gtk.c:2063
 msgid "Zoom _In"
 msgstr "_Aumenta zoom"
 
-#: ui/gtk.c:2055
+#: ui/gtk.c:2070
 msgid "Zoom _Out"
 msgstr "_Riduci zoom"
 
-#: ui/gtk.c:2062
+#: ui/gtk.c:2077
 msgid "Best _Fit"
 msgstr "A_nnulla zoom"
 
-#: ui/gtk.c:2069
+#: ui/gtk.c:2084
 msgid "Zoom To _Fit"
 msgstr "Adatta alla _finestra"
 
-#: ui/gtk.c:2075
+#: ui/gtk.c:2090
 msgid "Grab On _Hover"
 msgstr "Cattura _automatica input"
 
-#: ui/gtk.c:2078
+#: ui/gtk.c:2093
 msgid "_Grab Input"
 msgstr "_Cattura input"
 
-#: ui/gtk.c:2107
+#: ui/gtk.c:2122
 msgid "Show _Tabs"
 msgstr "Mostra _tab"
 
-#: ui/gtk.c:2110
+#: ui/gtk.c:2125
 msgid "Detach Tab"
 msgstr "_Sposta in una nuova finestra"
 
-#: ui/gtk.c:2122
+#: ui/gtk.c:2137
 msgid "_Machine"
 msgstr "_Macchina virtuale"
 
-#: ui/gtk.c:2127
+#: ui/gtk.c:2142
 msgid "_View"
 msgstr "_Visualizza"
