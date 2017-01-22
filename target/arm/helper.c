@@ -464,7 +464,7 @@ static void dacr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
     ARMCPU *cpu = arm_env_get_cpu(env);
 
     raw_write(env, ri, value);
-    tlb_flush(CPU(cpu), 1); /* Flush TLB as domain not tracked in TLB */
+    tlb_flush(CPU(cpu)); /* Flush TLB as domain not tracked in TLB */
 }
 
 static void fcse_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
@@ -475,7 +475,7 @@ static void fcse_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
         /* Unlike real hardware the qemu TLB uses virtual addresses,
          * not modified virtual addresses, so this causes a TLB flush.
          */
-        tlb_flush(CPU(cpu), 1);
+        tlb_flush(CPU(cpu));
         raw_write(env, ri, value);
     }
 }
@@ -491,7 +491,7 @@ static void contextidr_write(CPUARMState *env, const ARMCPRegInfo *ri,
          * format) this register includes the ASID, so do a TLB flush.
          * For PMSA it is purely a process ID and no action is needed.
          */
-        tlb_flush(CPU(cpu), 1);
+        tlb_flush(CPU(cpu));
     }
     raw_write(env, ri, value);
 }
@@ -502,7 +502,7 @@ static void tlbiall_write(CPUARMState *env, const ARMCPRegInfo *ri,
     /* Invalidate all (TLBIALL) */
     ARMCPU *cpu = arm_env_get_cpu(env);
 
-    tlb_flush(CPU(cpu), 1);
+    tlb_flush(CPU(cpu));
 }
 
 static void tlbimva_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -520,7 +520,7 @@ static void tlbiasid_write(CPUARMState *env, const ARMCPRegInfo *ri,
     /* Invalidate by ASID (TLBIASID) */
     ARMCPU *cpu = arm_env_get_cpu(env);
 
-    tlb_flush(CPU(cpu), value == 0);
+    tlb_flush(CPU(cpu));
 }
 
 static void tlbimvaa_write(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -539,7 +539,7 @@ static void tlbiall_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
     CPUState *other_cs;
 
     CPU_FOREACH(other_cs) {
-        tlb_flush(other_cs, 1);
+        tlb_flush(other_cs);
     }
 }
 
@@ -549,7 +549,7 @@ static void tlbiasid_is_write(CPUARMState *env, const ARMCPRegInfo *ri,
     CPUState *other_cs;
 
     CPU_FOREACH(other_cs) {
-        tlb_flush(other_cs, value == 0);
+        tlb_flush(other_cs);
     }
 }
 
@@ -2304,7 +2304,7 @@ static void pmsav7_write(CPUARMState *env, const ARMCPRegInfo *ri,
     }
 
     u32p += env->cp15.c6_rgnr;
-    tlb_flush(CPU(cpu), 1); /* Mappings may have changed - purge! */
+    tlb_flush(CPU(cpu)); /* Mappings may have changed - purge! */
     *u32p = value;
 }
 
@@ -2449,7 +2449,7 @@ static void vmsa_ttbcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         /* With LPAE the TTBCR could result in a change of ASID
          * via the TTBCR.A1 bit, so do a TLB flush.
          */
-        tlb_flush(CPU(cpu), 1);
+        tlb_flush(CPU(cpu));
     }
     vmsa_ttbcr_raw_write(env, ri, value);
 }
@@ -2473,7 +2473,7 @@ static void vmsa_tcr_el1_write(CPUARMState *env, const ARMCPRegInfo *ri,
     TCR *tcr = raw_ptr(env, ri);
 
     /* For AArch64 the A1 bit could result in a change of ASID, so TLB flush. */
-    tlb_flush(CPU(cpu), 1);
+    tlb_flush(CPU(cpu));
     tcr->raw_tcr = value;
 }
 
@@ -2486,7 +2486,7 @@ static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     if (cpreg_field_is_64bit(ri)) {
         ARMCPU *cpu = arm_env_get_cpu(env);
 
-        tlb_flush(CPU(cpu), 1);
+        tlb_flush(CPU(cpu));
     }
     raw_write(env, ri, value);
 }
@@ -3154,7 +3154,7 @@ static void sctlr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     raw_write(env, ri, value);
     /* ??? Lots of these bits are not implemented.  */
     /* This may enable/disable the MMU, so do a TLB flush.  */
-    tlb_flush(CPU(cpu), 1);
+    tlb_flush(CPU(cpu));
 }
 
 static CPAccessResult fpexc32_access(CPUARMState *env, const ARMCPRegInfo *ri,
@@ -3622,7 +3622,7 @@ static void hcr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
      * HCR_DC Disables stage1 and enables stage2 translation
      */
     if ((raw_read(env, ri) ^ value) & (HCR_VM | HCR_PTW | HCR_DC)) {
-        tlb_flush(CPU(cpu), 1);
+        tlb_flush(CPU(cpu));
     }
     raw_write(env, ri, value);
 }
@@ -4065,6 +4065,13 @@ static const ARMCPRegInfo debug_cp_reginfo[] = {
     { .name = "DBGVCR",
       .cp = 14, .opc1 = 0, .crn = 0, .crm = 7, .opc2 = 0,
       .access = PL1_RW, .accessfn = access_tda,
+      .type = ARM_CP_NOP },
+    /* Dummy DBGVCR32_EL2 (which is only for a 64-bit hypervisor
+     * to save and restore a 32-bit guest's DBGVCR)
+     */
+    { .name = "DBGVCR32_EL2", .state = ARM_CP_STATE_AA64,
+      .opc0 = 2, .opc1 = 4, .crn = 0, .crm = 7, .opc2 = 0,
+      .access = PL2_RW, .accessfn = access_tda,
       .type = ARM_CP_NOP },
     /* Dummy MDCCINT_EL1, since we don't implement the Debug Communications
      * Channel but Linux may try to access this register. The 32-bit
@@ -6396,6 +6403,20 @@ static void arm_cpu_do_interrupt_aarch32(CPUState *cs)
             /* FIQ routed to monitor mode */
             new_mode = ARM_CPU_MODE_MON;
         }
+        offset = 4;
+        break;
+    case EXCP_VIRQ:
+        new_mode = ARM_CPU_MODE_IRQ;
+        addr = 0x18;
+        /* Disable IRQ and imprecise data aborts.  */
+        mask = CPSR_A | CPSR_I;
+        offset = 4;
+        break;
+    case EXCP_VFIQ:
+        new_mode = ARM_CPU_MODE_FIQ;
+        addr = 0x1c;
+        /* Disable FIQ, IRQ and imprecise data aborts.  */
+        mask = CPSR_A | CPSR_I | CPSR_F;
         offset = 4;
         break;
     case EXCP_SMC:

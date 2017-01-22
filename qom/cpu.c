@@ -270,8 +270,14 @@ static void cpu_common_reset(CPUState *cpu)
     cpu->exception_index = -1;
     cpu->crash_occurred = false;
 
-    for (i = 0; i < TB_JMP_CACHE_SIZE; ++i) {
-        atomic_set(&cpu->tb_jmp_cache[i], NULL);
+    if (tcg_enabled()) {
+        for (i = 0; i < TB_JMP_CACHE_SIZE; ++i) {
+            atomic_set(&cpu->tb_jmp_cache[i], NULL);
+        }
+
+#ifdef CONFIG_SOFTMMU
+        tlb_flush(cpu, 0);
+#endif
     }
 }
 
@@ -348,6 +354,8 @@ static void cpu_common_realizefn(DeviceState *dev, Error **errp)
 static void cpu_common_unrealizefn(DeviceState *dev, Error **errp)
 {
     CPUState *cpu = CPU(dev);
+    /* NOTE: latest generic point before the cpu is fully unrealized */
+    trace_fini_vcpu(cpu);
     cpu_exec_unrealizefn(cpu);
 }
 

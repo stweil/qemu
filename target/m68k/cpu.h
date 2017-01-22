@@ -37,6 +37,7 @@
 #define OS_DOUBLE   4
 #define OS_EXTENDED 5
 #define OS_PACKED   6
+#define OS_UNSIZED  7
 
 #define MAX_QREGS 32
 
@@ -110,6 +111,9 @@ typedef struct CPUM68KState {
     int pending_level;
 
     uint32_t qregs[MAX_QREGS];
+
+    /* Fields up to this point are cleared by a CPU reset */
+    struct {} end_reset_fields;
 
     CPU_COMMON
 
