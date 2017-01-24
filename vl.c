@@ -72,6 +72,7 @@ int main(int argc, char **argv)
 #include "hw/bt.h"
 #include "sysemu/watchdog.h"
 #include "hw/smbios/smbios.h"
+#include "hw/acpi/acpi.h"
 #include "hw/xen/xen.h"
 #include "hw/qdev.h"
 #include "hw/loader.h"
@@ -1641,16 +1642,6 @@ void vm_state_notify(int running, RunState state)
     }
 }
 
-/* reset/shutdown handler */
-
-typedef struct QEMUResetEntry {
-    QTAILQ_ENTRY(QEMUResetEntry) entry;
-    QEMUResetHandler *func;
-    void *opaque;
-} QEMUResetEntry;
-
-static QTAILQ_HEAD(reset_handlers, QEMUResetEntry) reset_handlers =
-    QTAILQ_HEAD_INITIALIZER(reset_handlers);
 static int reset_requested;
 static int shutdown_requested, shutdown_signal = -1;
 static pid_t shutdown_pid;
@@ -1738,38 +1729,6 @@ static int qemu_debug_requested(void)
     int r = debug_requested;
     debug_requested = 0;
     return r;
-}
-
-void qemu_register_reset(QEMUResetHandler *func, void *opaque)
-{
-    QEMUResetEntry *re = g_malloc0(sizeof(QEMUResetEntry));
-
-    re->func = func;
-    re->opaque = opaque;
-    QTAILQ_INSERT_TAIL(&reset_handlers, re, entry);
-}
-
-void qemu_unregister_reset(QEMUResetHandler *func, void *opaque)
-{
-    QEMUResetEntry *re;
-
-    QTAILQ_FOREACH(re, &reset_handlers, entry) {
-        if (re->func == func && re->opaque == opaque) {
-            QTAILQ_REMOVE(&reset_handlers, re, entry);
-            g_free(re);
-            return;
-        }
-    }
-}
-
-void qemu_devices_reset(void)
-{
-    QEMUResetEntry *re, *nre;
-
-    /* reset all devices */
-    QTAILQ_FOREACH_SAFE(re, &reset_handlers, entry, nre) {
-        re->func(re->opaque);
-    }
 }
 
 void qemu_system_reset(bool report)
@@ -3746,7 +3705,7 @@ int main(int argc, char **argv)
                 if (!opts) {
                     exit(1);
                 }
-                do_acpitable_option(opts);
+                acpi_table_add(opts, &error_fatal);
                 break;
             case QEMU_OPTION_smbios:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("smbios"),
@@ -3754,7 +3713,7 @@ int main(int argc, char **argv)
                 if (!opts) {
                     exit(1);
                 }
-                do_smbios_option(opts);
+                smbios_entry_add(opts, &error_fatal);
                 break;
             case QEMU_OPTION_fwcfg:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("fw_cfg"),
