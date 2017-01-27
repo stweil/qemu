@@ -1271,11 +1271,6 @@ static void qemu_cpu_kick_thread(CPUState *cpu)
         return;
     }
     cpu->thread_kicked = true;
-#ifdef CONFIG_DARWIN
-    if (hax_enabled()) {
-        cpu->exit_request = 1;
-    }
-#endif
     err = pthread_kill(cpu->thread->thread, SIG_IPI);
     if (err) {
         fprintf(stderr, "qemu:%s: %s", __func__, strerror(err));
@@ -1455,9 +1450,6 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
     static QemuCond *tcg_halt_cond;
     static QemuThread *tcg_cpu_thread;
 
-    if (hax_enabled())
-        hax_init_vcpu(cpu);
-
     /* share a single thread for all cpus with TCG */
     if (!tcg_cpu_thread) {
         cpu->thread = g_malloc0(sizeof(QemuThread));
@@ -1605,9 +1597,7 @@ int vm_stop_force_state(RunState state)
 void list_cpus(FILE *f, fprintf_function cpu_fprintf, const char *optarg)
 {
     /* XXX: implement xxx_cpu_list for targets that still miss it */
-#if defined(cpu_list_id)
-    cpu_list_id(f, cpu_fprintf, optarg);
-#elif defined(cpu_list)
+#if defined(cpu_list)
     cpu_list(f, cpu_fprintf); /* deprecated */
 #else
     printf("Target ignores cpu selection\n");
