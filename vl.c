@@ -189,6 +189,7 @@ bool boot_strict;
 uint8_t *boot_splash_filedata;
 size_t boot_splash_filedata_size;
 uint8_t qemu_extra_params_fw[2];
+int only_migratable; /* turn it off unless user states otherwise */
 
 int icount_align_option;
 
@@ -2996,6 +2997,18 @@ static int global_init_func(void *opaque, QemuOpts *opts, Error **errp)
     return 0;
 }
 
+static int qemu_read_default_config_file(void)
+{
+    int ret;
+
+    ret = qemu_read_config_file(CONFIG_QEMU_CONFDIR "/qemu.conf");
+    if (ret < 0 && ret != -ENOENT) {
+        return ret;
+    }
+
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int i;
@@ -3123,10 +3136,8 @@ int main(int argc, char **argv)
         }
     }
 
-    if (defconfig) {
-        int ret;
-        ret = qemu_read_default_config_files(userconfig);
-        if (ret < 0) {
+    if (defconfig && userconfig) {
+        if (qemu_read_default_config_file() < 0) {
             exit(1);
         }
     }
@@ -3920,6 +3931,9 @@ int main(int argc, char **argv)
                 }
                 incoming = optarg;
                 break;
+            case QEMU_OPTION_only_migratable:
+                only_migratable = 1;
+                break;
             case QEMU_OPTION_nodefaults:
                 has_defaults = 0;
                 break;
@@ -4562,8 +4576,6 @@ int main(int argc, char **argv)
 
     cpu_synchronize_all_post_init();
 
-    numa_post_machine_init();
-
     if (hax_enabled()) {
         hax_sync_vcpus();
     }
@@ -4588,6 +4600,9 @@ int main(int argc, char **argv)
                           device_init_func, NULL, NULL)) {
         exit(1);
     }
+
+    numa_post_machine_init();
+
     rom_reset_order_override();
 
     /* Did we create any drives that we failed to create a device for? */

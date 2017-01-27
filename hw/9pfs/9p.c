@@ -979,6 +979,7 @@ static void coroutine_fn v9fs_attach(void *opaque)
     size_t offset = 7;
     V9fsQID qid;
     ssize_t err;
+    Error *local_err = NULL;
 
     v9fs_string_init(&uname);
     v9fs_string_init(&aname);
@@ -1007,26 +1008,36 @@ static void coroutine_fn v9fs_attach(void *opaque)
         clunk_fid(s, fid);
         goto out;
     }
+
+    /*
+     * disable migration if we haven't done already.
+     * attach could get called multiple times for the same export.
+     */
+    if (!s->migration_blocker) {
+        error_setg(&s->migration_blocker,
+                   "Migration is disabled when VirtFS export path '%s' is mounted in the guest using mount_tag '%s'",
+                   s->ctx.fs_root ? s->ctx.fs_root : "NULL", s->tag);
+        err = migrate_add_blocker(s->migration_blocker, &local_err);
+        if (local_err) {
+            error_free(local_err);
+            error_free(s->migration_blocker);
+            s->migration_blocker = NULL;
+            clunk_fid(s, fid);
+            goto out;
+        }
+        s->root_fid = fid;
+    }
+
     err = pdu_marshal(pdu, offset, "Q", &qid);
     if (err < 0) {
         clunk_fid(s, fid);
         goto out;
     }
     err += offset;
+
     memcpy(&s->root_qid, &qid, sizeof(qid));
     trace_v9fs_attach_return(pdu->tag, pdu->id,
                              qid.type, qid.version, qid.path);
-    /*
-     * disable migration if we haven't done already.
-     * attach could get called multiple times for the same export.
-     */
-    if (!s->migration_blocker) {
-        s->root_fid = fid;
-        error_setg(&s->migration_blocker,
-                   "Migration is disabled when VirtFS export path '%s' is mounted in the guest using mount_tag '%s'",
-                   s->ctx.fs_root ? s->ctx.fs_root : "NULL", s->tag);
-        migrate_add_blocker(s->migration_blocker);
-    }
 out:
     put_fid(pdu, fidp);
 out_nofid:
@@ -1571,7 +1582,7 @@ out_nofid:
     v9fs_string_free(&name);
 }
 
-static void v9fs_fsync(void *opaque)
+static void coroutine_fn v9fs_fsync(void *opaque)
 {
     int err;
     int32_t fid;
@@ -1655,7 +1666,7 @@ static void v9fs_init_qiov_from_pdu(QEMUIOVector *qiov, V9fsPDU *pdu,
     if (is_write) {
         pdu->s->transport->init_out_iov_from_pdu(pdu, &iov, &niov);
     } else {
-        pdu->s->transport->init_in_iov_from_pdu(pdu, &iov, &niov, size);
+        pdu->s->transport->init_in_iov_from_pdu(pdu, &iov, &niov, size + skip);
     }
 
     qemu_iovec_init_external(&elem, iov, niov);
@@ -1685,8 +1696,8 @@ static int v9fs_xattr_read(V9fsState *s, V9fsPDU *pdu, V9fsFidState *fidp,
     }
     offset += err;
 
-    v9fs_init_qiov_from_pdu(&qiov_full, pdu, 0, read_count, false);
-    err = v9fs_pack(qiov_full.iov, qiov_full.niov, offset,
+    v9fs_init_qiov_from_pdu(&qiov_full, pdu, offset, read_count, false);
+    err = v9fs_pack(qiov_full.iov, qiov_full.niov, 0,
                     ((char *)fidp->fs.xattr.value) + off,
                     read_count);
     qemu_iovec_destroy(&qiov_full);
@@ -2337,7 +2348,7 @@ out_nofid:
     v9fs_string_free(&symname);
 }
 
-static void v9fs_flush(void *opaque)
+static void coroutine_fn v9fs_flush(void *opaque)
 {
     ssize_t err;
     int16_t tag;
@@ -3454,7 +3465,7 @@ int v9fs_device_realize_common(V9fsState *s, Error **errp)
     /* initialize pdu allocator */
     QLIST_INIT(&s->free_list);
     QLIST_INIT(&s->active_list);
-    for (i = 0; i < (MAX_REQ - 1); i++) {
+    for (i = 0; i < MAX_REQ; i++) {
         QLIST_INSERT_HEAD(&s->free_list, &s->pdus[i], next);
         s->pdus[i].s = s;
         s->pdus[i].idx = i;
