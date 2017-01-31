@@ -435,7 +435,7 @@ void serial_frequency(SerialState *s, uint32_t frequency)
 }
 
 /* If fd is zero, it means that the serial device uses the console */
-SerialState *serial_16450_init(int base, qemu_irq irq, CharDriverState *chr)
+SerialState *serial_16450_init(int base, qemu_irq irq, Chardev *chr)
 {
     SerialState *s;
 
@@ -466,7 +466,7 @@ SerialState *serial_16450_init(int base, qemu_irq irq, CharDriverState *chr)
     return s;
 }
 
-SerialState *serial_16550_init(int base, qemu_irq irq, CharDriverState *chr)
+SerialState *serial_16550_init(int base, qemu_irq irq, Chardev *chr)
 {
     SerialState *s;
     s = serial_16450_init(base, irq, chr);

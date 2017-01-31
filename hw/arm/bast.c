@@ -414,7 +414,7 @@ static void stcb_init(MachineState *machine)
 {
     MemoryRegion *sysmem = get_system_memory();
     STCBState *stcb;
-    CharDriverState *chr;
+    Chardev *chr;
     DeviceState *dev;
     DriveInfo *dinfo;
     NICInfo *nd;

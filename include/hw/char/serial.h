@@ -87,18 +87,18 @@ void serial_realize_core(SerialState *s, Error **errp);
 void serial_exit_core(SerialState *s);
 void serial_set_frequency(SerialState *s, uint32_t frequency);
 
-SerialState *serial_16550_init(int base, qemu_irq irq, CharDriverState *chr);
+SerialState *serial_16550_init(int base, qemu_irq irq, Chardev *chr);
 uint64_t serial_mm_read(void *opaque, hwaddr addr, unsigned size);
 void serial_mm_write(void *opaque, hwaddr addr,
                      uint64_t value, unsigned size);
 
 /* legacy pre qom */
 SerialState *serial_init(int base, qemu_irq irq, int baudbase,
-                         CharDriverState *chr, MemoryRegion *system_io);
+                         Chardev *chr, MemoryRegion *system_io);
 SerialState *serial_mm_init(MemoryRegion *address_space,
                             hwaddr base, int it_shift,
                             qemu_irq irq, int baudbase,
-                            CharDriverState *chr, enum device_endian end);
+                            Chardev *chr, enum device_endian end);
 
 /* serial-isa.c */
 #define TYPE_ISA_SERIAL "isa-serial"

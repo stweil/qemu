@@ -3623,7 +3623,7 @@ static void malta_fpga_display_event(void *opaque, int event)
 
 static void ar7_display_init(CPUMIPSState *env)
 {
-    CharDriverState *chr;
+    Chardev *chr;
 
     chr = qemu_chr_new("gpio", "vc:400x300");
     qemu_chr_fe_init(&ar7->gpio_display, chr, NULL);

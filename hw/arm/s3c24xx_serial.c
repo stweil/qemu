@@ -240,7 +240,7 @@ s3c24xx_serial_receive(void *opaque, const uint8_t *buf, int size)
  */
 struct s3c24xx_serial_dev_s *
 s3c24xx_serial_init(S3CState *soc,
-                    CharDriverState *chr,
+                    Chardev *chr,
                     hwaddr base_addr,
                     int irqn)
 {

@@ -70,7 +70,7 @@ struct s3c24xx_clkcon_state_s *s3c24xx_clkcon_init(S3CState *soc, hwaddr base_ad
 struct s3c24xx_timers_state_s *s3c24xx_timers_init(S3CState *soc, hwaddr base_addr, uint32_t tclk0, uint32_t tclk1);
 
 /* initialise a serial port controller */
-struct s3c24xx_serial_dev_s *s3c24xx_serial_init(S3CState *soc, CharDriverState *chr, hwaddr base_addr, int irqn);
+struct s3c24xx_serial_dev_s *s3c24xx_serial_init(S3CState *soc, Chardev *chr, hwaddr base_addr, int irqn);
 
 /* Initialise real time clock */
 struct s3c24xx_rtc_state_s *s3c24xx_rtc_init(hwaddr base_addr);
