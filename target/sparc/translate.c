@@ -2448,8 +2448,32 @@ static void gen_ldstub_asi(DisasContext *dc, TCGv dst, TCGv addr, int insn)
         gen_ldstub(dc, dst, addr, da.mem_idx);
         break;
     default:
+#if 0
         /* ??? Should be DAE_invalid_asi.  */
         gen_exception(dc, TT_DATA_ACCESS);
+#else
+        fprintf(stderr, "%s:%u - %s, ASIType = %d\n",
+                __FILE__, __LINE__, __func__, da.type);
+
+        {
+            TCGv_i32 r_asi = tcg_const_i32(da.asi);
+            TCGv_i32 r_mop = tcg_const_i32(MO_UB);
+            TCGv_i64 s64, t64;
+
+            save_state(dc);
+            t64 = tcg_temp_new_i64();
+            gen_helper_ld_asi(t64, cpu_env, addr, r_asi, r_mop);
+
+            s64 = tcg_const_i64(0xff);
+            gen_helper_st_asi(cpu_env, addr, s64, r_asi, r_mop);
+            tcg_temp_free_i64(s64);
+            tcg_temp_free_i32(r_mop);
+            tcg_temp_free_i32(r_asi);
+
+            tcg_gen_trunc_i64_tl(dst, t64);
+            tcg_temp_free_i64(t64);
+        }
+#endif
         break;
     }
 }
