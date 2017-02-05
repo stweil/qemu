@@ -13,22 +13,74 @@
 
 #include "qemu/osdep.h"
 #include "9p.h"
-#include "9p-xattr.h"
+#ifdef WIN32
+    //idea from http://mingw-users.1079350.n2.nabble.com/Undefined-reference-to-quot-lstat-quot-and-quot-S-ISLNK-quot-td5450984.html
+    #define lstat(path,buffer) stat(path,buffer)
+
+    #define mkdir(path,mode) mkdir(path)
+    #define getxattr(buffer,name,pointer,length) 0
+
+    //pretend success
+    #define setxattr(path,name,pointer,length,u) 0
+    #define fgetxattr(fd,name,buffer,length) 0
+
+    #define lchown(buffer,uid,gid) 0
+    #define readlink(buffer,buf,bufsz) 0
+    #define mknod(buffer,mode,u) 0
+    #define link(buffer,buffer1) 0
+    #define symlink(buffer,buffer1) 0
+
+    #define v9fs_get_xattr(ctx,path,name,value,size) 0
+    #define v9fs_list_xattr(ctx,path,value,size) 0 
+    #define v9fs_set_xattr(ctx,path,name,value,size,flags) 0
+    #define v9fs_remove_xattr(ctx,path,name) 0
+
+    static int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result) {
+        entry = readdir(dirp);
+        *result = entry;
+        if (!entry) {
+            return -1;
+        }
+       return 0;
+    }
+
+    //Can be done better...
+    static int statfs (const char *file, struct statfs *buf) {
+        memset(buf, 0, sizeof(struct statfs));
+        buf->f_type = 0x01021997; // V9FS_MAGIC 
+        buf->f_bsize = 4096;
+        buf->f_blocks = 4000;
+        buf->f_bfree = 3000;
+        buf->f_bavail = 2999;
+        buf->f_files = 1000;
+        buf->f_ffree = 800;
+        buf->f_namelen = NAME_MAX;
+        return 0;
+    }
+#else
+    #include "9p-xattr.h"
+#endif
 #include "fsdev/qemu-fsdev.h"   /* local_ops */
-#include <arpa/inet.h>
-#include <pwd.h>
-#include <grp.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include "qemu/xattr.h"
+#ifndef WIN32
+    #include <arpa/inet.h>
+    #include <pwd.h>
+    #include <grp.h>
+    #include <sys/socket.h>
+    #include <sys/un.h>
+    #include "qemu/xattr.h"
+#endif
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include <libgen.h>
-#include <linux/fs.h>
+#ifndef WIN32
+    #include <linux/fs.h>
+#endif
 #ifdef CONFIG_LINUX_MAGIC_H
 #include <linux/magic.h>
 #endif
-#include <sys/ioctl.h>
+#ifndef WIN32
+    #include <sys/ioctl.h>
+#endif
 
 #ifndef XFS_SUPER_MAGIC
 #define XFS_SUPER_MAGIC  0x58465342
@@ -124,7 +176,8 @@ static int local_lstat(FsContext *fs_ctx, V9fsPath *fs_path, struct stat *stbuf)
     char *path = fs_path->data;
 
     buffer = rpath(fs_ctx, path);
-    err =  lstat(buffer, stbuf);
+    err = lstat(buffer, stbuf);
+    printf("\nstate %s %d\n\n", buffer, err);
     if (err) {
         goto err_out;
     }
@@ -162,7 +215,7 @@ static int local_create_mapped_attr_dir(FsContext *ctx, const char *path)
     char *attr_dir;
     char *tmp_path = g_strdup(path);
 
-    attr_dir = g_strdup_printf("%s/%s/%s",
+    attr_dir = g_strdup_printf(DELIMITER_IN_PATH2,
              ctx->fs_root, dirname(tmp_path), VIRTFS_META_DIR);
 
     err = mkdir(attr_dir, 0700);
@@ -397,14 +450,18 @@ static int local_readdir_r(FsContext *ctx, V9fsFidOpenState *fs,
 again:
     ret = readdir_r(fs->dir, entry, result);
     if (ctx->export_flags & V9FS_SM_MAPPED) {
-        entry->d_type = DT_UNKNOWN;
+        #ifndef WIN32
+            entry->d_type = DT_UNKNOWN;
+        #endif
     } else if (ctx->export_flags & V9FS_SM_MAPPED_FILE) {
         if (!ret && *result != NULL &&
             !strcmp(entry->d_name, VIRTFS_META_DIR)) {
             /* skp the meta data directory */
             goto again;
         }
-        entry->d_type = DT_UNKNOWN;
+        #ifndef WIN32
+            entry->d_type = DT_UNKNOWN;
+        #endif
     }
     return ret;
 }
@@ -491,7 +548,7 @@ static int local_mknod(FsContext *fs_ctx, V9fsPath *dir_path,
     char *buffer = NULL;
 
     v9fs_string_init(&fullname);
-    v9fs_string_sprintf(&fullname, "%s/%s", dir_path->data, name);
+    v9fs_string_sprintf(&fullname, DELIMITER_IN_PATH, dir_path->data, name);
     path = fullname.data;
 
     /* Determine the security model */
@@ -552,7 +609,7 @@ static int local_mkdir(FsContext *fs_ctx, V9fsPath *dir_path,
     char *buffer = NULL;
 
     v9fs_string_init(&fullname);
-    v9fs_string_sprintf(&fullname, "%s/%s", dir_path->data, name);
+    v9fs_string_sprintf(&fullname, DELIMITER_IN_PATH, dir_path->data, name);
     path = fullname.data;
 
     /* Determine the security model */
@@ -610,7 +667,13 @@ static int local_fstat(FsContext *fs_ctx, int fid_type,
     int err, fd;
 
     if (fid_type == P9_FID_DIR) {
+        //Don't know if that's right... (on WIN32/mingw, DIR* has no fd entry)
+#ifdef WIN32
+        #warning "Could cause problems!"
+        fd = fs->fd;
+#else
         fd = dirfd(fs->dir);
+#endif
     } else {
         fd = fs->fd;
     }
@@ -661,7 +724,7 @@ static int local_open2(FsContext *fs_ctx, V9fsPath *dir_path, const char *name,
     flags |= O_NOFOLLOW;
 
     v9fs_string_init(&fullname);
-    v9fs_string_sprintf(&fullname, "%s/%s", dir_path->data, name);
+    v9fs_string_sprintf(&fullname, DELIMITER_IN_PATH, dir_path->data, name);
     path = fullname.data;
 
     /* Determine the security model */
@@ -732,7 +795,7 @@ static int local_symlink(FsContext *fs_ctx, const char *oldpath,
     char *buffer = NULL;
 
     v9fs_string_init(&fullname);
-    v9fs_string_sprintf(&fullname, "%s/%s", dir_path->data, name);
+    v9fs_string_sprintf(&fullname, DELIMITER_IN_PATH, dir_path->data, name);
     newpath = fullname.data;
 
     /* Determine the security model */
@@ -758,8 +821,10 @@ static int local_symlink(FsContext *fs_ctx, const char *oldpath,
             goto err_end;
         }
         close(fd);
-        /* Set cleint credentials in symlink's xattr */
-        credp->fc_mode = credp->fc_mode|S_IFLNK;
+        /* Set client credentials in symlink's xattr */
+        #ifndef WIN32
+            credp->fc_mode = credp->fc_mode|S_IFLNK;
+        #endif
         err = local_set_xattr(buffer, credp);
         if (err == -1) {
             serrno = errno;
@@ -788,7 +853,9 @@ static int local_symlink(FsContext *fs_ctx, const char *oldpath,
         }
         close(fd);
         /* Set cleint credentials in symlink's xattr */
-        credp->fc_mode = credp->fc_mode|S_IFLNK;
+	#ifndef WIN32
+            credp->fc_mode = credp->fc_mode|S_IFLNK;
+        #endif
         err = local_set_mapped_file_attr(fs_ctx, newpath, credp);
         if (err == -1) {
             serrno = errno;
@@ -833,7 +900,7 @@ static int local_link(FsContext *ctx, V9fsPath *oldpath,
     char *buffer, *buffer1;
 
     v9fs_string_init(&newpath);
-    v9fs_string_sprintf(&newpath, "%s/%s", dirpath->data, name);
+    v9fs_string_sprintf(&newpath, DELIMITER_IN_PATH, dirpath->data, name);
 
     buffer = rpath(ctx, oldpath->data);
     buffer1 = rpath(ctx, newpath.data);
@@ -934,7 +1001,12 @@ static int local_utimensat(FsContext *s, V9fsPath *fs_path,
     char *path = fs_path->data;
 
     buffer = rpath(s, path);
+#ifdef WIN32
+    #warning "Could cause problems!"
+    ret = 0;
+#else
     ret = qemu_utimens(buffer, buf);
+#endif
     g_free(buffer);
     return ret;
 }
@@ -957,7 +1029,7 @@ static int local_remove(FsContext *ctx, const char *path)
          * directory
          */
         if (S_ISDIR(stbuf.st_mode)) {
-            buffer = g_strdup_printf("%s/%s/%s", ctx->fs_root,
+            buffer = g_strdup_printf(DELIMITER_IN_PATH2, ctx->fs_root,
                                      path, VIRTFS_META_DIR);
             err = remove(buffer);
             g_free(buffer);
@@ -998,7 +1070,12 @@ static int local_fsync(FsContext *ctx, int fid_type,
     int fd;
 
     if (fid_type == P9_FID_DIR) {
+#ifdef WIN32
+        #warning "Could cause problems!"
+        fd = fs->fd;
+#else
         fd = dirfd(fs->dir);
+#endif
     } else {
         fd = fs->fd;
     }
@@ -1058,7 +1135,7 @@ static int local_name_to_path(FsContext *ctx, V9fsPath *dir_path,
                               const char *name, V9fsPath *target)
 {
     if (dir_path) {
-        v9fs_string_sprintf((V9fsString *)target, "%s/%s",
+        v9fs_string_sprintf((V9fsString *)target, DELIMITER_IN_PATH,
                             dir_path->data, name);
     } else {
         v9fs_string_sprintf((V9fsString *)target, "%s", name);
@@ -1078,8 +1155,8 @@ static int local_renameat(FsContext *ctx, V9fsPath *olddir,
     v9fs_string_init(&old_full_name);
     v9fs_string_init(&new_full_name);
 
-    v9fs_string_sprintf(&old_full_name, "%s/%s", olddir->data, old_name);
-    v9fs_string_sprintf(&new_full_name, "%s/%s", newdir->data, new_name);
+    v9fs_string_sprintf(&old_full_name, DELIMITER_IN_PATH, olddir->data, old_name);
+    v9fs_string_sprintf(&new_full_name, DELIMITER_IN_PATH, newdir->data, new_name);
 
     ret = local_rename(ctx, old_full_name.data, new_full_name.data);
     v9fs_string_free(&old_full_name);
@@ -1096,14 +1173,14 @@ static int local_unlinkat(FsContext *ctx, V9fsPath *dir,
 
     v9fs_string_init(&fullname);
 
-    v9fs_string_sprintf(&fullname, "%s/%s", dir->data, name);
+    v9fs_string_sprintf(&fullname, DELIMITER_IN_PATH, dir->data, name);
     if (ctx->export_flags & V9FS_SM_MAPPED_FILE) {
         if (flags == AT_REMOVEDIR) {
             /*
              * If directory remove .virtfs_metadata contained in the
              * directory
              */
-            buffer = g_strdup_printf("%s/%s/%s", ctx->fs_root,
+            buffer = g_strdup_printf(DELIMITER_IN_PATH2, ctx->fs_root,
                                      fullname.data, VIRTFS_META_DIR);
             ret = remove(buffer);
             g_free(buffer);
@@ -1173,6 +1250,9 @@ static int local_init(FsContext *ctx)
     int err = 0;
     struct statfs stbuf;
 
+#ifdef WIN32
+    ctx->xops = 0;
+#else
     if (ctx->export_flags & V9FS_SM_PASSTHROUGH) {
         ctx->xops = passthrough_xattr_ops;
     } else if (ctx->export_flags & V9FS_SM_MAPPED) {
@@ -1186,6 +1266,7 @@ static int local_init(FsContext *ctx)
          */
         ctx->xops = passthrough_xattr_ops;
     }
+#endif
     ctx->export_flags |= V9FS_PATHNAME_FSCONTEXT;
 #ifdef FS_IOC_GETVERSION
     /*
