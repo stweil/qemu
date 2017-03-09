@@ -2325,7 +2325,6 @@ static const struct SCSIBusInfo megasas_scsi_info = {
 
 static void megasas_scsi_realize(PCIDevice *dev, Error **errp)
 {
-    DeviceState *d = DEVICE(dev);
     MegasasState *s = MEGASAS(dev);
     MegasasBaseClass *b = MEGASAS_DEVICE_GET_CLASS(s);
     uint8_t *pci_conf;
@@ -2367,9 +2366,11 @@ static void megasas_scsi_realize(PCIDevice *dev, Error **errp)
 
     if (megasas_use_msix(s) &&
         msix_init(dev, 15, &s->mmio_io, b->mmio_bar, 0x2000,
-                  &s->mmio_io, b->mmio_bar, 0x3800, 0x68)) {
+                  &s->mmio_io, b->mmio_bar, 0x3800, 0x68, NULL)) {
+        /* TODO: check msix_init's error, and should fail on msix=on */
         s->msix = ON_OFF_AUTO_OFF;
     }
+
     if (pci_is_express(dev)) {
         pcie_endpoint_cap_init(dev, 0xa0);
     }
@@ -2424,9 +2425,6 @@ static void megasas_scsi_realize(PCIDevice *dev, Error **errp)
 
     scsi_bus_new(&s->bus, sizeof(s->bus), DEVICE(dev),
                  &megasas_scsi_info, NULL);
-    if (!d->hotplugged) {
-        scsi_bus_legacy_handle_cmdline(&s->bus, errp);
-    }
 }
 
 static Property megasas_properties_gen1[] = {

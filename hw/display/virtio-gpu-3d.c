@@ -77,10 +77,18 @@ static void virgl_cmd_resource_unref(VirtIOGPU *g,
                                      struct virtio_gpu_ctrl_command *cmd)
 {
     struct virtio_gpu_resource_unref unref;
+    struct iovec *res_iovs = NULL;
+    int num_iovs = 0;
 
     VIRTIO_GPU_FILL_CMD(unref);
     trace_virtio_gpu_cmd_res_unref(unref.resource_id);
 
+    virgl_renderer_resource_detach_iov(unref.resource_id,
+                                       &res_iovs,
+                                       &num_iovs);
+    if (res_iovs != NULL && num_iovs != 0) {
+        virtio_gpu_cleanup_mapping_iov(res_iovs, num_iovs);
+    }
     virgl_renderer_resource_unref(unref.resource_id);
 }
 
@@ -169,16 +177,15 @@ static void virgl_cmd_set_scanout(VirtIOGPU *g,
         qemu_console_resize(g->scanout[ss.scanout_id].con,
                             ss.r.width, ss.r.height);
         virgl_renderer_force_ctx_0();
-        dpy_gl_scanout(g->scanout[ss.scanout_id].con, info.tex_id,
-                       info.flags & 1 /* FIXME: Y_0_TOP */,
-                       info.width, info.height,
-                       ss.r.x, ss.r.y, ss.r.width, ss.r.height);
+        dpy_gl_scanout_texture(g->scanout[ss.scanout_id].con, info.tex_id,
+                               info.flags & 1 /* FIXME: Y_0_TOP */,
+                               info.width, info.height,
+                               ss.r.x, ss.r.y, ss.r.width, ss.r.height);
     } else {
         if (ss.scanout_id != 0) {
             dpy_gfx_replace_surface(g->scanout[ss.scanout_id].con, NULL);
         }
-        dpy_gl_scanout(g->scanout[ss.scanout_id].con, 0, false,
-                       0, 0, 0, 0, 0, 0);
+        dpy_gl_scanout_disable(g->scanout[ss.scanout_id].con);
     }
     g->scanout[ss.scanout_id].resource_id = ss.resource_id;
 }
@@ -589,7 +596,7 @@ void virtio_gpu_virgl_reset(VirtIOGPU *g)
         if (i != 0) {
             dpy_gfx_replace_surface(g->scanout[i].con, NULL);
         }
-        dpy_gl_scanout(g->scanout[i].con, 0, false, 0, 0, 0, 0, 0, 0);
+        dpy_gl_scanout_disable(g->scanout[i].con);
     }
 }
 

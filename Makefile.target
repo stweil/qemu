@@ -65,6 +65,7 @@ endif
 
 $(QEMU_PROG).stp-installed: $(BUILD_DIR)/trace-events-all
 	$(call quiet-command,$(TRACETOOL) \
+		--group=all \
 		--format=stap \
 		--backends=$(TRACE_BACKENDS) \
 		--binary=$(bindir)/$(QEMU_PROG) \
@@ -74,6 +75,7 @@ $(QEMU_PROG).stp-installed: $(BUILD_DIR)/trace-events-all
 
 $(QEMU_PROG).stp: $(BUILD_DIR)/trace-events-all
 	$(call quiet-command,$(TRACETOOL) \
+		--group=all \
 		--format=stap \
 		--backends=$(TRACE_BACKENDS) \
 		--binary=$(realpath .)/$(QEMU_PROG) \
@@ -83,6 +85,7 @@ $(QEMU_PROG).stp: $(BUILD_DIR)/trace-events-all
 
 $(QEMU_PROG)-simpletrace.stp: $(BUILD_DIR)/trace-events-all
 	$(call quiet-command,$(TRACETOOL) \
+		--group=all \
 		--format=simpletrace-stap \
 		--backends=$(TRACE_BACKENDS) \
 		--probe-prefix=qemu.$(TARGET_TYPE).$(TARGET_NAME) \
@@ -192,31 +195,36 @@ all-obj-y := $(obj-y)
 target-obj-y :=
 block-obj-y :=
 common-obj-y :=
+chardev-obj-y :=
 include $(SRC_PATH)/Makefile.objs
 dummy := $(call unnest-vars,,target-obj-y)
 target-obj-y-save := $(target-obj-y)
 dummy := $(call unnest-vars,.., \
                block-obj-y \
                block-obj-m \
+               chardev-obj-y \
                crypto-obj-y \
                crypto-aes-obj-y \
                qom-obj-y \
                io-obj-y \
                common-obj-y \
-               common-obj-m)
+               common-obj-m \
+               trace-obj-y)
 target-obj-y := $(target-obj-y-save)
 all-obj-y += $(common-obj-y)
 all-obj-y += $(target-obj-y)
 all-obj-y += $(qom-obj-y)
-all-obj-$(CONFIG_SOFTMMU) += $(block-obj-y)
+all-obj-$(CONFIG_SOFTMMU) += $(block-obj-y) $(chardev-obj-y)
 all-obj-$(CONFIG_USER_ONLY) += $(crypto-aes-obj-y)
 all-obj-$(CONFIG_SOFTMMU) += $(crypto-obj-y)
 all-obj-$(CONFIG_SOFTMMU) += $(io-obj-y)
 
 $(QEMU_PROG_BUILD): config-devices.mak
 
+COMMON_LDADDS = $(trace-obj-y) ../libqemuutil.a ../libqemustub.a
+
 # build either PROG or PROGW
-$(QEMU_PROG_BUILD): $(all-obj-y) ../libqemuutil.a ../libqemustub.a
+$(QEMU_PROG_BUILD): $(all-obj-y) $(COMMON_LDADDS)
 	$(call LINK, $(filter-out %.mak, $^))
 ifdef CONFIG_DARWIN
 	$(call quiet-command,Rez -append $(SRC_PATH)/pc-bios/qemu.rsrc -o $@,"REZ","$(TARGET_DIR)$@")

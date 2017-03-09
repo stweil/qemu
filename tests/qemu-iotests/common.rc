@@ -172,7 +172,7 @@ _make_test_img()
 
     # Start an NBD server on the image file, which is what we'll be talking to
     if [ $IMGPROTO = "nbd" ]; then
-        eval "$QEMU_NBD -v -t -b 127.0.0.1 -p 10810 -f $IMGFMT  $TEST_IMG_FILE &"
+        eval "$QEMU_NBD -v -t -b 127.0.0.1 -p 10810 -f $IMGFMT  $TEST_IMG_FILE >/dev/null &"
         sleep 1 # FIXME: qemu-nbd needs to be listening before we continue
     fi
 }
@@ -193,11 +193,11 @@ _cleanup_test_img()
     case "$IMGPROTO" in
 
         nbd)
-            if [ -f "${TEST_DIR}/qemu-nbd.pid" ]; then
+            if [ -f "${QEMU_TEST_DIR}/qemu-nbd.pid" ]; then
                 local QEMU_NBD_PID
-                read QEMU_NBD_PID < "${TEST_DIR}/qemu-nbd.pid"
+                read QEMU_NBD_PID < "${QEMU_TEST_DIR}/qemu-nbd.pid"
                 kill ${QEMU_NBD_PID}
-                rm -f "${TEST_DIR}/qemu-nbd.pid"
+                rm -f "${QEMU_TEST_DIR}/qemu-nbd.pid"
             fi
             rm -f "$TEST_IMG_FILE"
             ;;
@@ -355,6 +355,17 @@ _supported_fmt()
     _notrun "not suitable for this image format: $IMGFMT"
 }
 
+# tests whether $IMGFMT is one of the unsupported image format for a test
+#
+_unsupported_fmt()
+{
+    for f; do
+        if [ "$f" = "$IMGFMT" ]; then
+            _notrun "not suitable for this image format: $IMGFMT"
+        fi
+    done
+}
+
 # tests whether $IMGPROTO is one of the supported image protocols for a test
 #
 _supported_proto()
@@ -366,6 +377,18 @@ _supported_proto()
     done
 
     _notrun "not suitable for this image protocol: $IMGPROTO"
+}
+
+# tests whether $IMGPROTO is specified as an unsupported image protocol for a test
+#
+_unsupported_proto()
+{
+    for f; do
+        if [ "$f" = "$IMGPROTO" ]; then
+            _notrun "not suitable for this image protocol: $IMGPROTO"
+            return
+        fi
+    done
 }
 
 # tests whether the host OS is one of the supported OSes for a test

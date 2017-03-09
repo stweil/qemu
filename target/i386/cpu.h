@@ -1213,7 +1213,7 @@ struct X86CPU {
     bool enforce_cpuid;
     bool expose_kvm;
     bool migratable;
-    bool host_features;
+    bool max_features; /* Enable all supported features automatically */
     uint32_t apic_id;
 
     /* Enables publishing of TSC increment and Local APIC bus frequencies to
@@ -1256,6 +1256,9 @@ struct X86CPU {
 
     /* if true override the phys_bits value with a value read from the host */
     bool host_phys_bits;
+
+    /* Stop SMI delivery for migration compatibility with old machines */
+    bool kvm_no_smi_migration;
 
     /* Number of physical address bits supported */
     uint32_t phys_bits;
@@ -1419,6 +1422,8 @@ floatx80 cpu_set_fp80(uint64_t mant, uint16_t upper);
 void cpu_x86_load_seg(CPUX86State *s, int seg_reg, int selector);
 void cpu_x86_fsave(CPUX86State *s, target_ulong ptr, int data32);
 void cpu_x86_frstor(CPUX86State *s, target_ulong ptr, int data32);
+void cpu_x86_fxsave(CPUX86State *s, target_ulong ptr);
+void cpu_x86_fxrstor(CPUX86State *s, target_ulong ptr);
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
    signal handlers to inform the virtual CPU of exceptions. non zero
@@ -1623,8 +1628,9 @@ void helper_lock_init(void);
 
 /* svm_helper.c */
 void cpu_svm_check_intercept_param(CPUX86State *env1, uint32_t type,
-                                   uint64_t param);
-void QEMU_NORETURN cpu_vmexit(CPUX86State *nenv, uint32_t exit_code, uint64_t exit_info_1);
+                                   uint64_t param, uintptr_t retaddr);
+void QEMU_NORETURN cpu_vmexit(CPUX86State *nenv, uint32_t exit_code,
+                              uint64_t exit_info_1, uintptr_t retaddr);
 
 /* seg_helper.c */
 void do_interrupt_x86_hardirq(CPUX86State *env, int intno, int is_hw);

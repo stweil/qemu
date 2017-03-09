@@ -164,6 +164,14 @@ struct target_sockaddr_in {
                 sizeof(struct target_in_addr)];
 };
 
+struct target_sockaddr_in6 {
+    uint16_t sin6_family;
+    uint16_t sin6_port; /* big endian */
+    uint32_t sin6_flowinfo; /* big endian */
+    struct in6_addr sin6_addr; /* IPv6 address, big endian */
+    uint32_t sin6_scope_id;
+};
+
 struct target_sock_filter {
     abi_ushort code;
     uint8_t jt;
@@ -1086,6 +1094,10 @@ struct target_pollfd {
 
 #define TARGET_FIBMAP     TARGET_IO(0x00,1)  /* bmap access */
 #define TARGET_FIGETBSZ   TARGET_IO(0x00,2)  /* get the block size used for bmap */
+
+#define TARGET_FICLONE    TARGET_IOW(0x94, 9, int)
+#define TARGET_FICLONERANGE TARGET_IOW(0x94, 13, struct file_clone_range)
+
 /* Note that the ioctl numbers claim type "long" but the actual type
  * used by the kernel is "int".
  */

@@ -105,6 +105,7 @@
 #define GDK_KEY_g GDK_g
 #define GDK_KEY_q GDK_q
 #define GDK_KEY_plus GDK_plus
+#define GDK_KEY_equal GDK_equal
 #define GDK_KEY_minus GDK_minus
 #define GDK_KEY_Pause GDK_Pause
 #define GDK_KEY_Delete GDK_Delete
@@ -668,7 +669,7 @@ static const DisplayChangeListenerOps dcl_gl_area_ops = {
     .dpy_gl_ctx_destroy      = gd_gl_area_destroy_context,
     .dpy_gl_ctx_make_current = gd_gl_area_make_current,
     .dpy_gl_ctx_get_current  = gd_gl_area_get_current_context,
-    .dpy_gl_scanout          = gd_gl_area_scanout,
+    .dpy_gl_scanout_texture  = gd_gl_area_scanout_texture,
     .dpy_gl_update           = gd_gl_area_scanout_flush,
 };
 
@@ -687,7 +688,8 @@ static const DisplayChangeListenerOps dcl_egl_ops = {
     .dpy_gl_ctx_destroy      = qemu_egl_destroy_context,
     .dpy_gl_ctx_make_current = gd_egl_make_current,
     .dpy_gl_ctx_get_current  = qemu_egl_get_current_context,
-    .dpy_gl_scanout          = gd_egl_scanout,
+    .dpy_gl_scanout_disable  = gd_egl_scanout_disable,
+    .dpy_gl_scanout_texture  = gd_egl_scanout_texture,
     .dpy_gl_update           = gd_egl_scanout_flush,
 };
 
@@ -1007,6 +1009,10 @@ static gboolean gd_button_event(GtkWidget *widget, GdkEventButton *button,
         btn = INPUT_BUTTON_MIDDLE;
     } else if (button->button == 3) {
         btn = INPUT_BUTTON_RIGHT;
+    } else if (button->button == 8) {
+        btn = INPUT_BUTTON_SIDE;
+    } else if (button->button == 9) {
+        btn = INPUT_BUTTON_EXTRA;
     } else {
         return TRUE;
     }
@@ -1027,6 +1033,19 @@ static gboolean gd_scroll_event(GtkWidget *widget, GdkEventScroll *scroll,
         btn = INPUT_BUTTON_WHEEL_UP;
     } else if (scroll->direction == GDK_SCROLL_DOWN) {
         btn = INPUT_BUTTON_WHEEL_DOWN;
+#if GTK_CHECK_VERSION(3, 4, 0)
+    } else if (scroll->direction == GDK_SCROLL_SMOOTH) {
+        gdouble delta_x, delta_y;
+        if (!gdk_event_get_scroll_deltas((GdkEvent *)scroll,
+                                         &delta_x, &delta_y)) {
+            return TRUE;
+        }
+        if (delta_y > 0) {
+            btn = INPUT_BUTTON_WHEEL_DOWN;
+        } else {
+            btn = INPUT_BUTTON_WHEEL_UP;
+        }
+#endif
     } else {
         return TRUE;
     }
@@ -1323,6 +1342,12 @@ static void gd_menu_zoom_in(GtkMenuItem *item, void *opaque)
     vc->gfx.scale_y += VC_SCALE_STEP;
 
     gd_update_windowsize(vc);
+}
+
+static void gd_accel_zoom_in(void *opaque)
+{
+    GtkDisplayState *s = opaque;
+    gtk_menu_item_activate(GTK_MENU_ITEM(s->zoom_in_item));
 }
 
 static void gd_menu_zoom_out(GtkMenuItem *item, void *opaque)
@@ -1715,8 +1740,6 @@ static void gd_vc_chr_set_echo(Chardev *chr, bool echo)
 
 static int nb_vcs;
 static Chardev *vcs[MAX_VCS];
-static const CharDriver gd_vc_driver;
-
 static void gd_vc_open(Chardev *chr,
                        ChardevBackend *backend,
                        bool *be_opened,
@@ -1739,6 +1762,7 @@ static void char_gd_vc_class_init(ObjectClass *oc, void *data)
 {
     ChardevClass *cc = CHARDEV_CLASS(oc);
 
+    cc->parse = qemu_chr_parse_vc;
     cc->open = gd_vc_open;
     cc->chr_write = gd_vc_chr_write;
     cc->chr_set_echo = gd_vc_chr_set_echo;
@@ -1749,11 +1773,6 @@ static const TypeInfo char_gd_vc_type_info = {
     .parent = TYPE_CHARDEV,
     .instance_size = sizeof(VCChardev),
     .class_init = char_gd_vc_class_init,
-};
-
-static const CharDriver gd_vc_driver = {
-    .kind = CHARDEV_BACKEND_KIND_VC,
-    .parse = qemu_chr_parse_vc,
 };
 
 static gboolean gd_vc_in(VteTerminal *terminal, gchar *text, guint size,
@@ -2092,6 +2111,8 @@ static GtkWidget *gd_create_menu_view(GtkDisplayState *s)
                                  "<QEMU>/View/Zoom In");
     gtk_accel_map_add_entry("<QEMU>/View/Zoom In", GDK_KEY_plus,
                             HOTKEY_MODIFIERS);
+    gtk_accel_group_connect(s->accel_group, GDK_KEY_equal, HOTKEY_MODIFIERS, 0,
+            g_cclosure_new_swap(G_CALLBACK(gd_accel_zoom_in), s, NULL));
     gtk_menu_shell_append(GTK_MENU_SHELL(view_menu), s->zoom_in_item);
 
     s->zoom_out_item = gtk_menu_item_new_with_mnemonic(_("Zoom _Out"));
@@ -2180,11 +2201,12 @@ static void gd_set_keycode_type(GtkDisplayState *s)
     GdkDisplay *display = gtk_widget_get_display(s->window);
     if (GDK_IS_X11_DISPLAY(display)) {
         Display *x11_display = gdk_x11_display_get_xdisplay(display);
-        XkbDescPtr desc = XkbGetKeyboard(x11_display, XkbGBN_AllComponentsMask,
-                                         XkbUseCoreKbd);
+        XkbDescPtr desc = XkbGetMap(x11_display, XkbGBN_AllComponentsMask,
+                                    XkbUseCoreKbd);
         char *keycodes = NULL;
 
-        if (desc && desc->names) {
+        if (desc &&
+            (XkbGetNames(x11_display, XkbKeycodesNameMask, desc) == Success)) {
             keycodes = XGetAtomName(x11_display, desc->names->keycodes);
         }
         if (keycodes == NULL) {
@@ -2232,8 +2254,12 @@ void gtk_display_init(DisplayState *ds, bool full_screen, bool grab_on_hover)
 
     s->free_scale = FALSE;
 
-    /* LC_MESSAGES only. See early_gtk_display_init() for details */
+    /* Mostly LC_MESSAGES only. See early_gtk_display_init() for details. For
+     * LC_CTYPE, we need to make sure that non-ASCII characters are considered
+     * printable, but without changing any of the character classes to make
+     * sure that we don't accidentally break implicit assumptions.  */
     setlocale(LC_MESSAGES, "");
+    setlocale(LC_CTYPE, "C.UTF-8");
     bindtextdomain("qemu", CONFIG_QEMU_LOCALEDIR);
     textdomain("qemu");
 
@@ -2353,6 +2379,5 @@ void early_gtk_display_init(int opengl)
 
 #if defined(CONFIG_VTE)
     type_register(&char_gd_vc_type_info);
-    register_char_driver(&gd_vc_driver);
 #endif
 }

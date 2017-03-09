@@ -865,11 +865,14 @@
 #        side, this process is called COarse-Grain LOck Stepping (COLO) for
 #        Non-stop Service. (since 2.8)
 #
+# @release-ram: if enabled, qemu will free the migrated ram pages on the source
+#        during postcopy-ram migration. (since 2.9)
+#
 # Since: 1.2
 ##
 { 'enum': 'MigrationCapability',
   'data': ['xbzrle', 'rdma-pin-all', 'auto-converge', 'zero-blocks',
-           'compress', 'events', 'postcopy-ram', 'x-colo'] }
+           'compress', 'events', 'postcopy-ram', 'x-colo', 'release-ram'] }
 
 ##
 # @MigrationCapabilityStatus:
@@ -1190,10 +1193,12 @@
 #
 # @completed: finish the process of failover
 #
+# @relaunch: restart the failover process, from 'none' -> 'completed' (Since 2.9)
+#
 # Since: 2.8
 ##
 { 'enum': 'FailoverStatus',
-  'data': [ 'none', 'require', 'active', 'completed'] }
+  'data': [ 'none', 'require', 'active', 'completed', 'relaunch' ] }
 
 ##
 # @x-colo-lost-heartbeat:
@@ -1422,10 +1427,23 @@
 #
 # @thread-id: ID of the underlying host thread
 #
+# @poll-max-ns: maximum polling time in ns, 0 means polling is disabled
+#               (since 2.9)
+#
+# @poll-grow: how many ns will be added to polling time, 0 means that it's not
+#             configured (since 2.9)
+#
+# @poll-shrink: how many ns will be removed from polling time, 0 means that
+#               it's not configured (since 2.9)
+#
 # Since: 2.0
 ##
 { 'struct': 'IOThreadInfo',
-  'data': {'id': 'str', 'thread-id': 'int'} }
+  'data': {'id': 'str',
+           'thread-id': 'int',
+           'poll-max-ns': 'int',
+           'poll-grow': 'int',
+           'poll-shrink': 'int' } }
 
 ##
 # @query-iothreads:
@@ -1506,7 +1524,8 @@
 #
 # The network connection information for server
 #
-# @auth: #optional authentication method
+# @auth: #optional authentication method used for
+#        the plain (non-websocket) VNC server
 #
 # Since: 2.1
 ##
@@ -1597,6 +1616,25 @@
             'tls-plain', 'x509-plain',
             'tls-sasl',  'x509-sasl' ] }
 
+
+##
+# @VncServerInfo2:
+#
+# The network connection information for server
+#
+# @auth: The current authentication type used by the servers
+#
+# @vencrypt: #optional The vencrypt sub authentication type used by the
+#            servers, only specified in case auth == vencrypt.
+#
+# Since: 2.9
+##
+{ 'struct': 'VncServerInfo2',
+  'base': 'VncBasicInfo',
+  'data': { 'auth'      : 'VncPrimaryAuth',
+            '*vencrypt' : 'VncVencryptSubAuth' } }
+
+
 ##
 # @VncInfo2:
 #
@@ -1612,9 +1650,9 @@
 # @clients: A list of @VncClientInfo of all currently connected clients.
 #           The list can be empty, for obvious reasons.
 #
-# @auth: The current authentication type used by the server
+# @auth: The current authentication type used by the non-websockets servers
 #
-# @vencrypt: #optional The vencrypt sub authentication type used by the server,
+# @vencrypt: #optional The vencrypt authentication type used by the servers,
 #            only specified in case auth == vencrypt.
 #
 # @display: #optional The display device the vnc server is linked to.
@@ -1623,7 +1661,7 @@
 ##
 { 'struct': 'VncInfo2',
   'data': { 'id'        : 'str',
-            'server'    : ['VncBasicInfo'],
+            'server'    : ['VncServerInfo2'],
             'clients'   : ['VncClientInfo'],
             'auth'      : 'VncPrimaryAuth',
             '*vencrypt' : 'VncVencryptSubAuth',
@@ -3934,6 +3972,15 @@
     'opts':  'NetLegacyOptions' } }
 
 ##
+# @NetLegacyOptionsType:
+#
+# Since: 1.2
+##
+{ 'enum': 'NetLegacyOptionsType',
+  'data': ['none', 'nic', 'user', 'tap', 'l2tpv3', 'socket', 'vde',
+           'dump', 'bridge', 'netmap', 'vhost-user'] }
+
+##
 # @NetLegacyOptions:
 #
 # Like Netdev, but for use only by the legacy command line options
@@ -3941,6 +3988,8 @@
 # Since: 1.2
 ##
 { 'union': 'NetLegacyOptions',
+  'base': { 'type': 'NetLegacyOptionsType' },
+  'discriminator': 'type',
   'data': {
     'none':     'NetdevNoneOptions',
     'nic':      'NetLegacyNicOptions',
@@ -4050,6 +4099,44 @@
     'unix': 'UnixSocketAddress',
     'vsock': 'VsockSocketAddress',
     'fd': 'String' } }
+
+##
+# @SocketAddressFlatType:
+#
+# Available SocketAddressFlat types
+#
+# @inet:  Internet address
+#
+# @unix:  Unix domain socket
+#
+# Since: 2.9
+##
+{ 'enum': 'SocketAddressFlatType',
+  'data': [ 'unix', 'inet' ] }
+
+##
+# @SocketAddressFlat:
+#
+# Captures the address of a socket
+#
+# @type:       Transport type
+#
+# This is similar to SocketAddress, only distinction:
+#
+# 1. SocketAddressFlat is a flat union, SocketAddress is a simple union.
+#    A flat union is nicer than simple because it avoids nesting
+#    (i.e. more {}) on the wire.
+#
+# 2. SocketAddressFlat supports only types 'unix' and 'inet', because
+#    that's what its current users need.
+#
+# Since: 2.9
+##
+{ 'union': 'SocketAddressFlat',
+  'base': { 'type': 'SocketAddressFlatType' },
+  'discriminator': 'type',
+  'data': { 'unix': 'UnixSocketAddress',
+            'inet': 'InetSocketAddress' } }
 
 ##
 # @getfd:
@@ -4224,6 +4311,15 @@
 # @full: Expand all properties. The produced model is not guaranteed to be
 #        migration-safe, but allows tooling to get an insight and work with
 #        model details.
+#
+# Note: When a non-migration-safe CPU model is expanded in static mode, some
+# features enabled by the CPU model may be omitted, because they can't be
+# implemented by a static CPU model definition (e.g. cache info passthrough and
+# PMU passthrough in x86). If you need an accurate representation of the
+# features enabled by a non-migration-safe CPU model, use @full. If you need a
+# static representation that will keep ABI compatibility even when changing QEMU
+# version or machine-type, use @static (but keep in mind that some features may
+# be omitted).
 #
 # Since: 2.8.0
 ##
@@ -4865,7 +4961,7 @@
 #
 # Configuration info for the new chardev backend.
 #
-# Since: 1.4 (testdev since 2.2)
+# Since: 1.4 (testdev since 2.2, wctablet since 2.9)
 ##
 { 'union': 'ChardevBackend', 'data': { 'file'   : 'ChardevFile',
                                        'serial' : 'ChardevHostdev',
@@ -4877,6 +4973,7 @@
                                        'null'   : 'ChardevCommon',
                                        'mux'    : 'ChardevMux',
                                        'msmouse': 'ChardevCommon',
+                                       'wctablet' : 'ChardevCommon',
                                        'braille': 'ChardevCommon',
                                        'testdev': 'ChardevCommon',
                                        'stdio'  : 'ChardevStdio',
@@ -5390,10 +5487,15 @@
 #
 # Button of a pointer input device (mouse, tablet).
 #
+# @side: front side button of a 5-button mouse (since 2.9)
+#
+# @extra: rear side button of a 5-button mouse (since 2.9)
+#
 # Since: 2.0
 ##
 { 'enum'  : 'InputButton',
-  'data'  : [ 'left', 'middle', 'right', 'wheel-up', 'wheel-down' ] }
+  'data'  : [ 'left', 'middle', 'right', 'wheel-up', 'wheel-down', 'side',
+  'extra' ] }
 
 ##
 # @InputAxis:
@@ -5540,6 +5642,14 @@
             'events' : [ 'InputEvent' ] } }
 
 ##
+# @NumaOptionsType:
+#
+# Since: 2.1
+##
+{ 'enum': 'NumaOptionsType',
+  'data': [ 'node' ] }
+
+##
 # @NumaOptions:
 #
 # A discriminated record of NUMA options. (for OptsVisitor)
@@ -5547,6 +5657,8 @@
 # Since: 2.1
 ##
 { 'union': 'NumaOptions',
+  'base': { 'type': 'NumaOptionsType' },
+  'discriminator': 'type',
   'data': {
     'node': 'NumaNodeOptions' }}
 
@@ -5841,6 +5953,42 @@
   'data': [ 'pause', 'poweroff' ] }
 
 ##
+# @GuestPanicInformationType:
+#
+# An enumeration of the guest panic information types
+#
+# Since: 2.9
+##
+{ 'enum': 'GuestPanicInformationType',
+  'data': [ 'hyper-v'] }
+
+##
+# @GuestPanicInformation:
+#
+# Information about a guest panic
+#
+# Since: 2.9
+##
+{'union': 'GuestPanicInformation',
+ 'base': {'type': 'GuestPanicInformationType'},
+ 'discriminator': 'type',
+ 'data': { 'hyper-v': 'GuestPanicInformationHyperV' } }
+
+##
+# @GuestPanicInformationHyperV:
+#
+# Hyper-V specific guest panic information (HV crash MSRs)
+#
+# Since: 2.9
+##
+{'struct': 'GuestPanicInformationHyperV',
+ 'data': { 'arg1': 'uint64',
+           'arg2': 'uint64',
+           'arg3': 'uint64',
+           'arg4': 'uint64',
+           'arg5': 'uint64' } }
+
+##
 # @rtc-reset-reinjection:
 #
 # This command will reset the RTC interrupt reinjection backlog.
@@ -5899,6 +6047,79 @@
 #
 ##
 { 'command': 'xen-load-devices-state', 'data': {'filename': 'str'} }
+
+##
+# @xen-set-replication:
+#
+# Enable or disable replication.
+#
+# @enable: true to enable, false to disable.
+#
+# @primary: true for primary or false for secondary.
+#
+# @failover: #optional true to do failover, false to stop. but cannot be
+#            specified if 'enable' is true. default value is false.
+#
+# Returns: nothing.
+#
+# Example:
+#
+# -> { "execute": "xen-set-replication",
+#      "arguments": {"enable": true, "primary": false} }
+# <- { "return": {} }
+#
+# Since: 2.9
+##
+{ 'command': 'xen-set-replication',
+  'data': { 'enable': 'bool', 'primary': 'bool', '*failover' : 'bool' } }
+
+##
+# @ReplicationStatus:
+#
+# The result format for 'query-xen-replication-status'.
+#
+# @error: true if an error happened, false if replication is normal.
+#
+# @desc: #optional the human readable error description string, when
+#        @error is 'true'.
+#
+# Since: 2.9
+##
+{ 'struct': 'ReplicationStatus',
+  'data': { 'error': 'bool', '*desc': 'str' } }
+
+##
+# @query-xen-replication-status:
+#
+# Query replication status while the vm is running.
+#
+# Returns: A @ReplicationResult object showing the status.
+#
+# Example:
+#
+# -> { "execute": "query-xen-replication-status" }
+# <- { "return": { "error": false } }
+#
+# Since: 2.9
+##
+{ 'command': 'query-xen-replication-status',
+  'returns': 'ReplicationStatus' }
+
+##
+# @xen-colo-do-checkpoint:
+#
+# Xen uses this command to notify replication to trigger a checkpoint.
+#
+# Returns: nothing.
+#
+# Example:
+#
+# -> { "execute": "xen-colo-do-checkpoint" }
+# <- { "return": {} }
+#
+# Since: 2.9
+##
+{ 'command': 'xen-colo-do-checkpoint' }
 
 ##
 # @GICCapability:
@@ -6026,3 +6247,23 @@
 #
 ##
 { 'command': 'query-hotpluggable-cpus', 'returns': ['HotpluggableCPU'] }
+
+##
+# @GuidInfo:
+#
+# GUID information.
+#
+# @guid: the globally unique identifier
+#
+# Since: 2.9
+##
+{ 'struct': 'GuidInfo', 'data': {'guid': 'str'} }
+
+##
+# @query-vm-generation-id:
+#
+# Show Virtual Machine Generation ID
+#
+# Since 2.9
+##
+{ 'command': 'query-vm-generation-id', 'returns': 'GuidInfo' }

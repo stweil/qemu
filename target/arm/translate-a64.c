@@ -379,20 +379,6 @@ static inline void gen_goto_tb(DisasContext *s, int n, uint64_t dest)
     }
 }
 
-static void disas_set_insn_syndrome(DisasContext *s, uint32_t syn)
-{
-    /* We don't need to save all of the syndrome so we mask and shift
-     * out uneeded bits to help the sleb128 encoder do a better job.
-     */
-    syn &= ARM_INSN_START_WORD2_MASK;
-    syn >>= ARM_INSN_START_WORD2_SHIFT;
-
-    /* We check and clear insn_start_idx to catch multiple updates.  */
-    assert(s->insn_start_idx != 0);
-    tcg_set_insn_param(s->insn_start_idx, 2, syn);
-    s->insn_start_idx = 0;
-}
-
 static void unallocated_encoding(DisasContext *s)
 {
     /* Unallocated and reserved encodings are uncategorized */
@@ -1342,10 +1328,14 @@ static void handle_hint(DisasContext *s, uint32_t insn,
         s->is_jmp = DISAS_WFI;
         return;
     case 1: /* YIELD */
-        s->is_jmp = DISAS_YIELD;
+        if (!parallel_cpus) {
+            s->is_jmp = DISAS_YIELD;
+        }
         return;
     case 2: /* WFE */
-        s->is_jmp = DISAS_WFE;
+        if (!parallel_cpus) {
+            s->is_jmp = DISAS_WFE;
+        }
         return;
     case 4: /* SEV */
     case 5: /* SEVL */
@@ -10943,6 +10933,10 @@ static void disas_crypto_aes(DisasContext *s, uint32_t insn)
         return;
     }
 
+    if (!fp_access_check(s)) {
+        return;
+    }
+
     /* Note that we convert the Vx register indexes into the
      * index within the vfp.regs[] array, so we can share the
      * helper with the AArch32 instructions.
@@ -11007,6 +11001,10 @@ static void disas_crypto_three_reg_sha(DisasContext *s, uint32_t insn)
         return;
     }
 
+    if (!fp_access_check(s)) {
+        return;
+    }
+
     tcg_rd_regno = tcg_const_i32(rd << 1);
     tcg_rn_regno = tcg_const_i32(rn << 1);
     tcg_rm_regno = tcg_const_i32(rm << 1);
@@ -11067,6 +11065,10 @@ static void disas_crypto_two_reg_sha(DisasContext *s, uint32_t insn)
 
     if (!arm_dc_feature(s, feature)) {
         unallocated_encoding(s);
+        return;
+    }
+
+    if (!fp_access_check(s)) {
         return;
     }
 

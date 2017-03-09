@@ -356,7 +356,7 @@ static const VMStateDescription vmstate_configuration = {
     .pre_save = configuration_pre_save,
     .fields = (VMStateField[]) {
         VMSTATE_UINT32(len, SaveState),
-        VMSTATE_VBUFFER_ALLOC_UINT32(name, SaveState, 0, NULL, 0, len),
+        VMSTATE_VBUFFER_ALLOC_UINT32(name, SaveState, 0, NULL, len),
         VMSTATE_END_OF_LIST()
     },
     .subsections = (const VMStateDescription*[]) {
@@ -590,8 +590,14 @@ int register_savevm_live(DeviceState *dev,
     if (dev) {
         char *id = qdev_get_dev_path(dev);
         if (id) {
-            pstrcpy(se->idstr, sizeof(se->idstr), id);
-            pstrcat(se->idstr, sizeof(se->idstr), "/");
+            if (snprintf(se->idstr, sizeof(se->idstr), "%s/", id) >=
+                sizeof(se->idstr)) {
+                error_report("Path too long for VMState (%s)", id);
+                g_free(id);
+                g_free(se);
+
+                return -1;
+            }
             g_free(id);
 
             se->compat = g_new0(CompatEntry, 1);
@@ -656,7 +662,8 @@ void unregister_savevm(DeviceState *dev, const char *idstr, void *opaque)
 int vmstate_register_with_alias_id(DeviceState *dev, int instance_id,
                                    const VMStateDescription *vmsd,
                                    void *opaque, int alias_id,
-                                   int required_for_version)
+                                   int required_for_version,
+                                   Error **errp)
 {
     SaveStateEntry *se;
 
@@ -673,8 +680,14 @@ int vmstate_register_with_alias_id(DeviceState *dev, int instance_id,
     if (dev) {
         char *id = qdev_get_dev_path(dev);
         if (id) {
-            pstrcpy(se->idstr, sizeof(se->idstr), id);
-            pstrcat(se->idstr, sizeof(se->idstr), "/");
+            if (snprintf(se->idstr, sizeof(se->idstr), "%s/", id) >=
+                sizeof(se->idstr)) {
+                error_setg(errp, "Path too long for VMState (%s)", id);
+                g_free(id);
+                g_free(se);
+
+                return -1;
+            }
             g_free(id);
 
             se->compat = g_new0(CompatEntry, 1);
@@ -857,7 +870,7 @@ int qemu_savevm_send_packaged(QEMUFile *f, const uint8_t *buf, size_t len)
 void qemu_savevm_send_postcopy_advise(QEMUFile *f)
 {
     uint64_t tmp[2];
-    tmp[0] = cpu_to_be64(getpagesize());
+    tmp[0] = cpu_to_be64(ram_pagesize_summary());
     tmp[1] = cpu_to_be64(1ul << qemu_target_page_bits());
 
     trace_qemu_savevm_send_postcopy_advise();
@@ -1264,6 +1277,11 @@ done:
         status = MIGRATION_STATUS_COMPLETED;
     }
     migrate_set_state(&ms->state, MIGRATION_STATUS_SETUP, status);
+
+    /* f is outer parameter, it should not stay in global migration state after
+     * this function finished */
+    ms->to_dst_file = NULL;
+
     return ret;
 }
 
@@ -1334,7 +1352,7 @@ static int qemu_loadvm_state_main(QEMUFile *f, MigrationIncomingState *mis);
 static int loadvm_postcopy_handle_advise(MigrationIncomingState *mis)
 {
     PostcopyState ps = postcopy_state_set(POSTCOPY_INCOMING_ADVISE);
-    uint64_t remote_hps, remote_tps;
+    uint64_t remote_pagesize_summary, local_pagesize_summary, remote_tps;
 
     trace_loadvm_postcopy_handle_advise();
     if (ps != POSTCOPY_INCOMING_NONE) {
@@ -1343,21 +1361,31 @@ static int loadvm_postcopy_handle_advise(MigrationIncomingState *mis)
     }
 
     if (!postcopy_ram_supported_by_host()) {
+        postcopy_state_set(POSTCOPY_INCOMING_NONE);
         return -1;
     }
 
-    remote_hps = qemu_get_be64(mis->from_src_file);
-    if (remote_hps != getpagesize())  {
+    remote_pagesize_summary = qemu_get_be64(mis->from_src_file);
+    local_pagesize_summary = ram_pagesize_summary();
+
+    if (remote_pagesize_summary != local_pagesize_summary)  {
         /*
-         * Some combinations of mismatch are probably possible but it gets
-         * a bit more complicated.  In particular we need to place whole
-         * host pages on the dest at once, and we need to ensure that we
-         * handle dirtying to make sure we never end up sending part of
-         * a hostpage on it's own.
+         * This detects two potential causes of mismatch:
+         *   a) A mismatch in host page sizes
+         *      Some combinations of mismatch are probably possible but it gets
+         *      a bit more complicated.  In particular we need to place whole
+         *      host pages on the dest at once, and we need to ensure that we
+         *      handle dirtying to make sure we never end up sending part of
+         *      a hostpage on it's own.
+         *   b) The use of different huge page sizes on source/destination
+         *      a more fine grain test is performed during RAM block migration
+         *      but this test here causes a nice early clear failure, and
+         *      also fails when passed to an older qemu that doesn't
+         *      do huge pages.
          */
-        error_report("Postcopy needs matching host page sizes "
-                     "(s=%" PRIu64 " d=%d)",
-                     remote_hps, getpagesize());
+        error_report("Postcopy needs matching RAM page sizes (s=%" PRIx64
+                                                             " d=%" PRIx64 ")",
+                     remote_pagesize_summary, local_pagesize_summary);
         return -1;
     }
 
@@ -2200,7 +2228,6 @@ void qmp_xen_load_devices_state(const char *filename, Error **errp)
     qio_channel_set_name(QIO_CHANNEL(ioc), "migration-xen-load-state");
     f = qemu_fopen_channel_input(QIO_CHANNEL(ioc));
 
-    migration_incoming_state_new(f);
     ret = qemu_loadvm_state(f);
     qemu_fclose(f);
     if (ret < 0) {
@@ -2216,6 +2243,7 @@ int load_vmstate(const char *name)
     QEMUFile *f;
     int ret;
     AioContext *aio_context;
+    MigrationIncomingState *mis = migration_incoming_get_current();
 
     if (!bdrv_all_can_snapshot(&bs)) {
         error_report("Device '%s' is writable but does not support snapshots.",
@@ -2266,7 +2294,7 @@ int load_vmstate(const char *name)
     }
 
     qemu_system_reset(VMRESET_SILENT);
-    migration_incoming_state_new(f);
+    mis->from_src_file = f;
 
     aio_context_acquire(aio_context);
     ret = qemu_loadvm_state(f);

@@ -278,7 +278,7 @@ static SocketAddress *nbd_config(BDRVNBDState *s, QDict *options, Error **errp)
         goto done;
     }
 
-    iv = qobject_input_visitor_new(crumpled_addr, true);
+    iv = qobject_input_visitor_new(crumpled_addr);
     visit_type_SocketAddress(iv, NULL, &saddr, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
@@ -537,8 +537,6 @@ static void nbd_refresh_filename(BlockDriverState *bs, QDict *options)
     visit_type_SocketAddress(ov, NULL, &s->saddr, &error_abort);
     visit_complete(ov, &saddr_qdict);
     visit_free(ov);
-    assert(qobject_type(saddr_qdict) == QTYPE_QDICT);
-
     qdict_put_obj(opts, "server", saddr_qdict);
 
     if (s->export) {

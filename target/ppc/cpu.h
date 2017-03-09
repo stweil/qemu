@@ -21,6 +21,7 @@
 #define PPC_CPU_H
 
 #include "qemu-common.h"
+#include "qemu/int128.h"
 
 //#define PPC_EMULATE_32BITS_HYPV
 
@@ -222,11 +223,12 @@ enum {
 typedef struct opc_handler_t opc_handler_t;
 
 /*****************************************************************************/
-/* Types used to describe some PowerPC registers */
+/* Types used to describe some PowerPC registers etc. */
 typedef struct DisasContext DisasContext;
 typedef struct ppc_spr_t ppc_spr_t;
 typedef union ppc_avr_t ppc_avr_t;
 typedef union ppc_tlb_t ppc_tlb_t;
+typedef struct ppc_hash_pte64 ppc_hash_pte64_t;
 
 /* SPR access micro-ops generations callbacks */
 struct ppc_spr_t {
@@ -262,6 +264,7 @@ union ppc_avr_t {
 #ifdef CONFIG_INT128
     __uint128_t u128;
 #endif
+    Int128 s128;
 };
 
 #if !defined(CONFIG_USER_ONLY)
@@ -302,14 +305,6 @@ union ppc_tlb_t {
 #define TLB_EMB                2
 #define TLB_MAS                3
 #endif
-
-#define SDR_32_HTABORG         0xFFFF0000UL
-#define SDR_32_HTABMASK        0x000001FFUL
-
-#if defined(TARGET_PPC64)
-#define SDR_64_HTABORG         0xFFFFFFFFFFFC0000ULL
-#define SDR_64_HTABSIZE        0x000000000000001FULL
-#endif /* defined(TARGET_PPC64 */
 
 typedef struct ppc_slb_t ppc_slb_t;
 struct ppc_slb_t {
@@ -379,15 +374,22 @@ struct ppc_slb_t {
 #define LPCR_ISL          (1ull << (63 - 2))
 #define LPCR_KBV          (1ull << (63 - 3))
 #define LPCR_DPFD_SHIFT   (63 - 11)
-#define LPCR_DPFD         (0x3ull << LPCR_DPFD_SHIFT)
+#define LPCR_DPFD         (0x7ull << LPCR_DPFD_SHIFT)
 #define LPCR_VRMASD_SHIFT (63 - 16)
 #define LPCR_VRMASD       (0x1full << LPCR_VRMASD_SHIFT)
+/* P9: Power-saving mode Exit Cause Enable (Upper Section) Mask */
+#define LPCR_PECE_U_SHIFT (63 - 19)
+#define LPCR_PECE_U_MASK  (0x7ull << LPCR_PECE_U_SHIFT)
+#define LPCR_HVEE         (1ull << (63 - 17)) /* Hypervisor Virt Exit Enable */
 #define LPCR_RMLS_SHIFT   (63 - 37)
 #define LPCR_RMLS         (0xfull << LPCR_RMLS_SHIFT)
 #define LPCR_ILE          (1ull << (63 - 38))
 #define LPCR_AIL_SHIFT    (63 - 40)      /* Alternate interrupt location */
 #define LPCR_AIL          (3ull << LPCR_AIL_SHIFT)
+#define LPCR_UPRT         (1ull << (63 - 41)) /* Use Process Table */
+#define LPCR_EVIRT        (1ull << (63 - 42)) /* Enhanced Virtualisation */
 #define LPCR_ONL          (1ull << (63 - 45))
+#define LPCR_LD           (1ull << (63 - 46)) /* Large Decrementer */
 #define LPCR_P7_PECE0     (1ull << (63 - 49))
 #define LPCR_P7_PECE1     (1ull << (63 - 50))
 #define LPCR_P7_PECE2     (1ull << (63 - 51))
@@ -396,11 +398,22 @@ struct ppc_slb_t {
 #define LPCR_P8_PECE2     (1ull << (63 - 49))
 #define LPCR_P8_PECE3     (1ull << (63 - 50))
 #define LPCR_P8_PECE4     (1ull << (63 - 51))
+/* P9: Power-saving mode Exit Cause Enable (Lower Section) Mask */
+#define LPCR_PECE_L_SHIFT (63 - 51)
+#define LPCR_PECE_L_MASK  (0x1full << LPCR_PECE_L_SHIFT)
+#define LPCR_PDEE         (1ull << (63 - 47)) /* Privileged Doorbell Exit EN */
+#define LPCR_HDEE         (1ull << (63 - 48)) /* Hyperv Doorbell Exit Enable */
+#define LPCR_EEE          (1ull << (63 - 49)) /* External Exit Enable        */
+#define LPCR_DEE          (1ull << (63 - 50)) /* Decrementer Exit Enable     */
+#define LPCR_OEE          (1ull << (63 - 51)) /* Other Exit Enable           */
 #define LPCR_MER          (1ull << (63 - 52))
+#define LPCR_GTSE         (1ull << (63 - 53)) /* Guest Translation Shootdown */
 #define LPCR_TC           (1ull << (63 - 54))
+#define LPCR_HEIC         (1ull << (63 - 59)) /* HV Extern Interrupt Control */
 #define LPCR_LPES0        (1ull << (63 - 60))
 #define LPCR_LPES1        (1ull << (63 - 61))
 #define LPCR_RMI          (1ull << (63 - 62))
+#define LPCR_HVICE        (1ull << (63 - 62)) /* HV Virtualisation Int Enable */
 #define LPCR_HDICE        (1ull << (63 - 63))
 
 #define msr_sf   ((env->msr >> MSR_SF)   & 1)
@@ -459,6 +472,22 @@ struct ppc_slb_t {
 #define msr_hv  (0)
 #endif
 #endif
+
+/* DSISR */
+#define DSISR_NOPTE              0x40000000
+/* Not permitted by access authority of encoded access authority */
+#define DSISR_PROTFAULT          0x08000000
+#define DSISR_ISSTORE            0x02000000
+/* Not permitted by virtual page class key protection */
+#define DSISR_AMR                0x00200000
+
+/* SRR1 error code fields */
+
+#define SRR1_NOPTE               DSISR_NOPTE
+/* Not permitted due to no-execute or guard bit set */
+#define SRR1_NOEXEC_GUARD        0x10000000
+#define SRR1_PROTFAULT           DSISR_PROTFAULT
+#define SRR1_IAMR                DSISR_AMR
 
 /* Facility Status and Control (FSCR) bits */
 #define FSCR_EBB        (63 - 56) /* Event-Based Branch Facility */
@@ -945,6 +974,8 @@ struct CPUPPCState {
     target_ulong so;
     target_ulong ov;
     target_ulong ca;
+    target_ulong ov32;
+    target_ulong ca32;
     /* Reservation address */
     target_ulong reserve_addr;
     /* Reservation value */
@@ -985,12 +1016,7 @@ struct CPUPPCState {
     /* tcg TLB needs flush (deferred slb inval instruction typically) */
 #endif
     /* segment registers */
-    hwaddr htab_base;
-    /* mask used to normalize hash value to PTEG index */
-    hwaddr htab_mask;
     target_ulong sr[32];
-    /* externally stored hash table */
-    uint8_t *external_htab;
     /* BATs */
     uint32_t nb_BATs;
     target_ulong DBAT[2][8];
@@ -1148,12 +1174,15 @@ do {                                            \
     env->wdt_period[3] = (d_);                  \
  } while (0)
 
+typedef struct PPCVirtualHypervisor PPCVirtualHypervisor;
+typedef struct PPCVirtualHypervisorClass PPCVirtualHypervisorClass;
+
 /**
  * PowerPCCPU:
  * @env: #CPUPPCState
  * @cpu_dt_id: CPU index used in the device tree. KVM uses this index too
  * @max_compat: Maximal supported logical PVR from the command line
- * @cpu_version: Current logical PVR, zero if in "raw" mode
+ * @compat_pvr: Current logical PVR, zero if in "raw" mode
  *
  * A PowerPC CPU.
  */
@@ -1165,7 +1194,8 @@ struct PowerPCCPU {
     CPUPPCState env;
     int cpu_dt_id;
     uint32_t max_compat;
-    uint32_t cpu_version;
+    uint32_t compat_pvr;
+    PPCVirtualHypervisor *vhyp;
 
     /* Fields related to migration compatibility hacks */
     bool pre_2_8_migration;
@@ -1187,6 +1217,34 @@ static inline PowerPCCPU *ppc_env_get_cpu(CPUPPCState *env)
 PowerPCCPUClass *ppc_cpu_class_by_pvr(uint32_t pvr);
 PowerPCCPUClass *ppc_cpu_class_by_pvr_mask(uint32_t pvr);
 
+struct PPCVirtualHypervisor {
+    Object parent;
+};
+
+struct PPCVirtualHypervisorClass {
+    InterfaceClass parent;
+    void (*hypercall)(PPCVirtualHypervisor *vhyp, PowerPCCPU *cpu);
+    hwaddr (*hpt_mask)(PPCVirtualHypervisor *vhyp);
+    const ppc_hash_pte64_t *(*map_hptes)(PPCVirtualHypervisor *vhyp,
+                                         hwaddr ptex, int n);
+    void (*unmap_hptes)(PPCVirtualHypervisor *vhyp,
+                        const ppc_hash_pte64_t *hptes,
+                        hwaddr ptex, int n);
+    void (*store_hpte)(PPCVirtualHypervisor *vhyp, hwaddr ptex,
+                       uint64_t pte0, uint64_t pte1);
+    uint64_t (*get_patbe)(PPCVirtualHypervisor *vhyp);
+};
+
+#define TYPE_PPC_VIRTUAL_HYPERVISOR "ppc-virtual-hypervisor"
+#define PPC_VIRTUAL_HYPERVISOR(obj)                 \
+    OBJECT_CHECK(PPCVirtualHypervisor, (obj), TYPE_PPC_VIRTUAL_HYPERVISOR)
+#define PPC_VIRTUAL_HYPERVISOR_CLASS(klass)         \
+    OBJECT_CLASS_CHECK(PPCVirtualHypervisorClass, (klass), \
+                       TYPE_PPC_VIRTUAL_HYPERVISOR)
+#define PPC_VIRTUAL_HYPERVISOR_GET_CLASS(obj) \
+    OBJECT_GET_CLASS(PPCVirtualHypervisorClass, (obj), \
+                     TYPE_PPC_VIRTUAL_HYPERVISOR)
+
 void ppc_cpu_do_interrupt(CPUState *cpu);
 bool ppc_cpu_exec_interrupt(CPUState *cpu, int int_req);
 void ppc_cpu_dump_state(CPUState *cpu, FILE *f, fprintf_function cpu_fprintf,
@@ -1199,6 +1257,8 @@ int ppc_cpu_gdb_read_register_apple(CPUState *cpu, uint8_t *buf, int reg);
 int ppc_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 int ppc_cpu_gdb_write_register_apple(CPUState *cpu, uint8_t *buf, int reg);
 int ppc64_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cs,
+                               int cpuid, void *opaque);
+int ppc32_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cs,
                                int cpuid, void *opaque);
 #ifndef CONFIG_USER_ONLY
 void ppc_cpu_do_system_reset(CPUState *cs);
@@ -1225,9 +1285,7 @@ void ppc_store_sdr1 (CPUPPCState *env, target_ulong value);
 void ppc_store_msr (CPUPPCState *env, target_ulong value);
 
 void ppc_cpu_list (FILE *f, fprintf_function cpu_fprintf);
-int ppc_get_compat_smt_threads(PowerPCCPU *cpu);
 #if defined(TARGET_PPC64)
-void ppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version, Error **errp);
 #endif
 
 /* Time-base and decrementer management */
@@ -1259,7 +1317,7 @@ void store_booke_tcr (CPUPPCState *env, target_ulong val);
 void store_booke_tsr (CPUPPCState *env, target_ulong val);
 void ppc_tlb_invalidate_all (CPUPPCState *env);
 void ppc_tlb_invalidate_one (CPUPPCState *env, target_ulong addr);
-void cpu_ppc_set_papr(PowerPCCPU *cpu);
+void cpu_ppc_set_papr(PowerPCCPU *cpu, PPCVirtualHypervisor *vhyp);
 #endif
 #endif
 
@@ -1297,28 +1355,48 @@ static inline int cpu_mmu_index (CPUPPCState *env, bool ifetch)
     return ifetch ? env->immu_idx : env->dmmu_idx;
 }
 
+/* Compatibility modes */
+#if defined(TARGET_PPC64)
+bool ppc_check_compat(PowerPCCPU *cpu, uint32_t compat_pvr,
+                      uint32_t min_compat_pvr, uint32_t max_compat_pvr);
+void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr, Error **errp);
+#if !defined(CONFIG_USER_ONLY)
+void ppc_set_compat_all(uint32_t compat_pvr, Error **errp);
+#endif
+int ppc_compat_max_threads(PowerPCCPU *cpu);
+#endif /* defined(TARGET_PPC64) */
+
 #include "exec/cpu-all.h"
 
 /*****************************************************************************/
 /* CRF definitions */
-#define CRF_LT        3
-#define CRF_GT        2
-#define CRF_EQ        1
-#define CRF_SO        0
-#define CRF_CH        (1 << CRF_LT)
-#define CRF_CL        (1 << CRF_GT)
-#define CRF_CH_OR_CL  (1 << CRF_EQ)
-#define CRF_CH_AND_CL (1 << CRF_SO)
+#define CRF_LT_BIT    3
+#define CRF_GT_BIT    2
+#define CRF_EQ_BIT    1
+#define CRF_SO_BIT    0
+#define CRF_LT        (1 << CRF_LT_BIT)
+#define CRF_GT        (1 << CRF_GT_BIT)
+#define CRF_EQ        (1 << CRF_EQ_BIT)
+#define CRF_SO        (1 << CRF_SO_BIT)
+/* For SPE extensions */
+#define CRF_CH        (1 << CRF_LT_BIT)
+#define CRF_CL        (1 << CRF_GT_BIT)
+#define CRF_CH_OR_CL  (1 << CRF_EQ_BIT)
+#define CRF_CH_AND_CL (1 << CRF_SO_BIT)
 
 /* XER definitions */
 #define XER_SO  31
 #define XER_OV  30
 #define XER_CA  29
+#define XER_OV32  19
+#define XER_CA32  18
 #define XER_CMP  8
 #define XER_BC   0
 #define xer_so  (env->so)
 #define xer_ov  (env->ov)
 #define xer_ca  (env->ca)
+#define xer_ov32  (env->ov)
+#define xer_ca32  (env->ca)
 #define xer_cmp ((env->xer >> XER_CMP) & 0xFF)
 #define xer_bc  ((env->xer >> XER_BC)  & 0x7F)
 
@@ -2250,6 +2328,7 @@ enum {
     PCR_COMPAT_2_05     = 1ull << (63-62),
     PCR_COMPAT_2_06     = 1ull << (63-61),
     PCR_COMPAT_2_07     = 1ull << (63-60),
+    PCR_COMPAT_3_00     = 1ull << (63-59),
     PCR_VEC_DIS         = 1ull << (63-0), /* Vec. disable (bit NA since POWER8) */
     PCR_VSX_DIS         = 1ull << (63-1), /* VSX disable (bit NA since POWER8) */
     PCR_TM_DIS          = 1ull << (63-2), /* Trans. memory disable (POWER8) */
@@ -2284,18 +2363,9 @@ enum {
 
 /*****************************************************************************/
 
-static inline target_ulong cpu_read_xer(CPUPPCState *env)
-{
-    return env->xer | (env->so << XER_SO) | (env->ov << XER_OV) | (env->ca << XER_CA);
-}
-
-static inline void cpu_write_xer(CPUPPCState *env, target_ulong xer)
-{
-    env->so = (xer >> XER_SO) & 1;
-    env->ov = (xer >> XER_OV) & 1;
-    env->ca = (xer >> XER_CA) & 1;
-    env->xer = xer & ~((1u << XER_SO) | (1u << XER_OV) | (1u << XER_CA));
-}
+#define is_isa300(ctx) (!!(ctx->insns_flags2 & PPC2_ISA300))
+target_ulong cpu_read_xer(CPUPPCState *env);
+void cpu_write_xer(CPUPPCState *env, target_ulong xer);
 
 static inline void cpu_get_tb_cpu_state(CPUPPCState *env, target_ulong *pc,
                                         target_ulong *cs_base, uint32_t *flags)
@@ -2427,8 +2497,6 @@ static inline bool lsw_reg_in_range(int start, int nregs, int rx)
     return (start + nregs <= 32 && rx >= start && rx < start + nregs) ||
            (start + nregs > 32 && (rx >= start || rx < start + nregs - 32));
 }
-
-extern void (*cpu_ppc_hypercall)(PowerPCCPU *);
 
 void dump_mmu(FILE *f, fprintf_function cpu_fprintf, CPUPPCState *env);
 

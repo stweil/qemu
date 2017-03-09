@@ -25,7 +25,7 @@
 #include "qemu/bitops.h"
 #include "qemu/error-report.h"
 #include "qom/object.h"
-#include "trace.h"
+#include "trace-root.h"
 
 #include "exec/memory-internal.h"
 #include "exec/ram_addr.h"
@@ -918,6 +918,8 @@ void memory_region_transaction_commit(void)
     AddressSpace *as;
 
     assert(memory_region_transaction_depth);
+    assert(qemu_mutex_iothread_locked());
+
     --memory_region_transaction_depth;
     if (!memory_region_transaction_depth) {
         if (memory_region_update_pending) {
@@ -1227,7 +1229,7 @@ static void memory_region_ram_device_write(void *opaque, hwaddr addr,
 static const MemoryRegionOps ram_device_mem_ops = {
     .read = memory_region_ram_device_read,
     .write = memory_region_ram_device_write,
-    .endianness = DEVICE_NATIVE_ENDIAN,
+    .endianness = DEVICE_HOST_ENDIAN,
     .valid = {
         .min_access_size = 1,
         .max_access_size = 8,
@@ -2421,8 +2423,13 @@ void memory_listener_register(MemoryListener *listener, AddressSpace *as)
 
 void memory_listener_unregister(MemoryListener *listener)
 {
+    if (!listener->address_space) {
+        return;
+    }
+
     QTAILQ_REMOVE(&memory_listeners, listener, link);
     QTAILQ_REMOVE(&listener->address_space->listeners, listener, link_as);
+    listener->address_space = NULL;
 }
 
 void address_space_init(AddressSpace *as, MemoryRegion *root, const char *name)
@@ -2631,13 +2638,24 @@ static void mtree_print_flatview(fprintf_function p, void *f,
 
     while (n--) {
         mr = range->mr;
-        p(f, MTREE_INDENT TARGET_FMT_plx "-"
-          TARGET_FMT_plx " (prio %d, %s): %s\n",
-          int128_get64(range->addr.start),
-          int128_get64(range->addr.start) + MR_SIZE(range->addr.size),
-          mr->priority,
-          memory_region_type(mr),
-          memory_region_name(mr));
+        if (range->offset_in_region) {
+            p(f, MTREE_INDENT TARGET_FMT_plx "-"
+              TARGET_FMT_plx " (prio %d, %s): %s @" TARGET_FMT_plx "\n",
+              int128_get64(range->addr.start),
+              int128_get64(range->addr.start) + MR_SIZE(range->addr.size),
+              mr->priority,
+              range->readonly ? "rom" : memory_region_type(mr),
+              memory_region_name(mr),
+              range->offset_in_region);
+        } else {
+            p(f, MTREE_INDENT TARGET_FMT_plx "-"
+              TARGET_FMT_plx " (prio %d, %s): %s\n",
+              int128_get64(range->addr.start),
+              int128_get64(range->addr.start) + MR_SIZE(range->addr.size),
+              mr->priority,
+              range->readonly ? "rom" : memory_region_type(mr),
+              memory_region_name(mr));
+        }
         range++;
     }
 

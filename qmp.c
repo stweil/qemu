@@ -18,6 +18,7 @@
 #include "qemu/cutils.h"
 #include "monitor/monitor.h"
 #include "sysemu/sysemu.h"
+#include "qemu/config-file.h"
 #include "qemu/uuid.h"
 #include "qmp-commands.h"
 #include "sysemu/char.h"
@@ -674,7 +675,7 @@ void qmp_object_add(const char *type, const char *id,
         pdict = qdict_new();
     }
 
-    v = qobject_input_visitor_new(QOBJECT(pdict), true);
+    v = qobject_input_visitor_new(QOBJECT(pdict));
     obj = user_creatable_add_type(type, id, pdict, v, errp);
     visit_free(v);
     if (obj) {

@@ -1736,16 +1736,30 @@ QEMUGLContext dpy_gl_ctx_get_current(QemuConsole *con)
     return con->gl->ops->dpy_gl_ctx_get_current(con->gl);
 }
 
-void dpy_gl_scanout(QemuConsole *con,
-                    uint32_t backing_id, bool backing_y_0_top,
-                    uint32_t backing_width, uint32_t backing_height,
-                    uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+void dpy_gl_scanout_disable(QemuConsole *con)
 {
     assert(con->gl);
-    con->gl->ops->dpy_gl_scanout(con->gl, backing_id,
-                                 backing_y_0_top,
-                                 backing_width, backing_height,
-                                 x, y, width, height);
+    if (con->gl->ops->dpy_gl_scanout_disable) {
+        con->gl->ops->dpy_gl_scanout_disable(con->gl);
+    } else {
+        con->gl->ops->dpy_gl_scanout_texture(con->gl, 0, false, 0, 0,
+                                             0, 0, 0, 0);
+    }
+}
+
+void dpy_gl_scanout_texture(QemuConsole *con,
+                            uint32_t backing_id,
+                            bool backing_y_0_top,
+                            uint32_t backing_width,
+                            uint32_t backing_height,
+                            uint32_t x, uint32_t y,
+                            uint32_t width, uint32_t height)
+{
+    assert(con->gl);
+    con->gl->ops->dpy_gl_scanout_texture(con->gl, backing_id,
+                                         backing_y_0_top,
+                                         backing_width, backing_height,
+                                         x, y, width, height);
 }
 
 void dpy_gl_update(QemuConsole *con,
@@ -2060,8 +2074,6 @@ static void text_console_do_init(Chardev *chr, DisplayState *ds)
     qemu_chr_be_generic_open(chr);
 }
 
-static const CharDriver vc_driver;
-
 static void vc_chr_open(Chardev *chr,
                         ChardevBackend *backend,
                         bool *be_opened,
@@ -2117,7 +2129,7 @@ void qemu_console_resize(QemuConsole *s, int width, int height)
 
     assert(s->console_type == GRAPHIC_CONSOLE);
 
-    if (s->surface &&
+    if (s->surface && (s->surface->flags & QEMU_ALLOCATED_FLAG) &&
         pixman_image_get_width(s->surface->image) == width &&
         pixman_image_get_height(s->surface->image) == height) {
         return;
@@ -2151,6 +2163,7 @@ void qemu_chr_parse_vc(QemuOpts *opts, ChardevBackend *backend, Error **errp)
     int val;
     ChardevVC *vc;
 
+    backend->type = CHARDEV_BACKEND_KIND_VC;
     vc = backend->u.vc.data = g_new0(ChardevVC, 1);
     qemu_chr_parse_common(opts, qapi_ChardevVC_base(vc));
 
@@ -2190,6 +2203,7 @@ static void char_vc_class_init(ObjectClass *oc, void *data)
 {
     ChardevClass *cc = CHARDEV_CLASS(oc);
 
+    cc->parse = qemu_chr_parse_vc;
     cc->open = vc_chr_open;
     cc->chr_write = vc_chr_write;
     cc->chr_set_echo = vc_chr_set_echo;
@@ -2207,14 +2221,8 @@ void qemu_console_early_init(void)
     /* set the default vc driver */
     if (!object_class_by_name(TYPE_CHARDEV_VC)) {
         type_register(&char_vc_type_info);
-        register_char_driver(&vc_driver);
     }
 }
-
-static const CharDriver vc_driver = {
-    .kind = CHARDEV_BACKEND_KIND_VC,
-    .parse = qemu_chr_parse_vc,
-};
 
 static void register_types(void)
 {

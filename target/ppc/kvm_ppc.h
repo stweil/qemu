@@ -26,7 +26,7 @@ void kvmppc_enable_logical_ci_hcalls(void);
 void kvmppc_enable_set_mode_hcall(void);
 void kvmppc_enable_clear_ref_mod_hcalls(void);
 void kvmppc_set_papr(PowerPCCPU *cpu);
-int kvmppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version);
+int kvmppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr);
 void kvmppc_set_mpic_proxy(PowerPCCPU *cpu, int mpic_proxy);
 int kvmppc_smt_threads(void);
 int kvmppc_clear_tsr_bits(PowerPCCPU *cpu, uint32_t tsr_bits);
@@ -49,16 +49,15 @@ int kvmppc_get_htab_fd(bool write);
 int kvmppc_save_htab(QEMUFile *f, int fd, size_t bufsize, int64_t max_ns);
 int kvmppc_load_htab_chunk(QEMUFile *f, int fd, uint32_t index,
                            uint16_t n_valid, uint16_t n_invalid);
-uint64_t kvmppc_hash64_read_pteg(PowerPCCPU *cpu, target_ulong pte_index);
-void kvmppc_hash64_free_pteg(uint64_t token);
-
-void kvmppc_hash64_write_pte(CPUPPCState *env, target_ulong pte_index,
-                             target_ulong pte0, target_ulong pte1);
+void kvmppc_read_hptes(ppc_hash_pte64_t *hptes, hwaddr ptex, int n);
+void kvmppc_write_hpte(hwaddr ptex, uint64_t pte0, uint64_t pte1);
 bool kvmppc_has_cap_fixup_hcalls(void);
 bool kvmppc_has_cap_htm(void);
 int kvmppc_enable_hwrng(void);
 int kvmppc_put_books_sregs(PowerPCCPU *cpu);
 PowerPCCPUClass *kvm_ppc_get_host_cpu_class(void);
+
+bool kvmppc_is_mem_backend_page_size_ok(char *obj_path);
 
 #else
 
@@ -123,7 +122,7 @@ static inline void kvmppc_set_papr(PowerPCCPU *cpu)
 {
 }
 
-static inline int kvmppc_set_compat(PowerPCCPU *cpu, uint32_t cpu_version)
+static inline int kvmppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr)
 {
     return 0;
 }
@@ -192,6 +191,11 @@ static inline uint64_t kvmppc_rma_size(uint64_t current_size,
     return ram_size;
 }
 
+static inline bool kvmppc_is_mem_backend_page_size_ok(char *obj_path)
+{
+    return true;
+}
+
 #endif /* !CONFIG_USER_ONLY */
 
 static inline bool kvmppc_has_cap_epr(void)
@@ -227,20 +231,13 @@ static inline int kvmppc_load_htab_chunk(QEMUFile *f, int fd, uint32_t index,
     abort();
 }
 
-static inline uint64_t kvmppc_hash64_read_pteg(PowerPCCPU *cpu,
-                                               target_ulong pte_index)
+static inline void kvmppc_read_hptes(ppc_hash_pte64_t *hptes,
+                                     hwaddr ptex, int n)
 {
     abort();
 }
 
-static inline void kvmppc_hash64_free_pteg(uint64_t token)
-{
-    abort();
-}
-
-static inline void kvmppc_hash64_write_pte(CPUPPCState *env,
-                                           target_ulong pte_index,
-                                           target_ulong pte0, target_ulong pte1)
+static inline void kvmppc_write_hpte(hwaddr ptex, uint64_t pte0, uint64_t pte1)
 {
     abort();
 }

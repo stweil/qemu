@@ -22,6 +22,7 @@
 #include "qapi-types.h"
 #include "exec/cpu-common.h"
 #include "qemu/coroutine_int.h"
+#include "qom/object.h"
 
 #define QEMU_VM_FILE_MAGIC           0x5145564d
 #define QEMU_VM_FILE_VERSION_COMPAT  0x00000002
@@ -92,6 +93,7 @@ struct MigrationIncomingState {
      */
     QemuEvent main_thread_load_event;
 
+    size_t         largest_page_size;
     bool           have_fault_thread;
     QemuThread     fault_thread;
     QemuSemaphore  fault_thread_sem;
@@ -107,6 +109,7 @@ struct MigrationIncomingState {
     QEMUFile *to_src_file;
     QemuMutex rp_mutex;    /* We send replies from multiple threads */
     void     *postcopy_tmp_page;
+    void     *postcopy_tmp_zero_page;
 
     QEMUBH *bh;
 
@@ -116,13 +119,13 @@ struct MigrationIncomingState {
     QemuThread colo_incoming_thread;
     /* The coroutine we should enter (back) after failover */
     Coroutine *migration_incoming_co;
+    QemuSemaphore colo_incoming_sem;
 
     /* See savevm.c */
     LoadStateEntry_Head loadvm_handlers;
 };
 
 MigrationIncomingState *migration_incoming_get_current(void);
-MigrationIncomingState *migration_incoming_state_new(QEMUFile *f);
 void migration_incoming_state_destroy(void);
 
 /*
@@ -188,6 +191,13 @@ struct MigrationState
     QSIMPLEQ_HEAD(src_page_requests, MigrationSrcPageRequest) src_page_requests;
     /* The RAMBlock used in the last src_page_request */
     RAMBlock *last_req_rb;
+    /* The semaphore is used to notify COLO thread that failover is finished */
+    QemuSemaphore colo_exit_sem;
+
+    /* The semaphore is used to notify COLO thread to do checkpoint */
+    QemuSemaphore colo_checkpoint_sem;
+    int64_t colo_checkpoint_time;
+    QEMUTimer *colo_delay_timer;
 
     /* The last error that occurred */
     Error *error;
@@ -286,6 +296,7 @@ int ram_postcopy_send_discard_bitmap(MigrationState *ms);
 int ram_discard_range(MigrationIncomingState *mis, const char *block_name,
                       uint64_t start, size_t length);
 int ram_postcopy_incoming_init(MigrationIncomingState *mis);
+void ram_postcopy_migrated_memory_release(MigrationState *ms);
 
 /**
  * @migrate_add_blocker - prevent migration from proceeding
@@ -305,6 +316,9 @@ int migrate_add_blocker(Error *reason, Error **errp);
  */
 void migrate_del_blocker(Error *reason);
 
+int check_migratable(Object *obj, Error **err);
+
+bool migrate_release_ram(void);
 bool migrate_postcopy_ram(void);
 bool migrate_zero_blocks(void);
 
@@ -366,6 +380,7 @@ void global_state_store_running(void);
 void flush_page_queue(MigrationState *ms);
 int ram_save_queue_pages(MigrationState *ms, const char *rbname,
                          ram_addr_t start, ram_addr_t len);
+uint64_t ram_pagesize_summary(void);
 
 PostcopyState postcopy_state_get(void);
 /* Set the state and return the old state */
