@@ -182,7 +182,7 @@ $(QEMU_RUBY): $(OBJS) libqemu.a
 	$(CC) -shared $(VL_LDFLAGS) -o $(QEMU_RUBY) $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(VL_LIBS)
 endif
 
-GENERATED_HEADERS += hmp-commands.h hmp-commands-info.h
+GENERATED_FILES += hmp-commands.h hmp-commands-info.h
 
 endif # CONFIG_SOFTMMU
 
@@ -258,5 +258,5 @@ ifdef CONFIG_TRACE_SYSTEMTAP
 	$(INSTALL_DATA) $(QEMU_PROG)-simpletrace.stp "$(DESTDIR)$(qemu_datadir)/../systemtap/tapset/$(QEMU_PROG)-simpletrace.stp"
 endif
 
-GENERATED_HEADERS += config-target.h
-Makefile: $(GENERATED_HEADERS)
+GENERATED_FILES += config-target.h
+Makefile: $(GENERATED_FILES)
