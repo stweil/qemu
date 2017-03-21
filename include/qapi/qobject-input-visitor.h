@@ -76,6 +76,7 @@ Visitor *qobject_input_visitor_new_keyval(QObject *obj);
  * On failure, store an error through @errp and return NULL.
  * On success, return a new QObject input visitor for the parse.
  */
+GCC_FMT_ATTR(1, 0)
 Visitor *qobject_input_visitor_new_str(const char *str,
                                        const char *implied_key,
                                        Error **errp);
