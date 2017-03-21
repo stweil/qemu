@@ -266,6 +266,19 @@ static int get_para_features(KVMState *s)
     return features;
 }
 
+static bool host_tsx_blacklisted(void)
+{
+    int family, model, stepping;\
+    char vendor[CPUID_VENDOR_SZ + 1];
+
+    host_vendor_fms(vendor, &family, &model, &stepping);
+
+    /* Check if we are running on a Haswell host known to have broken TSX */
+    return !strcmp(vendor, CPUID_VENDOR_INTEL) &&
+           (family == 6) &&
+           ((model == 63 && stepping < 4) ||
+            model == 60 || model == 69 || model == 70);
+}
 
 /* Returns the value for a specific register on the cpuid entry
  */
@@ -349,6 +362,10 @@ uint32_t kvm_arch_get_supported_cpuid(KVMState *s, uint32_t function,
         }
     } else if (function == 6 && reg == R_EAX) {
         ret |= CPUID_6_EAX_ARAT; /* safe to allow because of emulated APIC */
+    } else if (function == 7 && index == 0 && reg == R_EBX) {
+        if (host_tsx_blacklisted()) {
+            ret &= ~(CPUID_7_0_EBX_RTM | CPUID_7_0_EBX_HLE);
+        }
     } else if (function == 0x80000001 && reg == R_EDX) {
         /* On Intel, kvm returns cpuid according to the Intel spec,
          * so add missing bits according to the AMD spec:
@@ -1809,6 +1826,12 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
         return ret;
     }
 
+    if (ret < cpu->kvm_msr_buf->nmsrs) {
+        struct kvm_msr_entry *e = &cpu->kvm_msr_buf->entries[ret];
+        error_report("error: failed to set MSR 0x%" PRIx32 " to 0x%" PRIx64,
+                     (uint32_t)e->index, (uint64_t)e->data);
+    }
+
     assert(ret == cpu->kvm_msr_buf->nmsrs);
     return 0;
 }
@@ -2172,6 +2195,12 @@ static int kvm_get_msrs(X86CPU *cpu)
     ret = kvm_vcpu_ioctl(CPU(cpu), KVM_GET_MSRS, cpu->kvm_msr_buf);
     if (ret < 0) {
         return ret;
+    }
+
+    if (ret < cpu->kvm_msr_buf->nmsrs) {
+        struct kvm_msr_entry *e = &cpu->kvm_msr_buf->entries[ret];
+        error_report("error: failed to get MSR 0x%" PRIx32,
+                     (uint32_t)e->index);
     }
 
     assert(ret == cpu->kvm_msr_buf->nmsrs);
