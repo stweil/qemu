@@ -114,7 +114,7 @@ static QemuOptsList parallels_runtime_opts = {
             .name = PARALLELS_OPT_PREALLOC_SIZE,
             .type = QEMU_OPT_SIZE,
             .help = "Preallocation size on image expansion",
-            .def_value_str = "128MiB",
+            .def_value_str = "128M",
         },
         {
             .name = PARALLELS_OPT_PREALLOC_MODE,
@@ -687,7 +687,8 @@ static int parallels_open(BlockDriverState *bs, QDict *options, int flags,
     if (local_err != NULL) {
         goto fail_options;
     }
-    if (!bdrv_has_zero_init(bs->file->bs) ||
+
+    if (!(flags & BDRV_O_RESIZE) || !bdrv_has_zero_init(bs->file->bs) ||
             bdrv_truncate(bs->file, bdrv_getlength(bs->file->bs)) != 0) {
         s->prealloc_mode = PRL_PREALLOC_MODE_FALLOCATE;
     }
