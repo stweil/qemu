@@ -539,11 +539,11 @@ ARCH=
 # Normalise host CPU name and set ARCH.
 # Note that this case should only have supported host CPUs, not guests.
 case "$cpu" in
-  ppc|ppc64|s390|s390x|x32)
+  ppc|ppc64|s390|s390x|sparc64|x32)
     cpu="$cpu"
     supported_cpu="yes"
   ;;
-  ia64|sparc64)
+  ia64)
     cpu="$cpu"
   ;;
   i386|i486|i586|i686|i86pc|BePC)
@@ -571,6 +571,7 @@ case "$cpu" in
   ;;
   sparc|sun4[cdmuv])
     cpu="sparc"
+    supported_cpu="yes"
   ;;
   sh4)
     cpu="sh4"
@@ -3095,6 +3096,13 @@ glib_req_ver=2.22
 glib_modules=gthread-2.0
 if test "$modules" = yes; then
     glib_modules="$glib_modules gmodule-2.0"
+fi
+
+# This workaround is required due to a bug in pkg-config file for glib as it
+# doesn't define GLIB_STATIC_COMPILATION for pkg-config --static
+
+if test "$static" = yes -a "$mingw32" = yes; then
+    QEMU_CFLAGS="-DGLIB_STATIC_COMPILATION $QEMU_CFLAGS"
 fi
 
 for i in $glib_modules; do
