@@ -736,7 +736,7 @@ static int do_req(int sockfd, BlockDriverState *bs, SheepdogReq *hdr,
     } else {
         co = qemu_coroutine_create(do_co_req, &srco);
         if (bs) {
-            qemu_coroutine_enter(co);
+            bdrv_coroutine_enter(bs, co);
             BDRV_POLL_WHILE(bs, !srco.finished);
         } else {
             qemu_coroutine_enter(co);
@@ -942,7 +942,7 @@ static void co_read_response(void *opaque)
         s->co_recv = qemu_coroutine_create(aio_read_response, opaque);
     }
 
-    aio_co_wake(s->co_recv);
+    aio_co_enter(s->aio_context, s->co_recv);
 }
 
 static void co_write_request(void *opaque)

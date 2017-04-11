@@ -1753,6 +1753,9 @@ static void bdrv_replace_child_noperm(BdrvChild *child,
 {
     BlockDriverState *old_bs = child->bs;
 
+    if (old_bs && new_bs) {
+        assert(bdrv_get_aio_context(old_bs) == bdrv_get_aio_context(new_bs));
+    }
     if (old_bs) {
         if (old_bs->quiesce_counter && child->role->drained_end) {
             child->role->drained_end(child);
@@ -1853,6 +1856,7 @@ BdrvChild *bdrv_attach_child(BlockDriverState *parent_bs,
     bdrv_get_cumulative_perm(parent_bs, &perm, &shared_perm);
 
     assert(parent_bs->drv);
+    assert(bdrv_get_aio_context(parent_bs) == bdrv_get_aio_context(child_bs));
     parent_bs->drv->bdrv_child_perm(parent_bs, NULL, child_role,
                                     perm, shared_perm, &perm, &shared_perm);
 
@@ -3271,7 +3275,11 @@ int bdrv_truncate(BdrvChild *child, int64_t offset)
     BlockDriver *drv = bs->drv;
     int ret;
 
-    assert(child->perm & BLK_PERM_RESIZE);
+    /* FIXME: Some format block drivers use this function instead of implicitly
+     *        growing their file by writing beyond its end.
+     *        See bdrv_aligned_pwritev() for an explanation why we currently
+     *        cannot assert this permission in that case. */
+    // assert(child->perm & BLK_PERM_RESIZE);
 
     if (!drv)
         return -ENOMEDIUM;
@@ -4321,6 +4329,11 @@ AioContext *bdrv_get_aio_context(BlockDriverState *bs)
     return bs->aio_context;
 }
 
+void bdrv_coroutine_enter(BlockDriverState *bs, Coroutine *co)
+{
+    aio_co_enter(bdrv_get_aio_context(bs), co);
+}
+
 static void bdrv_do_remove_aio_context_notifier(BdrvAioNotifier *ban)
 {
     QLIST_REMOVE(ban, list);
@@ -4393,11 +4406,12 @@ void bdrv_attach_aio_context(BlockDriverState *bs,
 
 void bdrv_set_aio_context(BlockDriverState *bs, AioContext *new_context)
 {
-    AioContext *ctx;
+    AioContext *ctx = bdrv_get_aio_context(bs);
 
+    aio_disable_external(ctx);
+    bdrv_parent_drained_begin(bs);
     bdrv_drain(bs); /* ensure there are no in-flight requests */
 
-    ctx = bdrv_get_aio_context(bs);
     while (aio_poll(ctx, false)) {
         /* wait for all bottom halves to execute */
     }
@@ -4409,6 +4423,8 @@ void bdrv_set_aio_context(BlockDriverState *bs, AioContext *new_context)
      */
     aio_context_acquire(new_context);
     bdrv_attach_aio_context(bs, new_context);
+    bdrv_parent_drained_end(bs);
+    aio_enable_external(ctx);
     aio_context_release(new_context);
 }
 

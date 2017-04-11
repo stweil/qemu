@@ -44,7 +44,7 @@ static void coroutine_fn bdrv_co_do_rw(void *opaque);
 static int coroutine_fn bdrv_co_do_pwrite_zeroes(BlockDriverState *bs,
     int64_t offset, int count, BdrvRequestFlags flags);
 
-static void bdrv_parent_drained_begin(BlockDriverState *bs)
+void bdrv_parent_drained_begin(BlockDriverState *bs)
 {
     BdrvChild *c;
 
@@ -55,7 +55,7 @@ static void bdrv_parent_drained_begin(BlockDriverState *bs)
     }
 }
 
-static void bdrv_parent_drained_end(BlockDriverState *bs)
+void bdrv_parent_drained_end(BlockDriverState *bs)
 {
     BdrvChild *c;
 
@@ -616,7 +616,7 @@ static int bdrv_prwv_co(BdrvChild *child, int64_t offset,
         bdrv_rw_co_entry(&rwco);
     } else {
         co = qemu_coroutine_create(bdrv_rw_co_entry, &rwco);
-        qemu_coroutine_enter(co);
+        bdrv_coroutine_enter(child->bs, co);
         BDRV_POLL_WHILE(child->bs, rwco.ret == NOT_DONE);
     }
     return rwco.ret;
@@ -945,7 +945,14 @@ static int coroutine_fn bdrv_co_do_copy_on_readv(BdrvChild *child,
     size_t skip_bytes;
     int ret;
 
-    assert(child->perm & (BLK_PERM_WRITE_UNCHANGED | BLK_PERM_WRITE));
+    /* FIXME We cannot require callers to have write permissions when all they
+     * are doing is a read request. If we did things right, write permissions
+     * would be obtained anyway, but internally by the copy-on-read code. As
+     * long as it is implemented here rather than in a separat filter driver,
+     * the copy-on-read code doesn't have its own BdrvChild, however, for which
+     * it could request permissions. Therefore we have to bypass the permission
+     * system for the moment. */
+    // assert(child->perm & (BLK_PERM_WRITE_UNCHANGED | BLK_PERM_WRITE));
 
     /* Cover entire cluster so no additional backing file I/O is required when
      * allocating cluster in the image file.
@@ -1338,8 +1345,16 @@ static int coroutine_fn bdrv_aligned_pwritev(BdrvChild *child,
     assert(!waited || !req->serialising);
     assert(req->overlap_offset <= offset);
     assert(offset + bytes <= req->overlap_offset + req->overlap_bytes);
-    assert(child->perm & BLK_PERM_WRITE);
-    assert(end_sector <= bs->total_sectors || child->perm & BLK_PERM_RESIZE);
+    /* FIXME: Block migration uses the BlockBackend of the guest device at a
+     *        point when it has not yet taken write permissions. This will be
+     *        fixed by a future patch, but for now we have to bypass this
+     *        assertion for block migration to work. */
+    // assert(child->perm & BLK_PERM_WRITE);
+    /* FIXME: Because of the above, we also cannot guarantee that all format
+     *        BDS take the BLK_PERM_RESIZE permission on their file BDS, since
+     *        they are not obligated to do so if they do not have any parent
+     *        that has taken the permission to write to them. */
+    // assert(end_sector <= bs->total_sectors || child->perm & BLK_PERM_RESIZE);
 
     ret = notifier_with_return_list_notify(&bs->before_write_notifiers, req);
 
@@ -1873,7 +1888,7 @@ int64_t bdrv_get_block_status_above(BlockDriverState *bs,
     } else {
         co = qemu_coroutine_create(bdrv_get_block_status_above_co_entry,
                                    &data);
-        qemu_coroutine_enter(co);
+        bdrv_coroutine_enter(bs, co);
         BDRV_POLL_WHILE(bs, !data.done);
     }
     return data.ret;
@@ -1999,7 +2014,7 @@ bdrv_rw_vmstate(BlockDriverState *bs, QEMUIOVector *qiov, int64_t pos,
         };
         Coroutine *co = qemu_coroutine_create(bdrv_co_rw_vmstate_entry, &data);
 
-        qemu_coroutine_enter(co);
+        bdrv_coroutine_enter(bs, co);
         while (data.ret == -EINPROGRESS) {
             aio_poll(bdrv_get_aio_context(bs), true);
         }
@@ -2216,7 +2231,7 @@ static BlockAIOCB *bdrv_co_aio_prw_vector(BdrvChild *child,
     acb->is_write = is_write;
 
     co = qemu_coroutine_create(bdrv_co_do_rw, acb);
-    qemu_coroutine_enter(co);
+    bdrv_coroutine_enter(child->bs, co);
 
     bdrv_co_maybe_schedule_bh(acb);
     return &acb->common;
@@ -2247,7 +2262,7 @@ BlockAIOCB *bdrv_aio_flush(BlockDriverState *bs,
     acb->req.error = -EINPROGRESS;
 
     co = qemu_coroutine_create(bdrv_aio_flush_co_entry, acb);
-    qemu_coroutine_enter(co);
+    bdrv_coroutine_enter(bs, co);
 
     bdrv_co_maybe_schedule_bh(acb);
     return &acb->common;
@@ -2271,16 +2286,17 @@ static void coroutine_fn bdrv_flush_co_entry(void *opaque)
 
 int coroutine_fn bdrv_co_flush(BlockDriverState *bs)
 {
-    int ret;
-
-    if (!bs || !bdrv_is_inserted(bs) || bdrv_is_read_only(bs) ||
-        bdrv_is_sg(bs)) {
-        return 0;
-    }
+    int current_gen;
+    int ret = 0;
 
     bdrv_inc_in_flight(bs);
 
-    int current_gen = bs->write_gen;
+    if (!bs || !bdrv_is_inserted(bs) || bdrv_is_read_only(bs) ||
+        bdrv_is_sg(bs)) {
+        goto early_exit;
+    }
+
+    current_gen = bs->write_gen;
 
     /* Wait until any previous flushes are completed */
     while (bs->active_flush_req) {
@@ -2363,6 +2379,7 @@ out:
     /* Return value is ignored - it's ok if wait queue is empty */
     qemu_co_queue_next(&bs->flush_queue);
 
+early_exit:
     bdrv_dec_in_flight(bs);
     return ret;
 }
@@ -2380,7 +2397,7 @@ int bdrv_flush(BlockDriverState *bs)
         bdrv_flush_co_entry(&flush_co);
     } else {
         co = qemu_coroutine_create(bdrv_flush_co_entry, &flush_co);
-        qemu_coroutine_enter(co);
+        bdrv_coroutine_enter(bs, co);
         BDRV_POLL_WHILE(bs, flush_co.ret == NOT_DONE);
     }
 
@@ -2527,7 +2544,7 @@ int bdrv_pdiscard(BlockDriverState *bs, int64_t offset, int count)
         bdrv_pdiscard_co_entry(&rwco);
     } else {
         co = qemu_coroutine_create(bdrv_pdiscard_co_entry, &rwco);
-        qemu_coroutine_enter(co);
+        bdrv_coroutine_enter(bs, co);
         BDRV_POLL_WHILE(bs, rwco.ret == NOT_DONE);
     }
 
