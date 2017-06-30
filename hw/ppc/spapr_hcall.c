@@ -12,6 +12,8 @@
 #include "trace.h"
 #include "kvm_ppc.h"
 #include "hw/ppc/spapr_ovec.h"
+#include "qemu/error-report.h"
+#include "mmu-book3s-v3.h"
 
 struct SPRSyncState {
     int spr;
@@ -878,6 +880,131 @@ static target_ulong h_set_mode(PowerPCCPU *cpu, sPAPRMachineState *spapr,
     return ret;
 }
 
+static target_ulong h_clean_slb(PowerPCCPU *cpu, sPAPRMachineState *spapr,
+                                target_ulong opcode, target_ulong *args)
+{
+    qemu_log_mask(LOG_UNIMP, "Unimplemented SPAPR hcall 0x"TARGET_FMT_lx"%s\n",
+                  opcode, " (H_CLEAN_SLB)");
+    return H_FUNCTION;
+}
+
+static target_ulong h_invalidate_pid(PowerPCCPU *cpu, sPAPRMachineState *spapr,
+                                     target_ulong opcode, target_ulong *args)
+{
+    qemu_log_mask(LOG_UNIMP, "Unimplemented SPAPR hcall 0x"TARGET_FMT_lx"%s\n",
+                  opcode, " (H_INVALIDATE_PID)");
+    return H_FUNCTION;
+}
+
+static void spapr_check_setup_free_hpt(sPAPRMachineState *spapr,
+                                       uint64_t patbe_old, uint64_t patbe_new)
+{
+    /*
+     * We have 4 Options:
+     * HASH->HASH || RADIX->RADIX || NOTHING->RADIX : Do Nothing
+     * HASH->RADIX                                  : Free HPT
+     * RADIX->HASH                                  : Allocate HPT
+     * NOTHING->HASH                                : Allocate HPT
+     * Note: NOTHING implies the case where we said the guest could choose
+     *       later and so assumed radix and now it's called H_REG_PROC_TBL
+     */
+
+    if ((patbe_old & PATBE1_GR) == (patbe_new & PATBE1_GR)) {
+        /* We assume RADIX, so this catches all the "Do Nothing" cases */
+    } else if (!(patbe_old & PATBE1_GR)) {
+        /* HASH->RADIX : Free HPT */
+        spapr_free_hpt(spapr);
+    } else if (!(patbe_new & PATBE1_GR)) {
+        /* RADIX->HASH || NOTHING->HASH : Allocate HPT */
+        spapr_setup_hpt_and_vrma(spapr);
+    }
+    return;
+}
+
+#define FLAGS_MASK              0x01FULL
+#define FLAG_MODIFY             0x10
+#define FLAG_REGISTER           0x08
+#define FLAG_RADIX              0x04
+#define FLAG_HASH_PROC_TBL      0x02
+#define FLAG_GTSE               0x01
+
+static target_ulong h_register_process_table(PowerPCCPU *cpu,
+                                             sPAPRMachineState *spapr,
+                                             target_ulong opcode,
+                                             target_ulong *args)
+{
+    CPUState *cs;
+    target_ulong flags = args[0];
+    target_ulong proc_tbl = args[1];
+    target_ulong page_size = args[2];
+    target_ulong table_size = args[3];
+    uint64_t cproc;
+
+    if (flags & ~FLAGS_MASK) { /* Check no reserved bits are set */
+        return H_PARAMETER;
+    }
+    if (flags & FLAG_MODIFY) {
+        if (flags & FLAG_REGISTER) {
+            if (flags & FLAG_RADIX) { /* Register new RADIX process table */
+                if (proc_tbl & 0xfff || proc_tbl >> 60) {
+                    return H_P2;
+                } else if (page_size) {
+                    return H_P3;
+                } else if (table_size > 24) {
+                    return H_P4;
+                }
+                cproc = PATBE1_GR | proc_tbl | table_size;
+            } else { /* Register new HPT process table */
+                if (flags & FLAG_HASH_PROC_TBL) { /* Hash with Segment Tables */
+                    /* TODO - Not Supported */
+                    /* Technically caused by flag bits => H_PARAMETER */
+                    return H_PARAMETER;
+                } else { /* Hash with SLB */
+                    if (proc_tbl >> 38) {
+                        return H_P2;
+                    } else if (page_size & ~0x7) {
+                        return H_P3;
+                    } else if (table_size > 24) {
+                        return H_P4;
+                    }
+                }
+                cproc = (proc_tbl << 25) | page_size << 5 | table_size;
+            }
+
+        } else { /* Deregister current process table */
+            /* Set to benign value: (current GR) | 0. This allows
+             * deregistration in KVM to succeed even if the radix bit in flags
+             * doesn't match the radix bit in the old PATB. */
+            cproc = spapr->patb_entry & PATBE1_GR;
+        }
+    } else { /* Maintain current registration */
+        if (!(flags & FLAG_RADIX) != !(spapr->patb_entry & PATBE1_GR)) {
+            /* Technically caused by flag bits => H_PARAMETER */
+            return H_PARAMETER; /* Existing Process Table Mismatch */
+        }
+        cproc = spapr->patb_entry;
+    }
+
+    /* Check if we need to setup OR free the hpt */
+    spapr_check_setup_free_hpt(spapr, spapr->patb_entry, cproc);
+
+    spapr->patb_entry = cproc; /* Save new process table */
+
+    /* Update the UPRT and GTSE bits in the LPCR for all cpus */
+    CPU_FOREACH(cs) {
+        set_spr(cs, SPR_LPCR,
+                ((flags & (FLAG_RADIX | FLAG_HASH_PROC_TBL)) ? LPCR_UPRT : 0) |
+                ((flags & FLAG_GTSE) ? LPCR_GTSE : 0),
+                LPCR_UPRT | LPCR_GTSE);
+    }
+
+    if (kvm_enabled()) {
+        return kvmppc_configure_v3_mmu(cpu, flags & FLAG_RADIX,
+                                       flags & FLAG_GTSE, cproc);
+    }
+    return H_SUCCESS;
+}
+
 #define H_SIGNAL_SYS_RESET_ALL         -1
 #define H_SIGNAL_SYS_RESET_ALLBUTSELF  -2
 
@@ -918,18 +1045,13 @@ static target_ulong h_signal_sys_reset(PowerPCCPU *cpu,
     }
 }
 
-static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
-                                                  sPAPRMachineState *spapr,
-                                                  target_ulong opcode,
-                                                  target_ulong *args)
+static uint32_t cas_check_pvr(PowerPCCPU *cpu, target_ulong *addr,
+                              Error **errp)
 {
-    target_ulong list = ppc64_phys_to_real(args[0]);
-    target_ulong ov_table;
     bool explicit_match = false; /* Matched the CPU's real PVR */
     uint32_t max_compat = cpu->max_compat;
     uint32_t best_compat = 0;
     int i;
-    sPAPROptionVector *ov5_guest, *ov5_cas_old, *ov5_updates;
 
     /*
      * We scan the supplied table of PVRs looking for two things
@@ -939,9 +1061,9 @@ static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
     for (i = 0; i < 512; ++i) {
         uint32_t pvr, pvr_mask;
 
-        pvr_mask = ldl_be_phys(&address_space_memory, list);
-        pvr = ldl_be_phys(&address_space_memory, list + 4);
-        list += 8;
+        pvr_mask = ldl_be_phys(&address_space_memory, *addr);
+        pvr = ldl_be_phys(&address_space_memory, *addr + 4);
+        *addr += 8;
 
         if (~pvr_mask & pvr) {
             break; /* Terminator record */
@@ -960,17 +1082,38 @@ static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
         /* We couldn't find a suitable compatibility mode, and either
          * the guest doesn't support "raw" mode for this CPU, or raw
          * mode is disabled because a maximum compat mode is set */
-        return H_HARDWARE;
+        error_setg(errp, "Couldn't negotiate a suitable PVR during CAS");
+        return 0;
     }
 
     /* Parsing finished */
     trace_spapr_cas_pvr(cpu->compat_pvr, explicit_match, best_compat);
 
-    /* Update CPUs */
-    if (cpu->compat_pvr != best_compat) {
-        Error *local_err = NULL;
+    return best_compat;
+}
 
-        ppc_set_compat_all(best_compat, &local_err);
+static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
+                                                  sPAPRMachineState *spapr,
+                                                  target_ulong opcode,
+                                                  target_ulong *args)
+{
+    /* Working address in data buffer */
+    target_ulong addr = ppc64_phys_to_real(args[0]);
+    target_ulong ov_table;
+    uint32_t cas_pvr;
+    sPAPROptionVector *ov1_guest, *ov5_guest, *ov5_cas_old, *ov5_updates;
+    bool guest_radix;
+    Error *local_err = NULL;
+
+    cas_pvr = cas_check_pvr(cpu, &addr, &local_err);
+    if (local_err) {
+        error_report_err(local_err);
+        return H_HARDWARE;
+    }
+
+    /* Update CPUs */
+    if (cpu->compat_pvr != cas_pvr) {
+        ppc_set_compat_all(cas_pvr, &local_err);
         if (local_err) {
             error_report_err(local_err);
             return H_HARDWARE;
@@ -978,9 +1121,17 @@ static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
     }
 
     /* For the future use: here @ov_table points to the first option vector */
-    ov_table = list;
+    ov_table = addr;
 
+    ov1_guest = spapr_ovec_parse_vector(ov_table, 1);
     ov5_guest = spapr_ovec_parse_vector(ov_table, 5);
+    if (spapr_ovec_test(ov5_guest, OV5_MMU_BOTH)) {
+        error_report("guest requested hash and radix MMU, which is invalid.");
+        exit(EXIT_FAILURE);
+    }
+    /* The radix/hash bit in byte 24 requires special handling: */
+    guest_radix = spapr_ovec_test(ov5_guest, OV5_MMU_RADIX_300);
+    spapr_ovec_clear(ov5_guest, OV5_MMU_RADIX_300);
 
     /* NOTE: there are actually a number of ov5 bits where input from the
      * guest is always zero, and the platform/QEMU enables them independently
@@ -999,7 +1150,23 @@ static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
     ov5_updates = spapr_ovec_new();
     spapr->cas_reboot = spapr_ovec_diff(ov5_updates,
                                         ov5_cas_old, spapr->ov5_cas);
-
+    /* Now that processing is finished, set the radix/hash bit for the
+     * guest if it requested a valid mode; otherwise terminate the boot. */
+    if (guest_radix) {
+        if (kvm_enabled() && !kvmppc_has_cap_mmu_radix()) {
+            error_report("Guest requested unavailable MMU mode (radix).");
+            exit(EXIT_FAILURE);
+        }
+        spapr_ovec_set(spapr->ov5_cas, OV5_MMU_RADIX_300);
+    } else {
+        if (kvm_enabled() && kvmppc_has_cap_mmu_radix()
+            && !kvmppc_has_cap_mmu_hash_v3()) {
+            error_report("Guest requested unavailable MMU mode (hash).");
+            exit(EXIT_FAILURE);
+        }
+    }
+    spapr->cas_legacy_guest_workaround = !spapr_ovec_test(ov1_guest,
+                                                          OV1_PPC_3_00);
     if (!spapr->cas_reboot) {
         spapr->cas_reboot =
             (spapr_h_cas_compose_response(spapr, args[1], args[2],
@@ -1008,7 +1175,14 @@ static target_ulong h_client_architecture_support(PowerPCCPU *cpu,
     spapr_ovec_cleanup(ov5_updates);
 
     if (spapr->cas_reboot) {
-        qemu_system_reset_request();
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
+    } else {
+        /* If ppc_spapr_reset() did not set up a HPT but one is necessary
+         * (because the guest isn't going to use radix) then set it up here. */
+        if ((spapr->patb_entry & PATBE1_GR) && !guest_radix) {
+            /* legacy hash or new hash: */
+            spapr_setup_hpt_and_vrma(spapr);
+        }
     }
 
     return H_SUCCESS;
@@ -1083,6 +1257,11 @@ static void hypercall_register_types(void)
     spapr_register_hypercall(H_SET_XDABR, h_set_xdabr);
     spapr_register_hypercall(H_PAGE_INIT, h_page_init);
     spapr_register_hypercall(H_SET_MODE, h_set_mode);
+
+    /* In Memory Table MMU h-calls */
+    spapr_register_hypercall(H_CLEAN_SLB, h_clean_slb);
+    spapr_register_hypercall(H_INVALIDATE_PID, h_invalidate_pid);
+    spapr_register_hypercall(H_REGISTER_PROC_TBL, h_register_process_table);
 
     /* "debugger" hcalls (also used by SLOF). Note: We do -not- differenciate
      * here between the "CI" and the "CACHE" variants, they will use whatever

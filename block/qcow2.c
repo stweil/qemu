@@ -356,7 +356,7 @@ static int validate_table_offset(BlockDriverState *bs, uint64_t offset,
     }
 
     /* Tables must be cluster aligned */
-    if (offset & (s->cluster_size - 1)) {
+    if (offset_into_cluster(s, offset) != 0) {
         return -EINVAL;
     }
 
@@ -1385,7 +1385,7 @@ static int64_t coroutine_fn qcow2_co_get_block_status(BlockDriverState *bs,
         *file = bs->file->bs;
         status |= BDRV_BLOCK_OFFSET_VALID | cluster_offset;
     }
-    if (ret == QCOW2_CLUSTER_ZERO) {
+    if (ret == QCOW2_CLUSTER_ZERO_PLAIN || ret == QCOW2_CLUSTER_ZERO_ALLOC) {
         status |= BDRV_BLOCK_ZERO;
     } else if (ret != QCOW2_CLUSTER_UNALLOCATED) {
         status |= BDRV_BLOCK_DATA;
@@ -1482,7 +1482,8 @@ static coroutine_fn int qcow2_co_preadv(BlockDriverState *bs, uint64_t offset,
             }
             break;
 
-        case QCOW2_CLUSTER_ZERO:
+        case QCOW2_CLUSTER_ZERO_PLAIN:
+        case QCOW2_CLUSTER_ZERO_ALLOC:
             qemu_iovec_memset(&hd_qiov, 0, 0, cur_bytes);
             break;
 
@@ -1574,6 +1575,44 @@ fail:
     return ret;
 }
 
+/* Check if it's possible to merge a write request with the writing of
+ * the data from the COW regions */
+static bool merge_cow(uint64_t offset, unsigned bytes,
+                      QEMUIOVector *hd_qiov, QCowL2Meta *l2meta)
+{
+    QCowL2Meta *m;
+
+    for (m = l2meta; m != NULL; m = m->next) {
+        /* If both COW regions are empty then there's nothing to merge */
+        if (m->cow_start.nb_bytes == 0 && m->cow_end.nb_bytes == 0) {
+            continue;
+        }
+
+        /* The data (middle) region must be immediately after the
+         * start region */
+        if (l2meta_cow_start(m) + m->cow_start.nb_bytes != offset) {
+            continue;
+        }
+
+        /* The end region must be immediately after the data (middle)
+         * region */
+        if (m->offset + m->cow_end.offset != offset + bytes) {
+            continue;
+        }
+
+        /* Make sure that adding both COW regions to the QEMUIOVector
+         * does not exceed IOV_MAX */
+        if (hd_qiov->niov > IOV_MAX - 2) {
+            continue;
+        }
+
+        m->data_qiov = hd_qiov;
+        return true;
+    }
+
+    return false;
+}
+
 static coroutine_fn int qcow2_co_pwritev(BlockDriverState *bs, uint64_t offset,
                                          uint64_t bytes, QEMUIOVector *qiov,
                                          int flags)
@@ -1656,16 +1695,22 @@ static coroutine_fn int qcow2_co_pwritev(BlockDriverState *bs, uint64_t offset,
             goto fail;
         }
 
-        qemu_co_mutex_unlock(&s->lock);
-        BLKDBG_EVENT(bs->file, BLKDBG_WRITE_AIO);
-        trace_qcow2_writev_data(qemu_coroutine_self(),
-                                cluster_offset + offset_in_cluster);
-        ret = bdrv_co_pwritev(bs->file,
-                              cluster_offset + offset_in_cluster,
-                              cur_bytes, &hd_qiov, 0);
-        qemu_co_mutex_lock(&s->lock);
-        if (ret < 0) {
-            goto fail;
+        /* If we need to do COW, check if it's possible to merge the
+         * writing of the guest data together with that of the COW regions.
+         * If it's not possible (or not necessary) then write the
+         * guest data now. */
+        if (!merge_cow(offset, cur_bytes, &hd_qiov, l2meta)) {
+            qemu_co_mutex_unlock(&s->lock);
+            BLKDBG_EVENT(bs->file, BLKDBG_WRITE_AIO);
+            trace_qcow2_writev_data(qemu_coroutine_self(),
+                                    cluster_offset + offset_in_cluster);
+            ret = bdrv_co_pwritev(bs->file,
+                                  cluster_offset + offset_in_cluster,
+                                  cur_bytes, &hd_qiov, 0);
+            qemu_co_mutex_lock(&s->lock);
+            if (ret < 0) {
+                goto fail;
+            }
         }
 
         while (l2meta != NULL) {
@@ -2139,7 +2184,7 @@ static int qcow2_create2(const char *filename, int64_t total_size,
          * too, as long as the bulk is allocated here). Therefore, using
          * floating point arithmetic is fine. */
         int64_t meta_size = 0;
-        uint64_t nreftablee, nrefblocke, nl1e, nl2e;
+        uint64_t nreftablee, nrefblocke, nl1e, nl2e, refblock_count;
         int64_t aligned_total_size = align_offset(total_size, cluster_size);
         int refblock_bits, refblock_size;
         /* refcount entry size in bytes */
@@ -2182,11 +2227,12 @@ static int qcow2_create2(const char *filename, int64_t total_size,
         nrefblocke = (aligned_total_size + meta_size + cluster_size)
                    / (cluster_size - rces - rces * sizeof(uint64_t)
                                                  / cluster_size);
-        meta_size += DIV_ROUND_UP(nrefblocke, refblock_size) * cluster_size;
+        refblock_count = DIV_ROUND_UP(nrefblocke, refblock_size);
+        meta_size += refblock_count * cluster_size;
 
         /* total size of refcount tables */
-        nreftablee = nrefblocke / refblock_size;
-        nreftablee = align_offset(nreftablee, cluster_size / sizeof(uint64_t));
+        nreftablee = align_offset(refblock_count,
+                                  cluster_size / sizeof(uint64_t));
         meta_size += nreftablee * sizeof(uint64_t);
 
         qemu_opt_set_number(opts, BLOCK_OPT_SIZE,
@@ -2265,7 +2311,7 @@ static int qcow2_create2(const char *filename, int64_t total_size,
      * table)
      */
     options = qdict_new();
-    qdict_put(options, "driver", qstring_from_str("qcow2"));
+    qdict_put_str(options, "driver", "qcow2");
     blk = blk_new_open(filename, NULL, options,
                        BDRV_O_RDWR | BDRV_O_RESIZE | BDRV_O_NO_FLUSH,
                        &local_err);
@@ -2294,9 +2340,9 @@ static int qcow2_create2(const char *filename, int64_t total_size,
     }
 
     /* Okay, now that we have a valid image, let's give it the right size */
-    ret = blk_truncate(blk, total_size);
+    ret = blk_truncate(blk, total_size, errp);
     if (ret < 0) {
-        error_setg_errno(errp, -ret, "Could not resize image");
+        error_prepend(errp, "Could not resize image: ");
         goto out;
     }
 
@@ -2327,7 +2373,7 @@ static int qcow2_create2(const char *filename, int64_t total_size,
 
     /* Reopen the image without BDRV_O_NO_FLUSH to flush it before returning */
     options = qdict_new();
-    qdict_put(options, "driver", qstring_from_str("qcow2"));
+    qdict_put_str(options, "driver", "qcow2");
     blk = blk_new_open(filename, NULL, options,
                        BDRV_O_RDWR | BDRV_O_NO_BACKING, &local_err);
     if (blk == NULL) {
@@ -2449,6 +2495,10 @@ static bool is_zero_sectors(BlockDriverState *bs, int64_t start,
     BlockDriverState *file;
     int64_t res;
 
+    if (start + count > bs->total_sectors) {
+        count = bs->total_sectors - start;
+    }
+
     if (!count) {
         return true;
     }
@@ -2458,27 +2508,30 @@ static bool is_zero_sectors(BlockDriverState *bs, int64_t start,
 }
 
 static coroutine_fn int qcow2_co_pwrite_zeroes(BlockDriverState *bs,
-    int64_t offset, int count, BdrvRequestFlags flags)
+    int64_t offset, int bytes, BdrvRequestFlags flags)
 {
     int ret;
     BDRVQcow2State *s = bs->opaque;
 
     uint32_t head = offset % s->cluster_size;
-    uint32_t tail = (offset + count) % s->cluster_size;
+    uint32_t tail = (offset + bytes) % s->cluster_size;
 
-    trace_qcow2_pwrite_zeroes_start_req(qemu_coroutine_self(), offset, count);
+    trace_qcow2_pwrite_zeroes_start_req(qemu_coroutine_self(), offset, bytes);
+    if (offset + bytes == bs->total_sectors * BDRV_SECTOR_SIZE) {
+        tail = 0;
+    }
 
     if (head || tail) {
         int64_t cl_start = (offset - head) >> BDRV_SECTOR_BITS;
         uint64_t off;
         unsigned int nr;
 
-        assert(head + count <= s->cluster_size);
+        assert(head + bytes <= s->cluster_size);
 
         /* check whether remainder of cluster already reads as zero */
         if (!(is_zero_sectors(bs, cl_start,
                               DIV_ROUND_UP(head, BDRV_SECTOR_SIZE)) &&
-              is_zero_sectors(bs, (offset + count) >> BDRV_SECTOR_BITS,
+              is_zero_sectors(bs, (offset + bytes) >> BDRV_SECTOR_BITS,
                               DIV_ROUND_UP(-tail & (s->cluster_size - 1),
                                            BDRV_SECTOR_SIZE)))) {
             return -ENOTSUP;
@@ -2487,10 +2540,12 @@ static coroutine_fn int qcow2_co_pwrite_zeroes(BlockDriverState *bs,
         qemu_co_mutex_lock(&s->lock);
         /* We can have new write after previous check */
         offset = cl_start << BDRV_SECTOR_BITS;
-        count = s->cluster_size;
+        bytes = s->cluster_size;
         nr = s->cluster_size;
         ret = qcow2_get_cluster_offset(bs, offset, &nr, &off);
-        if (ret != QCOW2_CLUSTER_UNALLOCATED && ret != QCOW2_CLUSTER_ZERO) {
+        if (ret != QCOW2_CLUSTER_UNALLOCATED &&
+            ret != QCOW2_CLUSTER_ZERO_PLAIN &&
+            ret != QCOW2_CLUSTER_ZERO_ALLOC) {
             qemu_co_mutex_unlock(&s->lock);
             return -ENOTSUP;
         }
@@ -2498,59 +2553,65 @@ static coroutine_fn int qcow2_co_pwrite_zeroes(BlockDriverState *bs,
         qemu_co_mutex_lock(&s->lock);
     }
 
-    trace_qcow2_pwrite_zeroes(qemu_coroutine_self(), offset, count);
+    trace_qcow2_pwrite_zeroes(qemu_coroutine_self(), offset, bytes);
 
     /* Whatever is left can use real zero clusters */
-    ret = qcow2_zero_clusters(bs, offset, count >> BDRV_SECTOR_BITS, flags);
+    ret = qcow2_cluster_zeroize(bs, offset, bytes, flags);
     qemu_co_mutex_unlock(&s->lock);
 
     return ret;
 }
 
 static coroutine_fn int qcow2_co_pdiscard(BlockDriverState *bs,
-                                          int64_t offset, int count)
+                                          int64_t offset, int bytes)
 {
     int ret;
     BDRVQcow2State *s = bs->opaque;
 
-    if (!QEMU_IS_ALIGNED(offset | count, s->cluster_size)) {
-        assert(count < s->cluster_size);
-        return -ENOTSUP;
+    if (!QEMU_IS_ALIGNED(offset | bytes, s->cluster_size)) {
+        assert(bytes < s->cluster_size);
+        /* Ignore partial clusters, except for the special case of the
+         * complete partial cluster at the end of an unaligned file */
+        if (!QEMU_IS_ALIGNED(offset, s->cluster_size) ||
+            offset + bytes != bs->total_sectors * BDRV_SECTOR_SIZE) {
+            return -ENOTSUP;
+        }
     }
 
     qemu_co_mutex_lock(&s->lock);
-    ret = qcow2_discard_clusters(bs, offset, count >> BDRV_SECTOR_BITS,
-                                 QCOW2_DISCARD_REQUEST, false);
+    ret = qcow2_cluster_discard(bs, offset, bytes, QCOW2_DISCARD_REQUEST,
+                                false);
     qemu_co_mutex_unlock(&s->lock);
     return ret;
 }
 
-static int qcow2_truncate(BlockDriverState *bs, int64_t offset)
+static int qcow2_truncate(BlockDriverState *bs, int64_t offset, Error **errp)
 {
     BDRVQcow2State *s = bs->opaque;
     int64_t new_l1_size;
     int ret;
 
     if (offset & 511) {
-        error_report("The new size must be a multiple of 512");
+        error_setg(errp, "The new size must be a multiple of 512");
         return -EINVAL;
     }
 
     /* cannot proceed if image has snapshots */
     if (s->nb_snapshots) {
-        error_report("Can't resize an image which has snapshots");
+        error_setg(errp, "Can't resize an image which has snapshots");
         return -ENOTSUP;
     }
 
     /* shrinking is currently not supported */
     if (offset < bs->total_sectors * 512) {
-        error_report("qcow2 doesn't support shrinking images yet");
+        error_setg(errp, "qcow2 doesn't support shrinking images yet");
         return -ENOTSUP;
     }
 
     new_l1_size = size_to_l1(s, offset);
     ret = qcow2_grow_l1_table(bs, new_l1_size, true);
     if (ret < 0) {
+        error_setg_errno(errp, -ret, "Failed to grow the L1 table");
         return ret;
     }
 
@@ -2559,6 +2620,7 @@ static int qcow2_truncate(BlockDriverState *bs, int64_t offset)
     ret = bdrv_pwrite_sync(bs->file, offsetof(QCowHeader, size),
                            &offset, sizeof(uint64_t));
     if (ret < 0) {
+        error_setg_errno(errp, -ret, "Failed to update the image size");
         return ret;
     }
 
@@ -2584,7 +2646,7 @@ qcow2_co_pwritev_compressed(BlockDriverState *bs, uint64_t offset,
         /* align end of file to a sector boundary to ease reading with
            sector based I/Os */
         cluster_offset = bdrv_getlength(bs->file->bs);
-        return bdrv_truncate(bs->file, cluster_offset);
+        return bdrv_truncate(bs->file, cluster_offset, NULL);
     }
 
     buf = qemu_blockalign(bs, s->cluster_size);
@@ -2674,6 +2736,7 @@ fail:
 static int make_completely_empty(BlockDriverState *bs)
 {
     BDRVQcow2State *s = bs->opaque;
+    Error *local_err = NULL;
     int ret, l1_clusters;
     int64_t offset;
     uint64_t *new_reftable = NULL;
@@ -2798,8 +2861,10 @@ static int make_completely_empty(BlockDriverState *bs)
         goto fail;
     }
 
-    ret = bdrv_truncate(bs->file, (3 + l1_clusters) * s->cluster_size);
+    ret = bdrv_truncate(bs->file, (3 + l1_clusters) * s->cluster_size,
+                        &local_err);
     if (ret < 0) {
+        error_report_err(local_err);
         goto fail;
     }
 
@@ -2822,9 +2887,8 @@ fail:
 static int qcow2_make_empty(BlockDriverState *bs)
 {
     BDRVQcow2State *s = bs->opaque;
-    uint64_t start_sector;
-    int sector_step = (QEMU_ALIGN_DOWN(INT_MAX, s->cluster_size) /
-                       BDRV_SECTOR_SIZE);
+    uint64_t offset, end_offset;
+    int step = QEMU_ALIGN_DOWN(INT_MAX, s->cluster_size);
     int l1_clusters, ret = 0;
 
     l1_clusters = DIV_ROUND_UP(s->l1_size, s->cluster_size / sizeof(uint64_t));
@@ -2841,18 +2905,15 @@ static int qcow2_make_empty(BlockDriverState *bs)
 
     /* This fallback code simply discards every active cluster; this is slow,
      * but works in all cases */
-    for (start_sector = 0; start_sector < bs->total_sectors;
-         start_sector += sector_step)
-    {
+    end_offset = bs->total_sectors * BDRV_SECTOR_SIZE;
+    for (offset = 0; offset < end_offset; offset += step) {
         /* As this function is generally used after committing an external
          * snapshot, QCOW2_DISCARD_SNAPSHOT seems appropriate. Also, the
          * default action for this kind of discard is to pass the discard,
          * which will ideally result in an actually smaller image file, as
          * is probably desired. */
-        ret = qcow2_discard_clusters(bs, start_sector * BDRV_SECTOR_SIZE,
-                                     MIN(sector_step,
-                                         bs->total_sectors - start_sector),
-                                     QCOW2_DISCARD_SNAPSHOT, true);
+        ret = qcow2_cluster_discard(bs, offset, MIN(step, end_offset - offset),
+                                    QCOW2_DISCARD_SNAPSHOT, true);
         if (ret < 0) {
             break;
         }
@@ -3205,7 +3266,6 @@ static int qcow2_amend_options(BlockDriverState *bs, QemuOpts *opts,
 
     if (s->refcount_bits != refcount_bits) {
         int refcount_order = ctz32(refcount_bits);
-        Error *local_error = NULL;
 
         if (new_version < 3 && refcount_bits != 16) {
             error_report("Different refcount widths than 16 bits require "
@@ -3217,9 +3277,9 @@ static int qcow2_amend_options(BlockDriverState *bs, QemuOpts *opts,
         helper_cb_info.current_operation = QCOW2_CHANGING_REFCOUNT_ORDER;
         ret = qcow2_change_refcount_order(bs, refcount_order,
                                           &qcow2_amend_helper_cb,
-                                          &helper_cb_info, &local_error);
+                                          &helper_cb_info, &local_err);
         if (ret < 0) {
-            error_report_err(local_error);
+            error_report_err(local_err);
             return ret;
         }
     }
@@ -3273,9 +3333,10 @@ static int qcow2_amend_options(BlockDriverState *bs, QemuOpts *opts,
             return ret;
         }
 
-        ret = blk_truncate(blk, new_size);
+        ret = blk_truncate(blk, new_size, &local_err);
         blk_unref(blk);
         if (ret < 0) {
+            error_report_err(local_err);
             return ret;
         }
     }

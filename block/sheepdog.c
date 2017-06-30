@@ -16,7 +16,6 @@
 #include "qapi-visit.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qdict.h"
-#include "qapi/qmp/qint.h"
 #include "qapi/qobject-input-visitor.h"
 #include "qemu/uri.h"
 #include "qemu/error-report.h"
@@ -536,14 +535,12 @@ static SocketAddress *sd_socket_address(const char *path,
     SocketAddress *addr = g_new0(SocketAddress, 1);
 
     if (path) {
-        addr->type = SOCKET_ADDRESS_KIND_UNIX;
-        addr->u.q_unix.data = g_new0(UnixSocketAddress, 1);
-        addr->u.q_unix.data->path = g_strdup(path);
+        addr->type = SOCKET_ADDRESS_TYPE_UNIX;
+        addr->u.q_unix.path = g_strdup(path);
     } else {
-        addr->type = SOCKET_ADDRESS_KIND_INET;
-        addr->u.inet.data = g_new0(InetSocketAddress, 1);
-        addr->u.inet.data->host = g_strdup(host ?: SD_DEFAULT_ADDR);
-        addr->u.inet.data->port = g_strdup(port ?: stringify(SD_DEFAULT_PORT));
+        addr->type = SOCKET_ADDRESS_TYPE_INET;
+        addr->u.inet.host = g_strdup(host ?: SD_DEFAULT_ADDR);
+        addr->u.inet.port = g_strdup(port ?: stringify(SD_DEFAULT_PORT));
     }
 
     return addr;
@@ -554,7 +551,6 @@ static SocketAddress *sd_server_config(QDict *options, Error **errp)
     QDict *server = NULL;
     QObject *crumpled_server = NULL;
     Visitor *iv = NULL;
-    SocketAddressFlat *saddr_flat = NULL;
     SocketAddress *saddr = NULL;
     Error *local_err = NULL;
 
@@ -574,16 +570,13 @@ static SocketAddress *sd_server_config(QDict *options, Error **errp)
      * visitor expects the former.
      */
     iv = qobject_input_visitor_new(crumpled_server);
-    visit_type_SocketAddressFlat(iv, NULL, &saddr_flat, &local_err);
+    visit_type_SocketAddress(iv, NULL, &saddr, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         goto done;
     }
 
-    saddr = socket_address_crumple(saddr_flat);
-
 done:
-    qapi_free_SocketAddressFlat(saddr_flat);
     visit_free(iv);
     qobject_decref(crumpled_server);
     QDECREF(server);
@@ -595,9 +588,9 @@ static int connect_to_sdog(BDRVSheepdogState *s, Error **errp)
 {
     int fd;
 
-    fd = socket_connect(s->addr, errp, NULL, NULL);
+    fd = socket_connect(s->addr, NULL, NULL, errp);
 
-    if (s->addr->type == SOCKET_ADDRESS_KIND_INET && fd >= 0) {
+    if (s->addr->type == SOCKET_ADDRESS_TYPE_INET && fd >= 0) {
         int ret = socket_set_nodelay(fd);
         if (ret < 0) {
             error_report("%s", strerror(errno));
@@ -704,7 +697,8 @@ out:
 
     srco->co = NULL;
     srco->ret = ret;
-    srco->finished = true;
+    /* Set srco->finished before reading bs->wakeup.  */
+    atomic_mb_set(&srco->finished, true);
     if (srco->bs) {
         bdrv_wakeup(srco->bs);
     }
@@ -1052,11 +1046,11 @@ static void sd_parse_uri(SheepdogConfig *cfg, const char *filename,
     }
 
     /* transport */
-    if (!strcmp(uri->scheme, "sheepdog")) {
+    if (!g_strcmp0(uri->scheme, "sheepdog")) {
         is_unix = false;
-    } else if (!strcmp(uri->scheme, "sheepdog+tcp")) {
+    } else if (!g_strcmp0(uri->scheme, "sheepdog+tcp")) {
         is_unix = false;
-    } else if (!strcmp(uri->scheme, "sheepdog+unix")) {
+    } else if (!g_strcmp0(uri->scheme, "sheepdog+unix")) {
         is_unix = true;
     } else {
         error_setg(&err, "URI scheme must be 'sheepdog', 'sheepdog+tcp',"
@@ -2159,9 +2153,8 @@ static int64_t sd_getlength(BlockDriverState *bs)
     return s->inode.vdi_size;
 }
 
-static int sd_truncate(BlockDriverState *bs, int64_t offset)
+static int sd_truncate(BlockDriverState *bs, int64_t offset, Error **errp)
 {
-    Error *local_err = NULL;
     BDRVSheepdogState *s = bs->opaque;
     int ret, fd;
     unsigned int datalen;
@@ -2169,16 +2162,15 @@ static int sd_truncate(BlockDriverState *bs, int64_t offset)
 
     max_vdi_size = (UINT64_C(1) << s->inode.block_size_shift) * MAX_DATA_OBJS;
     if (offset < s->inode.vdi_size) {
-        error_report("shrinking is not supported");
+        error_setg(errp, "shrinking is not supported");
         return -EINVAL;
     } else if (offset > max_vdi_size) {
-        error_report("too big image size");
+        error_setg(errp, "too big image size");
         return -EINVAL;
     }
 
-    fd = connect_to_sdog(s, &local_err);
+    fd = connect_to_sdog(s, errp);
     if (fd < 0) {
-        error_report_err(local_err);
         return fd;
     }
 
@@ -2191,7 +2183,7 @@ static int sd_truncate(BlockDriverState *bs, int64_t offset)
     close(fd);
 
     if (ret < 0) {
-        error_report("failed to update an inode.");
+        error_setg_errno(errp, -ret, "failed to update an inode");
     }
 
     return ret;
@@ -2456,7 +2448,7 @@ static coroutine_fn int sd_co_writev(BlockDriverState *bs, int64_t sector_num,
     BDRVSheepdogState *s = bs->opaque;
 
     if (offset > s->inode.vdi_size) {
-        ret = sd_truncate(bs, offset);
+        ret = sd_truncate(bs, offset, NULL);
         if (ret < 0) {
             return ret;
         }
@@ -2943,7 +2935,7 @@ static int sd_load_vmstate(BlockDriverState *bs, QEMUIOVector *qiov,
 
 
 static coroutine_fn int sd_co_pdiscard(BlockDriverState *bs, int64_t offset,
-                                      int count)
+                                      int bytes)
 {
     SheepdogAIOCB acb;
     BDRVSheepdogState *s = bs->opaque;
@@ -2961,11 +2953,11 @@ static coroutine_fn int sd_co_pdiscard(BlockDriverState *bs, int64_t offset,
     iov.iov_len = sizeof(zero);
     discard_iov.iov = &iov;
     discard_iov.niov = 1;
-    if (!QEMU_IS_ALIGNED(offset | count, BDRV_SECTOR_SIZE)) {
+    if (!QEMU_IS_ALIGNED(offset | bytes, BDRV_SECTOR_SIZE)) {
         return -ENOTSUP;
     }
     sd_aio_setup(&acb, s, &discard_iov, offset >> BDRV_SECTOR_BITS,
-                 count >> BDRV_SECTOR_BITS, AIOCB_DISCARD_OBJ);
+                 bytes >> BDRV_SECTOR_BITS, AIOCB_DISCARD_OBJ);
     sd_co_rw_vector(&acb);
     sd_aio_complete(&acb);
 

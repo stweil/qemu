@@ -475,8 +475,8 @@ qcrypto_block_luks_load_key(QCryptoBlock *block,
     rv = readfunc(block,
                   slot->key_offset * QCRYPTO_BLOCK_LUKS_SECTOR_SIZE,
                   splitkey, splitkeylen,
-                  errp,
-                  opaque);
+                  opaque,
+                  errp);
     if (rv < 0) {
         goto cleanup;
     }
@@ -679,8 +679,8 @@ qcrypto_block_luks_open(QCryptoBlock *block,
     rv = readfunc(block, 0,
                   (uint8_t *)&luks->header,
                   sizeof(luks->header),
-                  errp,
-                  opaque);
+                  opaque,
+                  errp);
     if (rv < 0) {
         ret = rv;
         goto fail;
@@ -1246,7 +1246,7 @@ qcrypto_block_luks_create(QCryptoBlock *block,
         QCRYPTO_BLOCK_LUKS_SECTOR_SIZE;
 
     /* Reserve header space to match payload offset */
-    initfunc(block, block->payload_offset, &local_err, opaque);
+    initfunc(block, block->payload_offset, opaque, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         goto error;
@@ -1271,8 +1271,8 @@ qcrypto_block_luks_create(QCryptoBlock *block,
     writefunc(block, 0,
               (const uint8_t *)&luks->header,
               sizeof(luks->header),
-              &local_err,
-              opaque);
+              opaque,
+              &local_err);
 
     /* Delay checking local_err until we've byte-swapped */
 
@@ -1301,8 +1301,8 @@ qcrypto_block_luks_create(QCryptoBlock *block,
                   luks->header.key_slots[0].key_offset *
                   QCRYPTO_BLOCK_LUKS_SECTOR_SIZE,
                   splitkey, splitkeylen,
-                  errp,
-                  opaque) != splitkeylen) {
+                  opaque,
+                  errp) != splitkeylen) {
         goto error;
     }
 

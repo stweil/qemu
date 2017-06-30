@@ -35,7 +35,7 @@
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include "qemu/log.h"
-#include "sysemu/char.h"
+#include "chardev/char.h"
 #include "sysemu/device_tree.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/qtest.h"
@@ -232,7 +232,7 @@ static void boston_platreg_write(void *opaque, hwaddr addr,
         break;
     case PLAT_SOFTRST_CTL:
         if (val & PLAT_SOFTRST_CTL_SYSRESET) {
-            qemu_system_reset_request();
+            qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         }
         break;
     default:

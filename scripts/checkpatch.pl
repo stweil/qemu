@@ -1,4 +1,4 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
 # (c) 2001, Dave Jones. (the file handling bit)
 # (c) 2005, Joel Schopp <jschopp@austin.ibm.com> (the ugly bit)
 # (c) 2007,2008, Andy Whitcroft <apw@uk.ibm.com> (new conditions, test suite)
@@ -6,6 +6,7 @@
 # Licensed under the terms of the GNU GPL License version 2
 
 use strict;
+use warnings;
 
 my $P = $0;
 $P =~ s@.*/@@g;
@@ -2570,6 +2571,27 @@ sub process {
 		}
 		if ($line =~ /\bbzero\(/) {
 			ERROR("use memset() instead of bzero()\n" . $herecurr);
+		}
+		my $non_exit_glib_asserts = qr{g_assert_cmpstr|
+						g_assert_cmpint|
+						g_assert_cmpuint|
+						g_assert_cmphex|
+						g_assert_cmpfloat|
+						g_assert_true|
+						g_assert_false|
+						g_assert_nonnull|
+						g_assert_null|
+						g_assert_no_error|
+						g_assert_error|
+						g_test_assert_expected_messages|
+						g_test_trap_assert_passed|
+						g_test_trap_assert_stdout|
+						g_test_trap_assert_stdout_unmatched|
+						g_test_trap_assert_stderr|
+						g_test_trap_assert_stderr_unmatched}x;
+		if ($realfile !~ /^tests\// &&
+			$line =~ /\b(?:$non_exit_glib_asserts)\(/) {
+			ERROR("Use g_assert or g_assert_not_reached\n". $herecurr);
 		}
 	}
 

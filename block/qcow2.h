@@ -301,10 +301,10 @@ typedef struct Qcow2COWRegion {
      * Offset of the COW region in bytes from the start of the first cluster
      * touched by the request.
      */
-    uint64_t    offset;
+    unsigned    offset;
 
     /** Number of bytes to copy */
-    int         nb_bytes;
+    unsigned    nb_bytes;
 } Qcow2COWRegion;
 
 /**
@@ -321,6 +321,9 @@ typedef struct QCowL2Meta
 
     /** Number of newly allocated clusters */
     int nb_clusters;
+
+    /** Do not free the old clusters */
+    bool keep_old_clusters;
 
     /**
      * Requests that overlap with this allocation and wait to be restarted
@@ -340,18 +343,26 @@ typedef struct QCowL2Meta
      */
     Qcow2COWRegion cow_end;
 
+    /**
+     * The I/O vector with the data from the actual guest write request.
+     * If non-NULL, this is meant to be merged together with the data
+     * from @cow_start and @cow_end into one single write operation.
+     */
+    QEMUIOVector *data_qiov;
+
     /** Pointer to next L2Meta of the same write request */
     struct QCowL2Meta *next;
 
     QLIST_ENTRY(QCowL2Meta) next_in_flight;
 } QCowL2Meta;
 
-enum {
+typedef enum QCow2ClusterType {
     QCOW2_CLUSTER_UNALLOCATED,
+    QCOW2_CLUSTER_ZERO_PLAIN,
+    QCOW2_CLUSTER_ZERO_ALLOC,
     QCOW2_CLUSTER_NORMAL,
     QCOW2_CLUSTER_COMPRESSED,
-    QCOW2_CLUSTER_ZERO
-};
+} QCow2ClusterType;
 
 typedef enum QCow2MetadataOverlap {
     QCOW2_OL_MAIN_HEADER_BITNR    = 0,
@@ -440,12 +451,15 @@ static inline uint64_t qcow2_max_refcount_clusters(BDRVQcow2State *s)
     return QCOW_MAX_REFTABLE_SIZE >> s->cluster_bits;
 }
 
-static inline int qcow2_get_cluster_type(uint64_t l2_entry)
+static inline QCow2ClusterType qcow2_get_cluster_type(uint64_t l2_entry)
 {
     if (l2_entry & QCOW_OFLAG_COMPRESSED) {
         return QCOW2_CLUSTER_COMPRESSED;
     } else if (l2_entry & QCOW_OFLAG_ZERO) {
-        return QCOW2_CLUSTER_ZERO;
+        if (l2_entry & L2E_OFFSET_MASK) {
+            return QCOW2_CLUSTER_ZERO_ALLOC;
+        }
+        return QCOW2_CLUSTER_ZERO_PLAIN;
     } else if (!(l2_entry & L2E_OFFSET_MASK)) {
         return QCOW2_CLUSTER_UNALLOCATED;
     } else {
@@ -544,10 +558,11 @@ uint64_t qcow2_alloc_compressed_cluster_offset(BlockDriverState *bs,
                                          int compressed_size);
 
 int qcow2_alloc_cluster_link_l2(BlockDriverState *bs, QCowL2Meta *m);
-int qcow2_discard_clusters(BlockDriverState *bs, uint64_t offset,
-    int nb_sectors, enum qcow2_discard_type type, bool full_discard);
-int qcow2_zero_clusters(BlockDriverState *bs, uint64_t offset, int nb_sectors,
-                        int flags);
+int qcow2_cluster_discard(BlockDriverState *bs, uint64_t offset,
+                          uint64_t bytes, enum qcow2_discard_type type,
+                          bool full_discard);
+int qcow2_cluster_zeroize(BlockDriverState *bs, uint64_t offset,
+                          uint64_t bytes, int flags);
 
 int qcow2_expand_zero_clusters(BlockDriverState *bs,
                                BlockDriverAmendStatusCB *status_cb,

@@ -33,7 +33,7 @@
 #include "qapi/qmp/qerror.h"
 #include "qemu/error-report.h"
 #include "qemu/iov.h"
-#include "sysemu/char.h"
+#include "chardev/char-fe.h"
 
 #include <usbredirparser.h>
 #include <usbredirfilter.h>
@@ -229,21 +229,10 @@ static void usbredir_log(void *priv, int level, const char *msg)
 static void usbredir_log_data(USBRedirDevice *dev, const char *desc,
     const uint8_t *data, int len)
 {
-    int i, j, n;
-
     if (dev->debug < usbredirparser_debug_data) {
         return;
     }
-
-    for (i = 0; i < len; i += j) {
-        char buf[128];
-
-        n = sprintf(buf, "%s", desc);
-        for (j = 0; j < 8 && i + j < len; j++) {
-            n += sprintf(buf + n, " %02X", data[i + j]);
-        }
-        error_report("%s", buf);
-    }
+    qemu_hexdump((char *)data, stderr, desc, len);
 }
 
 /*
@@ -1430,10 +1419,8 @@ static void usbredir_cleanup_device_queues(USBRedirDevice *dev)
 static void usbredir_unrealize(USBDevice *udev, Error **errp)
 {
     USBRedirDevice *dev = USB_REDIRECT(udev);
-    Chardev *chr = qemu_chr_fe_get_driver(&dev->cs);
 
-    qemu_chr_fe_deinit(&dev->cs);
-    qemu_chr_delete(chr);
+    qemu_chr_fe_deinit(&dev->cs, true);
 
     /* Note must be done after qemu_chr_close, as that causes a close event */
     qemu_bh_delete(dev->chardev_close_bh);

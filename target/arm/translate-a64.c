@@ -101,21 +101,27 @@ void a64_translate_init(void)
         offsetof(CPUARMState, exclusive_high), "exclusive_high");
 }
 
-static inline ARMMMUIdx get_a64_user_mem_index(DisasContext *s)
+static inline int get_a64_user_mem_index(DisasContext *s)
 {
-    /* Return the mmu_idx to use for A64 "unprivileged load/store" insns:
+    /* Return the core mmu_idx to use for A64 "unprivileged load/store" insns:
      *  if EL1, access as if EL0; otherwise access at current EL
      */
+    ARMMMUIdx useridx;
+
     switch (s->mmu_idx) {
     case ARMMMUIdx_S12NSE1:
-        return ARMMMUIdx_S12NSE0;
+        useridx = ARMMMUIdx_S12NSE0;
+        break;
     case ARMMMUIdx_S1SE1:
-        return ARMMMUIdx_S1SE0;
+        useridx = ARMMMUIdx_S1SE0;
+        break;
     case ARMMMUIdx_S2NS:
         g_assert_not_reached();
     default:
-        return s->mmu_idx;
+        useridx = s->mmu_idx;
+        break;
     }
+    return arm_to_core_mmu_idx(useridx);
 }
 
 void aarch64_cpu_dump_state(CPUState *cs, FILE *f,
@@ -373,7 +379,7 @@ static inline void gen_goto_tb(DisasContext *s, int n, uint64_t dest)
         } else if (s->singlestep_enabled) {
             gen_exception_internal(EXCP_DEBUG);
         } else {
-            tcg_gen_exit_tb(0);
+            tcg_gen_lookup_and_goto_ptr(cpu_pc);
             s->is_jmp = DISAS_TB_JUMP;
         }
     }
@@ -1416,7 +1422,9 @@ static void handle_msr_i(DisasContext *s, uint32_t insn,
         gen_helper_msr_i_pstate(cpu_env, tcg_op, tcg_imm);
         tcg_temp_free_i32(tcg_imm);
         tcg_temp_free_i32(tcg_op);
-        s->is_jmp = DISAS_UPDATE;
+        /* For DAIFClear, exit the cpu loop to re-evaluate pending IRQs.  */
+        gen_a64_set_pc_im(s->pc);
+        s->is_jmp = (op == 0x1f ? DISAS_EXIT : DISAS_JUMP);
         break;
     }
     default:
@@ -11212,7 +11220,7 @@ void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
     dc->be_data = ARM_TBFLAG_BE_DATA(tb->flags) ? MO_BE : MO_LE;
     dc->condexec_mask = 0;
     dc->condexec_cond = 0;
-    dc->mmu_idx = ARM_TBFLAG_MMUIDX(tb->flags);
+    dc->mmu_idx = core_to_arm_mmu_idx(env, ARM_TBFLAG_MMUIDX(tb->flags));
     dc->tbi0 = ARM_TBFLAG_TBI0(tb->flags);
     dc->tbi1 = ARM_TBFLAG_TBI1(tb->flags);
     dc->current_el = arm_mmu_idx_to_el(dc->mmu_idx);
@@ -11361,7 +11369,9 @@ void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
             gen_a64_set_pc_im(dc->pc);
             /* fall through */
         case DISAS_JUMP:
-            /* indicate that the hash table must be used to find the next TB */
+            tcg_gen_lookup_and_goto_ptr(cpu_pc);
+            break;
+        case DISAS_EXIT:
             tcg_gen_exit_tb(0);
             break;
         case DISAS_TB_JUMP:

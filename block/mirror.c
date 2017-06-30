@@ -342,6 +342,7 @@ static uint64_t coroutine_fn mirror_iteration(MirrorBlockJob *s)
     int max_io_sectors = MAX((s->buf_size >> BDRV_SECTOR_BITS) / MAX_IN_FLIGHT,
                              MAX_IO_SECTORS);
 
+    bdrv_dirty_bitmap_lock(s->dirty_bitmap);
     sector_num = bdrv_dirty_iter_next(s->dbi);
     if (sector_num < 0) {
         bdrv_set_dirty_iter(s->dbi, 0);
@@ -349,6 +350,7 @@ static uint64_t coroutine_fn mirror_iteration(MirrorBlockJob *s)
         trace_mirror_restart_iter(s, bdrv_get_dirty_count(s->dirty_bitmap));
         assert(sector_num >= 0);
     }
+    bdrv_dirty_bitmap_unlock(s->dirty_bitmap);
 
     first_chunk = sector_num / sectors_per_chunk;
     while (test_bit(first_chunk, s->in_flight_bitmap)) {
@@ -360,12 +362,13 @@ static uint64_t coroutine_fn mirror_iteration(MirrorBlockJob *s)
 
     /* Find the number of consective dirty chunks following the first dirty
      * one, and wait for in flight requests in them. */
+    bdrv_dirty_bitmap_lock(s->dirty_bitmap);
     while (nb_chunks * sectors_per_chunk < (s->buf_size >> BDRV_SECTOR_BITS)) {
         int64_t next_dirty;
         int64_t next_sector = sector_num + nb_chunks * sectors_per_chunk;
         int64_t next_chunk = next_sector / sectors_per_chunk;
         if (next_sector >= end ||
-            !bdrv_get_dirty(source, s->dirty_bitmap, next_sector)) {
+            !bdrv_get_dirty_locked(source, s->dirty_bitmap, next_sector)) {
             break;
         }
         if (test_bit(next_chunk, s->in_flight_bitmap)) {
@@ -386,8 +389,10 @@ static uint64_t coroutine_fn mirror_iteration(MirrorBlockJob *s)
      * calling bdrv_get_block_status_above could yield - if some blocks are
      * marked dirty in this window, we need to know.
      */
-    bdrv_reset_dirty_bitmap(s->dirty_bitmap, sector_num,
-                            nb_chunks * sectors_per_chunk);
+    bdrv_reset_dirty_bitmap_locked(s->dirty_bitmap, sector_num,
+                                  nb_chunks * sectors_per_chunk);
+    bdrv_dirty_bitmap_unlock(s->dirty_bitmap);
+
     bitmap_set(s->in_flight_bitmap, sector_num / sectors_per_chunk, nb_chunks);
     while (nb_chunks > 0 && sector_num < end) {
         int64_t ret;
@@ -506,6 +511,8 @@ static void mirror_exit(BlockJob *job, void *opaque)
     BlockDriverState *mirror_top_bs = s->mirror_top_bs;
     Error *local_err = NULL;
 
+    bdrv_release_dirty_bitmap(src, s->dirty_bitmap);
+
     /* Make sure that the source BDS doesn't go away before we called
      * block_job_completed(). */
     bdrv_ref(src);
@@ -514,7 +521,12 @@ static void mirror_exit(BlockJob *job, void *opaque)
 
     /* Remove target parent that still uses BLK_PERM_WRITE/RESIZE before
      * inserting target_bs at s->to_replace, where we might not be able to get
-     * these permissions. */
+     * these permissions.
+     *
+     * Note that blk_unref() alone doesn't necessarily drop permissions because
+     * we might be running nested inside mirror_drain(), which takes an extra
+     * reference, so use an explicit blk_set_perm() first. */
+    blk_set_perm(s->target, 0, BLK_PERM_ALL, &error_abort);
     blk_unref(s->target);
     s->target = NULL;
 
@@ -724,7 +736,7 @@ static void coroutine_fn mirror_run(void *opaque)
         }
 
         if (s->bdev_length > base_length) {
-            ret = blk_truncate(s->target, s->bdev_length);
+            ret = blk_truncate(s->target, s->bdev_length, NULL);
             if (ret < 0) {
                 goto immediate_exit;
             }
@@ -899,7 +911,6 @@ immediate_exit:
     g_free(s->cow_bitmap);
     g_free(s->in_flight_bitmap);
     bdrv_dirty_iter_free(s->dbi);
-    bdrv_release_dirty_bitmap(bs, s->dirty_bitmap);
 
     data = g_malloc(sizeof(*data));
     data->ret = ret;
@@ -1052,15 +1063,15 @@ static int64_t coroutine_fn bdrv_mirror_top_get_block_status(
 }
 
 static int coroutine_fn bdrv_mirror_top_pwrite_zeroes(BlockDriverState *bs,
-    int64_t offset, int count, BdrvRequestFlags flags)
+    int64_t offset, int bytes, BdrvRequestFlags flags)
 {
-    return bdrv_co_pwrite_zeroes(bs->backing, offset, count, flags);
+    return bdrv_co_pwrite_zeroes(bs->backing, offset, bytes, flags);
 }
 
 static int coroutine_fn bdrv_mirror_top_pdiscard(BlockDriverState *bs,
-    int64_t offset, int count)
+    int64_t offset, int bytes)
 {
-    return bdrv_co_pdiscard(bs->backing->bs, offset, count);
+    return bdrv_co_pdiscard(bs->backing->bs, offset, bytes);
 }
 
 static void bdrv_mirror_top_refresh_filename(BlockDriverState *bs, QDict *opts)
@@ -1112,10 +1123,11 @@ static void mirror_start_job(const char *job_id, BlockDriverState *bs,
                              BlockdevOnError on_target_error,
                              bool unmap,
                              BlockCompletionFunc *cb,
-                             void *opaque, Error **errp,
+                             void *opaque,
                              const BlockJobDriver *driver,
                              bool is_none_mode, BlockDriverState *base,
-                             bool auto_complete, const char *filter_node_name)
+                             bool auto_complete, const char *filter_node_name,
+                             Error **errp)
 {
     MirrorBlockJob *s;
     BlockDriverState *mirror_top_bs;
@@ -1251,7 +1263,7 @@ fail:
 
         g_free(s->replaces);
         blk_unref(s->target);
-        block_job_unref(&s->common);
+        block_job_early_fail(&s->common);
     }
 
     bdrv_child_try_set_perm(mirror_top_bs->backing, 0, BLK_PERM_ALL,
@@ -1280,17 +1292,17 @@ void mirror_start(const char *job_id, BlockDriverState *bs,
     base = mode == MIRROR_SYNC_MODE_TOP ? backing_bs(bs) : NULL;
     mirror_start_job(job_id, bs, BLOCK_JOB_DEFAULT, target, replaces,
                      speed, granularity, buf_size, backing_mode,
-                     on_source_error, on_target_error, unmap, NULL, NULL, errp,
+                     on_source_error, on_target_error, unmap, NULL, NULL,
                      &mirror_job_driver, is_none_mode, base, false,
-                     filter_node_name);
+                     filter_node_name, errp);
 }
 
 void commit_active_start(const char *job_id, BlockDriverState *bs,
                          BlockDriverState *base, int creation_flags,
                          int64_t speed, BlockdevOnError on_error,
                          const char *filter_node_name,
-                         BlockCompletionFunc *cb, void *opaque, Error **errp,
-                         bool auto_complete)
+                         BlockCompletionFunc *cb, void *opaque,
+                         bool auto_complete, Error **errp)
 {
     int orig_base_flags;
     Error *local_err = NULL;
@@ -1303,9 +1315,9 @@ void commit_active_start(const char *job_id, BlockDriverState *bs,
 
     mirror_start_job(job_id, bs, creation_flags, base, NULL, speed, 0, 0,
                      MIRROR_LEAVE_BACKING_CHAIN,
-                     on_error, on_error, true, cb, opaque, &local_err,
+                     on_error, on_error, true, cb, opaque,
                      &commit_active_job_driver, false, base, auto_complete,
-                     filter_node_name);
+                     filter_node_name, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         goto error_restore_flags;

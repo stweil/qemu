@@ -25,8 +25,6 @@
 #include "qapi/error.h"
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
-#include "qemu/timer.h"
-#include "qemu/log.h"
 #include "block/block_int.h"
 #include "qemu/module.h"
 #include "trace.h"
@@ -131,11 +129,22 @@ do { \
 
 #define MAX_BLOCKSIZE	4096
 
+/* Posix file locking bytes. Libvirt takes byte 0, we start from higher bytes,
+ * leaving a few more bytes for its future use. */
+#define RAW_LOCK_PERM_BASE             100
+#define RAW_LOCK_SHARED_BASE           200
+
 typedef struct BDRVRawState {
     int fd;
+    int lock_fd;
+    bool use_lock;
     int type;
     int open_flags;
     size_t buf_align;
+
+    /* The current permissions. */
+    uint64_t perm;
+    uint64_t shared_perm;
 
 #ifdef CONFIG_XFS
     bool is_xfs:1;
@@ -372,12 +381,7 @@ static void raw_parse_flags(int bdrv_flags, int *open_flags)
 static void raw_parse_filename(const char *filename, QDict *options,
                                Error **errp)
 {
-    /* The filename does not have to be prefixed by the protocol name, since
-     * "file" is the default protocol; therefore, the return value of this
-     * function call can be ignored. */
-    strstart(filename, "file:", &filename);
-
-    qdict_put_obj(options, "filename", QOBJECT(qstring_from_str(filename)));
+    bdrv_parse_filename_strip_prefix(filename, "file:", options);
 }
 
 static QemuOptsList raw_runtime_opts = {
@@ -394,6 +398,11 @@ static QemuOptsList raw_runtime_opts = {
             .type = QEMU_OPT_STRING,
             .help = "host AIO implementation (threads, native)",
         },
+        {
+            .name = "locking",
+            .type = QEMU_OPT_STRING,
+            .help = "file locking mode (on/off/auto, default: auto)",
+        },
         { /* end of list */ }
     },
 };
@@ -408,6 +417,7 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
     BlockdevAioOptions aio, aio_default;
     int fd, ret;
     struct stat st;
+    OnOffAuto locking;
 
     opts = qemu_opts_create(&raw_runtime_opts, NULL, 0, &error_abort);
     qemu_opts_absorb_qdict(opts, options, &local_err);
@@ -437,6 +447,37 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
     }
     s->use_linux_aio = (aio == BLOCKDEV_AIO_OPTIONS_NATIVE);
 
+    locking = qapi_enum_parse(OnOffAuto_lookup, qemu_opt_get(opts, "locking"),
+                              ON_OFF_AUTO__MAX, ON_OFF_AUTO_AUTO, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        ret = -EINVAL;
+        goto fail;
+    }
+    switch (locking) {
+    case ON_OFF_AUTO_ON:
+        s->use_lock = true;
+#ifndef F_OFD_SETLK
+        fprintf(stderr,
+                "File lock requested but OFD locking syscall is unavailable, "
+                "falling back to POSIX file locks.\n"
+                "Due to the implementation, locks can be lost unexpectedly.\n");
+#endif
+        break;
+    case ON_OFF_AUTO_OFF:
+        s->use_lock = false;
+        break;
+    case ON_OFF_AUTO_AUTO:
+#ifdef F_OFD_SETLK
+        s->use_lock = true;
+#else
+        s->use_lock = false;
+#endif
+        break;
+    default:
+        abort();
+    }
+
     s->open_flags = open_flags;
     raw_parse_flags(bdrv_flags, &s->open_flags);
 
@@ -451,6 +492,21 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
         goto fail;
     }
     s->fd = fd;
+
+    s->lock_fd = -1;
+    if (s->use_lock) {
+        fd = qemu_open(filename, s->open_flags);
+        if (fd < 0) {
+            ret = -errno;
+            error_setg_errno(errp, errno, "Could not open '%s' for locking",
+                             filename);
+            qemu_close(s->fd);
+            goto fail;
+        }
+        s->lock_fd = fd;
+    }
+    s->perm = 0;
+    s->shared_perm = BLK_PERM_ALL;
 
 #ifdef CONFIG_LINUX_AIO
      /* Currently Linux does AIO only for files opened with O_DIRECT */
@@ -537,6 +593,161 @@ static int raw_open(BlockDriverState *bs, QDict *options, int flags,
 
     s->type = FTYPE_FILE;
     return raw_open_common(bs, options, flags, 0, errp);
+}
+
+typedef enum {
+    RAW_PL_PREPARE,
+    RAW_PL_COMMIT,
+    RAW_PL_ABORT,
+} RawPermLockOp;
+
+#define PERM_FOREACH(i) \
+    for ((i) = 0; (1ULL << (i)) <= BLK_PERM_ALL; i++)
+
+/* Lock bytes indicated by @perm_lock_bits and @shared_perm_lock_bits in the
+ * file; if @unlock == true, also unlock the unneeded bytes.
+ * @shared_perm_lock_bits is the mask of all permissions that are NOT shared.
+ */
+static int raw_apply_lock_bytes(BDRVRawState *s,
+                                uint64_t perm_lock_bits,
+                                uint64_t shared_perm_lock_bits,
+                                bool unlock, Error **errp)
+{
+    int ret;
+    int i;
+
+    PERM_FOREACH(i) {
+        int off = RAW_LOCK_PERM_BASE + i;
+        if (perm_lock_bits & (1ULL << i)) {
+            ret = qemu_lock_fd(s->lock_fd, off, 1, false);
+            if (ret) {
+                error_setg(errp, "Failed to lock byte %d", off);
+                return ret;
+            }
+        } else if (unlock) {
+            ret = qemu_unlock_fd(s->lock_fd, off, 1);
+            if (ret) {
+                error_setg(errp, "Failed to unlock byte %d", off);
+                return ret;
+            }
+        }
+    }
+    PERM_FOREACH(i) {
+        int off = RAW_LOCK_SHARED_BASE + i;
+        if (shared_perm_lock_bits & (1ULL << i)) {
+            ret = qemu_lock_fd(s->lock_fd, off, 1, false);
+            if (ret) {
+                error_setg(errp, "Failed to lock byte %d", off);
+                return ret;
+            }
+        } else if (unlock) {
+            ret = qemu_unlock_fd(s->lock_fd, off, 1);
+            if (ret) {
+                error_setg(errp, "Failed to unlock byte %d", off);
+                return ret;
+            }
+        }
+    }
+    return 0;
+}
+
+/* Check "unshared" bytes implied by @perm and ~@shared_perm in the file. */
+static int raw_check_lock_bytes(BDRVRawState *s,
+                                uint64_t perm, uint64_t shared_perm,
+                                Error **errp)
+{
+    int ret;
+    int i;
+
+    PERM_FOREACH(i) {
+        int off = RAW_LOCK_SHARED_BASE + i;
+        uint64_t p = 1ULL << i;
+        if (perm & p) {
+            ret = qemu_lock_fd_test(s->lock_fd, off, 1, true);
+            if (ret) {
+                char *perm_name = bdrv_perm_names(p);
+                error_setg(errp,
+                           "Failed to get \"%s\" lock",
+                           perm_name);
+                g_free(perm_name);
+                error_append_hint(errp,
+                                  "Is another process using the image?\n");
+                return ret;
+            }
+        }
+    }
+    PERM_FOREACH(i) {
+        int off = RAW_LOCK_PERM_BASE + i;
+        uint64_t p = 1ULL << i;
+        if (!(shared_perm & p)) {
+            ret = qemu_lock_fd_test(s->lock_fd, off, 1, true);
+            if (ret) {
+                char *perm_name = bdrv_perm_names(p);
+                error_setg(errp,
+                           "Failed to get shared \"%s\" lock",
+                           perm_name);
+                g_free(perm_name);
+                error_append_hint(errp,
+                                  "Is another process using the image?\n");
+                return ret;
+            }
+        }
+    }
+    return 0;
+}
+
+static int raw_handle_perm_lock(BlockDriverState *bs,
+                                RawPermLockOp op,
+                                uint64_t new_perm, uint64_t new_shared,
+                                Error **errp)
+{
+    BDRVRawState *s = bs->opaque;
+    int ret = 0;
+    Error *local_err = NULL;
+
+    if (!s->use_lock) {
+        return 0;
+    }
+
+    if (bdrv_get_flags(bs) & BDRV_O_INACTIVE) {
+        return 0;
+    }
+
+    assert(s->lock_fd > 0);
+
+    switch (op) {
+    case RAW_PL_PREPARE:
+        ret = raw_apply_lock_bytes(s, s->perm | new_perm,
+                                   ~s->shared_perm | ~new_shared,
+                                   false, errp);
+        if (!ret) {
+            ret = raw_check_lock_bytes(s, new_perm, new_shared, errp);
+            if (!ret) {
+                return 0;
+            }
+        }
+        op = RAW_PL_ABORT;
+        /* fall through to unlock bytes. */
+    case RAW_PL_ABORT:
+        raw_apply_lock_bytes(s, s->perm, ~s->shared_perm, true, &local_err);
+        if (local_err) {
+            /* Theoretically the above call only unlocks bytes and it cannot
+             * fail. Something weird happened, report it.
+             */
+            error_report_err(local_err);
+        }
+        break;
+    case RAW_PL_COMMIT:
+        raw_apply_lock_bytes(s, new_perm, ~new_shared, true, &local_err);
+        if (local_err) {
+            /* Theoretically the above call only unlocks bytes and it cannot
+             * fail. Something weird happened, report it.
+             */
+            error_report_err(local_err);
+        }
+        break;
+    }
+    return ret;
 }
 
 static int raw_reopen_prepare(BDRVReopenState *state,
@@ -1274,7 +1485,7 @@ static int aio_worker(void *arg)
 
 static int paio_submit_co(BlockDriverState *bs, int fd,
                           int64_t offset, QEMUIOVector *qiov,
-                          int count, int type)
+                          int bytes, int type)
 {
     RawPosixAIOData *acb = g_new(RawPosixAIOData, 1);
     ThreadPool *pool;
@@ -1283,22 +1494,22 @@ static int paio_submit_co(BlockDriverState *bs, int fd,
     acb->aio_type = type;
     acb->aio_fildes = fd;
 
-    acb->aio_nbytes = count;
+    acb->aio_nbytes = bytes;
     acb->aio_offset = offset;
 
     if (qiov) {
         acb->aio_iov = qiov->iov;
         acb->aio_niov = qiov->niov;
-        assert(qiov->size == count);
+        assert(qiov->size == bytes);
     }
 
-    trace_paio_submit_co(offset, count, type);
+    trace_paio_submit_co(offset, bytes, type);
     pool = aio_get_thread_pool(bdrv_get_aio_context(bs));
     return thread_pool_submit_co(pool, aio_worker, acb);
 }
 
 static BlockAIOCB *paio_submit(BlockDriverState *bs, int fd,
-        int64_t offset, QEMUIOVector *qiov, int count,
+        int64_t offset, QEMUIOVector *qiov, int bytes,
         BlockCompletionFunc *cb, void *opaque, int type)
 {
     RawPosixAIOData *acb = g_new(RawPosixAIOData, 1);
@@ -1308,7 +1519,7 @@ static BlockAIOCB *paio_submit(BlockDriverState *bs, int fd,
     acb->aio_type = type;
     acb->aio_fildes = fd;
 
-    acb->aio_nbytes = count;
+    acb->aio_nbytes = bytes;
     acb->aio_offset = offset;
 
     if (qiov) {
@@ -1317,7 +1528,7 @@ static BlockAIOCB *paio_submit(BlockDriverState *bs, int fd,
         assert(qiov->size == acb->aio_nbytes);
     }
 
-    trace_paio_submit(acb, opaque, offset, count, type);
+    trace_paio_submit(acb, opaque, offset, bytes, type);
     pool = aio_get_thread_pool(bdrv_get_aio_context(bs));
     return thread_pool_submit_aio(pool, aio_worker, acb, cb, opaque);
 }
@@ -1407,26 +1618,37 @@ static void raw_close(BlockDriverState *bs)
         qemu_close(s->fd);
         s->fd = -1;
     }
+    if (s->lock_fd >= 0) {
+        qemu_close(s->lock_fd);
+        s->lock_fd = -1;
+    }
 }
 
-static int raw_truncate(BlockDriverState *bs, int64_t offset)
+static int raw_truncate(BlockDriverState *bs, int64_t offset, Error **errp)
 {
     BDRVRawState *s = bs->opaque;
     struct stat st;
+    int ret;
 
     if (fstat(s->fd, &st)) {
-        return -errno;
+        ret = -errno;
+        error_setg_errno(errp, -ret, "Failed to fstat() the file");
+        return ret;
     }
 
     if (S_ISREG(st.st_mode)) {
         if (ftruncate(s->fd, offset) < 0) {
-            return -errno;
+            ret = -errno;
+            error_setg_errno(errp, -ret, "Failed to resize the file");
+            return ret;
         }
     } else if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode)) {
-       if (offset > raw_getlength(bs)) {
-           return -EINVAL;
-       }
+        if (offset > raw_getlength(bs)) {
+            error_setg(errp, "Cannot grow device files");
+            return -EINVAL;
+        }
     } else {
+        error_setg(errp, "Resizing this file is not supported");
         return -ENOTSUP;
     }
 
@@ -1887,26 +2109,26 @@ static int64_t coroutine_fn raw_co_get_block_status(BlockDriverState *bs,
 }
 
 static coroutine_fn BlockAIOCB *raw_aio_pdiscard(BlockDriverState *bs,
-    int64_t offset, int count,
+    int64_t offset, int bytes,
     BlockCompletionFunc *cb, void *opaque)
 {
     BDRVRawState *s = bs->opaque;
 
-    return paio_submit(bs, s->fd, offset, NULL, count,
+    return paio_submit(bs, s->fd, offset, NULL, bytes,
                        cb, opaque, QEMU_AIO_DISCARD);
 }
 
 static int coroutine_fn raw_co_pwrite_zeroes(
     BlockDriverState *bs, int64_t offset,
-    int count, BdrvRequestFlags flags)
+    int bytes, BdrvRequestFlags flags)
 {
     BDRVRawState *s = bs->opaque;
 
     if (!(flags & BDRV_REQ_MAY_UNMAP)) {
-        return paio_submit_co(bs, s->fd, offset, NULL, count,
+        return paio_submit_co(bs, s->fd, offset, NULL, bytes,
                               QEMU_AIO_WRITE_ZEROES);
     } else if (s->discard_zeroes) {
-        return paio_submit_co(bs, s->fd, offset, NULL, count,
+        return paio_submit_co(bs, s->fd, offset, NULL, bytes,
                               QEMU_AIO_DISCARD);
     }
     return -ENOTSUP;
@@ -1944,6 +2166,25 @@ static QemuOptsList raw_create_opts = {
     }
 };
 
+static int raw_check_perm(BlockDriverState *bs, uint64_t perm, uint64_t shared,
+                          Error **errp)
+{
+    return raw_handle_perm_lock(bs, RAW_PL_PREPARE, perm, shared, errp);
+}
+
+static void raw_set_perm(BlockDriverState *bs, uint64_t perm, uint64_t shared)
+{
+    BDRVRawState *s = bs->opaque;
+    raw_handle_perm_lock(bs, RAW_PL_COMMIT, perm, shared, NULL);
+    s->perm = perm;
+    s->shared_perm = shared;
+}
+
+static void raw_abort_perm_update(BlockDriverState *bs)
+{
+    raw_handle_perm_lock(bs, RAW_PL_ABORT, 0, 0, NULL);
+}
+
 BlockDriver bdrv_file = {
     .format_name = "file",
     .protocol_name = "file",
@@ -1974,7 +2215,9 @@ BlockDriver bdrv_file = {
     .bdrv_get_info = raw_get_info,
     .bdrv_get_allocated_file_size
                         = raw_get_allocated_file_size,
-
+    .bdrv_check_perm = raw_check_perm,
+    .bdrv_set_perm   = raw_set_perm,
+    .bdrv_abort_perm_update = raw_abort_perm_update,
     .create_opts = &raw_create_opts,
 };
 
@@ -2147,10 +2390,7 @@ static int check_hdev_writable(BDRVRawState *s)
 static void hdev_parse_filename(const char *filename, QDict *options,
                                 Error **errp)
 {
-    /* The prefix is optional, just as for "file". */
-    strstart(filename, "host_device:", &filename);
-
-    qdict_put_obj(options, "filename", QOBJECT(qstring_from_str(filename)));
+    bdrv_parse_filename_strip_prefix(filename, "host_device:", options);
 }
 
 static bool hdev_is_sg(BlockDriverState *bs)
@@ -2239,7 +2479,7 @@ static int hdev_open(BlockDriverState *bs, QDict *options, int flags,
             goto hdev_open_Mac_error;
         }
 
-        qdict_put(options, "filename", qstring_from_str(bsd_path));
+        qdict_put_str(options, "filename", bsd_path);
 
 hdev_open_Mac_error:
         g_free(mediaType);
@@ -2320,7 +2560,7 @@ static int fd_open(BlockDriverState *bs)
 }
 
 static coroutine_fn BlockAIOCB *hdev_aio_pdiscard(BlockDriverState *bs,
-    int64_t offset, int count,
+    int64_t offset, int bytes,
     BlockCompletionFunc *cb, void *opaque)
 {
     BDRVRawState *s = bs->opaque;
@@ -2328,12 +2568,12 @@ static coroutine_fn BlockAIOCB *hdev_aio_pdiscard(BlockDriverState *bs,
     if (fd_open(bs) < 0) {
         return NULL;
     }
-    return paio_submit(bs, s->fd, offset, NULL, count,
+    return paio_submit(bs, s->fd, offset, NULL, bytes,
                        cb, opaque, QEMU_AIO_DISCARD|QEMU_AIO_BLKDEV);
 }
 
 static coroutine_fn int hdev_co_pwrite_zeroes(BlockDriverState *bs,
-    int64_t offset, int count, BdrvRequestFlags flags)
+    int64_t offset, int bytes, BdrvRequestFlags flags)
 {
     BDRVRawState *s = bs->opaque;
     int rc;
@@ -2343,10 +2583,10 @@ static coroutine_fn int hdev_co_pwrite_zeroes(BlockDriverState *bs,
         return rc;
     }
     if (!(flags & BDRV_REQ_MAY_UNMAP)) {
-        return paio_submit_co(bs, s->fd, offset, NULL, count,
+        return paio_submit_co(bs, s->fd, offset, NULL, bytes,
                               QEMU_AIO_WRITE_ZEROES|QEMU_AIO_BLKDEV);
     } else if (s->discard_zeroes) {
-        return paio_submit_co(bs, s->fd, offset, NULL, count,
+        return paio_submit_co(bs, s->fd, offset, NULL, bytes,
                               QEMU_AIO_DISCARD|QEMU_AIO_BLKDEV);
     }
     return -ENOTSUP;
@@ -2433,6 +2673,9 @@ static BlockDriver bdrv_host_device = {
     .bdrv_get_info = raw_get_info,
     .bdrv_get_allocated_file_size
                         = raw_get_allocated_file_size,
+    .bdrv_check_perm = raw_check_perm,
+    .bdrv_set_perm   = raw_set_perm,
+    .bdrv_abort_perm_update = raw_abort_perm_update,
     .bdrv_probe_blocksizes = hdev_probe_blocksizes,
     .bdrv_probe_geometry = hdev_probe_geometry,
 
@@ -2446,10 +2689,7 @@ static BlockDriver bdrv_host_device = {
 static void cdrom_parse_filename(const char *filename, QDict *options,
                                  Error **errp)
 {
-    /* The prefix is optional, just as for "file". */
-    strstart(filename, "host_cdrom:", &filename);
-
-    qdict_put_obj(options, "filename", QOBJECT(qstring_from_str(filename)));
+    bdrv_parse_filename_strip_prefix(filename, "host_cdrom:", options);
 }
 #endif
 

@@ -54,18 +54,13 @@ void QEMU_NORETURN runtime_exception(CPUS390XState *env, int excp,
                                      uintptr_t retaddr)
 {
     CPUState *cs = CPU(s390_env_get_cpu(env));
-    int t;
 
     cs->exception_index = EXCP_PGM;
     env->int_pgm_code = excp;
+    env->int_pgm_ilen = ILEN_AUTO;
 
     /* Use the (ultimate) callers address to find the insn that trapped.  */
     cpu_restore_state(cs, retaddr);
-
-    /* Advance past the insn.  */
-    t = cpu_ldub_code(env, env->psw.addr);
-    env->int_pgm_ilen = t = get_ilen(t);
-    env->psw.addr += t;
 
     cpu_loop_exit(cs);
 }
@@ -79,8 +74,6 @@ void HELPER(exception)(CPUS390XState *env, uint32_t excp)
     cs->exception_index = excp;
     cpu_loop_exit(cs);
 }
-
-#ifndef CONFIG_USER_ONLY
 
 void program_interrupt(CPUS390XState *env, uint32_t code, int ilen)
 {
@@ -107,6 +100,8 @@ void program_interrupt(CPUS390XState *env, uint32_t code, int ilen)
         cpu_loop_exit(cs);
     }
 }
+
+#ifndef CONFIG_USER_ONLY
 
 /* SCLP service call */
 uint32_t HELPER(servc)(CPUS390XState *env, uint64_t r1, uint64_t r2)
@@ -199,12 +194,12 @@ void handle_diag_308(CPUS390XState *env, uint64_t r1, uint64_t r3)
     IplParameterBlock *iplb;
 
     if (env->psw.mask & PSW_MASK_PSTATE) {
-        program_interrupt(env, PGM_PRIVILEGED, ILEN_LATER_INC);
+        program_interrupt(env, PGM_PRIVILEGED, ILEN_AUTO);
         return;
     }
 
     if ((subcode & ~0x0ffffULL) || (subcode > 6)) {
-        program_interrupt(env, PGM_SPECIFICATION, ILEN_LATER_INC);
+        program_interrupt(env, PGM_SPECIFICATION, ILEN_AUTO);
         return;
     }
 
@@ -229,12 +224,12 @@ void handle_diag_308(CPUS390XState *env, uint64_t r1, uint64_t r3)
         break;
     case 5:
         if ((r1 & 1) || (addr & 0x0fffULL)) {
-            program_interrupt(env, PGM_SPECIFICATION, ILEN_LATER_INC);
+            program_interrupt(env, PGM_SPECIFICATION, ILEN_AUTO);
             return;
         }
         if (!address_space_access_valid(&address_space_memory, addr,
                                         sizeof(IplParameterBlock), false)) {
-            program_interrupt(env, PGM_ADDRESSING, ILEN_LATER_INC);
+            program_interrupt(env, PGM_ADDRESSING, ILEN_AUTO);
             return;
         }
         iplb = g_malloc0(sizeof(IplParameterBlock));
@@ -258,12 +253,12 @@ out:
         return;
     case 6:
         if ((r1 & 1) || (addr & 0x0fffULL)) {
-            program_interrupt(env, PGM_SPECIFICATION, ILEN_LATER_INC);
+            program_interrupt(env, PGM_SPECIFICATION, ILEN_AUTO);
             return;
         }
         if (!address_space_access_valid(&address_space_memory, addr,
                                         sizeof(IplParameterBlock), true)) {
-            program_interrupt(env, PGM_ADDRESSING, ILEN_LATER_INC);
+            program_interrupt(env, PGM_ADDRESSING, ILEN_AUTO);
             return;
         }
         iplb = s390_ipl_get_iplb();
@@ -288,7 +283,9 @@ void HELPER(diag)(CPUS390XState *env, uint32_t r1, uint32_t r3, uint32_t num)
     switch (num) {
     case 0x500:
         /* KVM hypercall */
+        qemu_mutex_lock_iothread();
         r = s390_virtio_hypercall(env);
+        qemu_mutex_unlock_iothread();
         break;
     case 0x44:
         /* yield */
@@ -305,7 +302,7 @@ void HELPER(diag)(CPUS390XState *env, uint32_t r1, uint32_t r3, uint32_t num)
     }
 
     if (r) {
-        program_interrupt(env, PGM_OPERATION, ILEN_LATER_INC);
+        program_interrupt(env, PGM_OPERATION, ILEN_AUTO);
     }
 }
 
@@ -381,6 +378,7 @@ uint64_t HELPER(stpt)(CPUS390XState *env)
 uint32_t HELPER(stsi)(CPUS390XState *env, uint64_t a0,
                       uint64_t r0, uint64_t r1)
 {
+    S390CPU *cpu = s390_env_get_cpu(env);
     int cc = 0;
     int sel1, sel2;
 
@@ -400,12 +398,14 @@ uint32_t HELPER(stsi)(CPUS390XState *env, uint64_t a0,
         if ((sel1 == 1) && (sel2 == 1)) {
             /* Basic Machine Configuration */
             struct sysib_111 sysib;
+            char type[5] = {};
 
             memset(&sysib, 0, sizeof(sysib));
             ebcdic_put(sysib.manuf, "QEMU            ", 16);
-            /* same as machine type number in STORE CPU ID */
-            ebcdic_put(sysib.type, "QEMU", 4);
-            /* same as model number in STORE CPU ID */
+            /* same as machine type number in STORE CPU ID, but in EBCDIC */
+            snprintf(type, ARRAY_SIZE(type), "%X", cpu->model->def->type);
+            ebcdic_put(sysib.type, type, 4);
+            /* model number (not stored in STORE CPU ID for z/Architecure) */
             ebcdic_put(sysib.model, "QEMU            ", 16);
             ebcdic_put(sysib.sequence, "QEMU            ", 16);
             ebcdic_put(sysib.plant, "QEMU", 4);
@@ -515,7 +515,7 @@ uint32_t HELPER(sigp)(CPUS390XState *env, uint64_t order_code, uint32_t r1,
     /* Remember: Use "R1 or R1 + 1, whichever is the odd-numbered register"
        as parameter (input). Status (output) is always R1. */
 
-    switch (order_code) {
+    switch (order_code & SIGP_ORDER_MASK) {
     case SIGP_SET_ARCH:
         /* switch arch */
         break;
@@ -530,11 +530,11 @@ uint32_t HELPER(sigp)(CPUS390XState *env, uint64_t order_code, uint32_t r1,
         break;
 #if !defined(CONFIG_USER_ONLY)
     case SIGP_RESTART:
-        qemu_system_reset_request();
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         cpu_loop_exit(CPU(s390_env_get_cpu(env)));
         break;
     case SIGP_STOP:
-        qemu_system_shutdown_request();
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
         cpu_loop_exit(CPU(s390_env_get_cpu(env)));
         break;
 #endif
@@ -666,6 +666,7 @@ void HELPER(per_ifetch)(CPUS390XState *env, uint64_t addr)
         if (env->cregs[9] & PER_CR9_EVENT_NULLIFICATION) {
             CPUState *cs = CPU(s390_env_get_cpu(env));
 
+            env->per_perc_atmid |= PER_CODE_EVENT_NULLIFICATION;
             env->int_pgm_code = PGM_PER;
             env->int_pgm_ilen = get_ilen(cpu_ldub_code(env, addr));
 
@@ -675,3 +676,62 @@ void HELPER(per_ifetch)(CPUS390XState *env, uint64_t addr)
     }
 }
 #endif
+
+/* The maximum bit defined at the moment is 129.  */
+#define MAX_STFL_WORDS  3
+
+/* Canonicalize the current cpu's features into the 64-bit words required
+   by STFLE.  Return the index-1 of the max word that is non-zero.  */
+static unsigned do_stfle(CPUS390XState *env, uint64_t words[MAX_STFL_WORDS])
+{
+    S390CPU *cpu = s390_env_get_cpu(env);
+    const unsigned long *features = cpu->model->features;
+    unsigned max_bit = 0;
+    S390Feat feat;
+
+    memset(words, 0, sizeof(uint64_t) * MAX_STFL_WORDS);
+
+    if (test_bit(S390_FEAT_ZARCH, features)) {
+        /* z/Architecture is always active if around */
+        words[0] = 1ull << (63 - 2);
+    }
+
+    for (feat = find_first_bit(features, S390_FEAT_MAX);
+         feat < S390_FEAT_MAX;
+         feat = find_next_bit(features, S390_FEAT_MAX, feat + 1)) {
+        const S390FeatDef *def = s390_feat_def(feat);
+        if (def->type == S390_FEAT_TYPE_STFL) {
+            unsigned bit = def->bit;
+            if (bit > max_bit) {
+                max_bit = bit;
+            }
+            assert(bit / 64 < MAX_STFL_WORDS);
+            words[bit / 64] |= 1ULL << (63 - bit % 64);
+        }
+    }
+
+    return max_bit / 64;
+}
+
+void HELPER(stfl)(CPUS390XState *env)
+{
+    uint64_t words[MAX_STFL_WORDS];
+
+    do_stfle(env, words);
+    cpu_stl_data(env, 200, words[0] >> 32);
+}
+
+uint32_t HELPER(stfle)(CPUS390XState *env, uint64_t addr)
+{
+    uint64_t words[MAX_STFL_WORDS];
+    unsigned count_m1 = env->regs[0] & 0xff;
+    unsigned max_m1 = do_stfle(env, words);
+    unsigned i;
+
+    for (i = 0; i <= count_m1; ++i) {
+        cpu_stq_data(env, addr + 8 * i, words[i]);
+    }
+
+    env->regs[0] = deposit64(env->regs[0], 0, 8, max_m1);
+    return (count_m1 >= max_m1 ? 0 : 3);
+}

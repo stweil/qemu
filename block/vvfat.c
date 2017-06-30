@@ -28,8 +28,7 @@
 #include "block/block_int.h"
 #include "qemu/module.h"
 #include "qemu/bswap.h"
-#include "migration/migration.h"
-#include "qapi/qmp/qint.h"
+#include "migration/blocker.h"
 #include "qapi/qmp/qbool.h"
 #include "qapi/qmp/qstring.h"
 #include "qemu/cutils.h"
@@ -1057,10 +1056,10 @@ static void vvfat_parse_filename(const char *filename, QDict *options,
     }
 
     /* Fill in the options QDict */
-    qdict_put(options, "dir", qstring_from_str(filename));
-    qdict_put(options, "fat-type", qint_from_int(fat_type));
-    qdict_put(options, "floppy", qbool_from_bool(floppy));
-    qdict_put(options, "rw", qbool_from_bool(rw));
+    qdict_put_str(options, "dir", filename);
+    qdict_put_int(options, "fat-type", fat_type);
+    qdict_put_bool(options, "floppy", floppy);
+    qdict_put_bool(options, "rw", rw);
 }
 
 static int vvfat_open(BlockDriverState *bs, QDict *options, int flags,
@@ -1156,8 +1155,6 @@ static int vvfat_open(BlockDriverState *bs, QDict *options, int flags,
 
     s->current_cluster=0xffffffff;
 
-    /* read only is the default for safety */
-    bs->read_only = true;
     s->qcow = NULL;
     s->qcow_filename = NULL;
     s->fat2 = NULL;
@@ -1169,11 +1166,24 @@ static int vvfat_open(BlockDriverState *bs, QDict *options, int flags,
     s->sector_count = cyls * heads * secs - (s->first_sectors_number - 1);
 
     if (qemu_opt_get_bool(opts, "rw", false)) {
-        ret = enable_write_target(bs, errp);
-        if (ret < 0) {
+        if (!bdrv_is_read_only(bs)) {
+            ret = enable_write_target(bs, errp);
+            if (ret < 0) {
+                goto fail;
+            }
+        } else {
+            ret = -EPERM;
+            error_setg(errp,
+                       "Unable to set VVFAT to 'rw' when drive is read-only");
             goto fail;
         }
-        bs->read_only = false;
+    } else  {
+        /* read only is the default for safety */
+        ret = bdrv_set_read_only(bs, true, &local_err);
+        if (ret < 0) {
+            error_propagate(errp, local_err);
+            goto fail;
+        }
     }
 
     bs->total_sectors = cyls * heads * secs;
@@ -3040,7 +3050,7 @@ static int enable_write_target(BlockDriverState *bs, Error **errp)
     }
 
     options = qdict_new();
-    qdict_put(options, "write-target.driver", qstring_from_str("qcow"));
+    qdict_put_str(options, "write-target.driver", "qcow");
     s->qcow = bdrv_open_child(s->qcow_filename, options, "write-target", bs,
                               &child_vvfat_qcow, false, errp);
     QDECREF(options);

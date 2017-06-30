@@ -441,7 +441,7 @@ static BlockStats *bdrv_query_bds_stats(const BlockDriverState *bs,
         s->node_name = g_strdup(bdrv_get_node_name(bs));
     }
 
-    s->stats->wr_highest_offset = bs->wr_highest_offset;
+    s->stats->wr_highest_offset = stat64_get(&bs->wr_highest_offset);
 
     if (bs->file) {
         s->has_parent = true;
@@ -595,9 +595,11 @@ static void dump_qobject(fprintf_function func_fprintf, void *f,
                          int comp_indent, QObject *obj)
 {
     switch (qobject_type(obj)) {
-        case QTYPE_QINT: {
-            QInt *value = qobject_to_qint(obj);
-            func_fprintf(f, "%" PRId64, qint_get_int(value));
+        case QTYPE_QNUM: {
+            QNum *value = qobject_to_qnum(obj);
+            char *tmp = qnum_to_string(value);
+            func_fprintf(f, "%s", tmp);
+            g_free(tmp);
             break;
         }
         case QTYPE_QSTRING: {
@@ -613,11 +615,6 @@ static void dump_qobject(fprintf_function func_fprintf, void *f,
         case QTYPE_QLIST: {
             QList *value = qobject_to_qlist(obj);
             dump_qlist(func_fprintf, f, comp_indent, value);
-            break;
-        }
-        case QTYPE_QFLOAT: {
-            QFloat *value = qobject_to_qfloat(obj);
-            func_fprintf(f, "%g", qfloat_get_double(value));
             break;
         }
         case QTYPE_QBOOL: {

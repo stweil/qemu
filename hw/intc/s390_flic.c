@@ -13,7 +13,6 @@
 #include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "hw/sysbus.h"
-#include "migration/qemu-file.h"
 #include "hw/s390x/s390_flic.h"
 #include "trace.h"
 #include "hw/qdev.h"
@@ -21,11 +20,14 @@
 
 S390FLICState *s390_get_flic(void)
 {
-    S390FLICState *fs;
+    static S390FLICState *fs;
 
-    fs = S390_FLIC_COMMON(object_resolve_path(TYPE_KVM_S390_FLIC, NULL));
     if (!fs) {
-        fs = S390_FLIC_COMMON(object_resolve_path(TYPE_QEMU_S390_FLIC, NULL));
+        fs = S390_FLIC_COMMON(object_resolve_path(TYPE_KVM_S390_FLIC, NULL));
+        if (!fs) {
+            fs = S390_FLIC_COMMON(object_resolve_path(TYPE_QEMU_S390_FLIC,
+                                                      NULL));
+        }
     }
     return fs;
 }

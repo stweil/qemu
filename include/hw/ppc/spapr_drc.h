@@ -26,6 +26,48 @@
 #define SPAPR_DR_CONNECTOR(obj) OBJECT_CHECK(sPAPRDRConnector, (obj), \
                                              TYPE_SPAPR_DR_CONNECTOR)
 
+#define TYPE_SPAPR_DRC_PHYSICAL "spapr-drc-physical"
+#define SPAPR_DRC_PHYSICAL_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(sPAPRDRConnectorClass, obj, TYPE_SPAPR_DRC_PHYSICAL)
+#define SPAPR_DRC_PHYSICAL_CLASS(klass) \
+        OBJECT_CLASS_CHECK(sPAPRDRConnectorClass, klass, \
+                           TYPE_SPAPR_DRC_PHYSICAL)
+#define SPAPR_DRC_PHYSICAL(obj) OBJECT_CHECK(sPAPRDRConnector, (obj), \
+                                             TYPE_SPAPR_DRC_PHYSICAL)
+
+#define TYPE_SPAPR_DRC_LOGICAL "spapr-drc-logical"
+#define SPAPR_DRC_LOGICAL_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(sPAPRDRConnectorClass, obj, TYPE_SPAPR_DRC_LOGICAL)
+#define SPAPR_DRC_LOGICAL_CLASS(klass) \
+        OBJECT_CLASS_CHECK(sPAPRDRConnectorClass, klass, \
+                           TYPE_SPAPR_DRC_LOGICAL)
+#define SPAPR_DRC_LOGICAL(obj) OBJECT_CHECK(sPAPRDRConnector, (obj), \
+                                             TYPE_SPAPR_DRC_LOGICAL)
+
+#define TYPE_SPAPR_DRC_CPU "spapr-drc-cpu"
+#define SPAPR_DRC_CPU_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(sPAPRDRConnectorClass, obj, TYPE_SPAPR_DRC_CPU)
+#define SPAPR_DRC_CPU_CLASS(klass) \
+        OBJECT_CLASS_CHECK(sPAPRDRConnectorClass, klass, TYPE_SPAPR_DRC_CPU)
+#define SPAPR_DRC_CPU(obj) OBJECT_CHECK(sPAPRDRConnector, (obj), \
+                                        TYPE_SPAPR_DRC_CPU)
+
+#define TYPE_SPAPR_DRC_PCI "spapr-drc-pci"
+#define SPAPR_DRC_PCI_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(sPAPRDRConnectorClass, obj, TYPE_SPAPR_DRC_PCI)
+#define SPAPR_DRC_PCI_CLASS(klass) \
+        OBJECT_CLASS_CHECK(sPAPRDRConnectorClass, klass, TYPE_SPAPR_DRC_PCI)
+#define SPAPR_DRC_PCI(obj) OBJECT_CHECK(sPAPRDRConnector, (obj), \
+                                        TYPE_SPAPR_DRC_PCI)
+
+#define TYPE_SPAPR_DRC_LMB "spapr-drc-lmb"
+#define SPAPR_DRC_LMB_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(sPAPRDRConnectorClass, obj, TYPE_SPAPR_DRC_LMB)
+#define SPAPR_DRC_LMB_CLASS(klass) \
+        OBJECT_CLASS_CHECK(sPAPRDRConnectorClass, klass, TYPE_SPAPR_DRC_LMB)
+#define SPAPR_DRC_LMB(obj) OBJECT_CHECK(sPAPRDRConnector, (obj), \
+                                        TYPE_SPAPR_DRC_LMB)
+
 /*
  * Various hotplug types managed by sPAPRDRConnector
  *
@@ -83,7 +125,7 @@ typedef enum {
 } sPAPRDRAllocationState;
 
 /*
- * LED/visual indicator state
+ * DR-indicator (LED/visual indicator)
  *
  * set via set-indicator RTAS calls
  * as documented by PAPR+ 2.7 13.5.3.4, Table 177,
@@ -95,10 +137,10 @@ typedef enum {
  * action: (currently unused)
  */
 typedef enum {
-    SPAPR_DR_INDICATOR_STATE_INACTIVE   = 0,
-    SPAPR_DR_INDICATOR_STATE_ACTIVE     = 1,
-    SPAPR_DR_INDICATOR_STATE_IDENTIFY   = 2,
-    SPAPR_DR_INDICATOR_STATE_ACTION     = 3,
+    SPAPR_DR_INDICATOR_INACTIVE   = 0,
+    SPAPR_DR_INDICATOR_ACTIVE     = 1,
+    SPAPR_DR_INDICATOR_IDENTIFY   = 2,
+    SPAPR_DR_INDICATOR_ACTION     = 3,
 } sPAPRDRIndicatorState;
 
 /*
@@ -130,36 +172,38 @@ typedef enum {
     SPAPR_DR_CC_RESPONSE_NOT_CONFIGURABLE = -9003,
 } sPAPRDRCCResponse;
 
-typedef void (spapr_drc_detach_cb)(DeviceState *d, void *opaque);
+/* rtas-configure-connector state */
+typedef struct sPAPRConfigureConnectorState {
+    int fdt_offset;
+    int fdt_depth;
+} sPAPRConfigureConnectorState;
 
 typedef struct sPAPRDRConnector {
     /*< private >*/
     DeviceState parent;
 
-    sPAPRDRConnectorType type;
     uint32_t id;
     Object *owner;
-    const char *name;
+
+    /* DR-indicator */
+    uint32_t dr_indicator;
 
     /* sensor/indicator states */
     uint32_t isolation_state;
     uint32_t allocation_state;
-    uint32_t indicator_state;
 
     /* configure-connector state */
     void *fdt;
     int fdt_start_offset;
     bool configured;
+    sPAPRConfigureConnectorState *ccs;
 
     bool awaiting_release;
     bool signalled;
     bool awaiting_allocation;
-    bool awaiting_allocation_skippable;
 
     /* device pointer, via link property */
     DeviceState *dev;
-    spapr_drc_detach_cb *detach_cb;
-    void *detach_cb_opaque;
 } sPAPRDRConnector;
 
 typedef struct sPAPRDRConnectorClass {
@@ -167,41 +211,35 @@ typedef struct sPAPRDRConnectorClass {
     DeviceClass parent;
 
     /*< public >*/
+    sPAPRDRConnectorTypeShift typeshift;
+    const char *typename; /* used in device tree, PAPR 13.5.2.6 & C.6.1 */
+    const char *drc_name_prefix; /* used other places in device tree */
+
+    sPAPRDREntitySense (*dr_entity_sense)(sPAPRDRConnector *drc);
 
     /* accessors for guest-visible (generally via RTAS) DR state */
     uint32_t (*set_isolation_state)(sPAPRDRConnector *drc,
                                     sPAPRDRIsolationState state);
-    uint32_t (*set_indicator_state)(sPAPRDRConnector *drc,
-                                    sPAPRDRIndicatorState state);
     uint32_t (*set_allocation_state)(sPAPRDRConnector *drc,
                                      sPAPRDRAllocationState state);
-    uint32_t (*get_index)(sPAPRDRConnector *drc);
-    uint32_t (*get_type)(sPAPRDRConnector *drc);
-    const char *(*get_name)(sPAPRDRConnector *drc);
-
-    uint32_t (*entity_sense)(sPAPRDRConnector *drc, sPAPRDREntitySense *state);
-
-    /* QEMU interfaces for managing FDT/configure-connector */
-    const void *(*get_fdt)(sPAPRDRConnector *drc, int *fdt_start_offset);
-    void (*set_configured)(sPAPRDRConnector *drc);
 
     /* QEMU interfaces for managing hotplug operations */
-    void (*attach)(sPAPRDRConnector *drc, DeviceState *d, void *fdt,
-                   int fdt_start_offset, bool coldplug, Error **errp);
-    void (*detach)(sPAPRDRConnector *drc, DeviceState *d,
-                   spapr_drc_detach_cb *detach_cb,
-                   void *detach_cb_opaque, Error **errp);
     bool (*release_pending)(sPAPRDRConnector *drc);
     void (*set_signalled)(sPAPRDRConnector *drc);
 } sPAPRDRConnectorClass;
 
-sPAPRDRConnector *spapr_dr_connector_new(Object *owner,
-                                         sPAPRDRConnectorType type,
+uint32_t spapr_drc_index(sPAPRDRConnector *drc);
+sPAPRDRConnectorType spapr_drc_type(sPAPRDRConnector *drc);
+
+sPAPRDRConnector *spapr_dr_connector_new(Object *owner, const char *type,
                                          uint32_t id);
-sPAPRDRConnector *spapr_dr_connector_by_index(uint32_t index);
-sPAPRDRConnector *spapr_dr_connector_by_id(sPAPRDRConnectorType type,
-                                           uint32_t id);
+sPAPRDRConnector *spapr_drc_by_index(uint32_t index);
+sPAPRDRConnector *spapr_drc_by_id(const char *type, uint32_t id);
 int spapr_drc_populate_dt(void *fdt, int fdt_offset, Object *owner,
                           uint32_t drc_type_mask);
+
+void spapr_drc_attach(sPAPRDRConnector *drc, DeviceState *d, void *fdt,
+                      int fdt_start_offset, bool coldplug, Error **errp);
+void spapr_drc_detach(sPAPRDRConnector *drc, DeviceState *d, Error **errp);
 
 #endif /* HW_SPAPR_DRC_H */

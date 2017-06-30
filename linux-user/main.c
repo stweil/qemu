@@ -2635,17 +2635,17 @@ void cpu_loop(CPUOpenRISCState *env)
         case EXCP_SYSCALL:
             env->pc += 4;   /* 0xc00; */
             ret = do_syscall(env,
-                             env->gpr[11], /* return value       */
-                             env->gpr[3],  /* r3 - r7 are params */
-                             env->gpr[4],
-                             env->gpr[5],
-                             env->gpr[6],
-                             env->gpr[7],
-                             env->gpr[8], 0, 0);
+                             cpu_get_gpr(env, 11), /* return value       */
+                             cpu_get_gpr(env, 3),  /* r3 - r7 are params */
+                             cpu_get_gpr(env, 4),
+                             cpu_get_gpr(env, 5),
+                             cpu_get_gpr(env, 6),
+                             cpu_get_gpr(env, 7),
+                             cpu_get_gpr(env, 8), 0, 0);
             if (ret == -TARGET_ERESTARTSYS) {
                 env->pc -= 4;
             } else if (ret != -TARGET_QEMU_ESIGRETURN) {
-                env->gpr[11] = ret;
+                cpu_set_gpr(env, 11, ret);
             }
             break;
         case EXCP_DPF:
@@ -4277,10 +4277,7 @@ int main(int argc, char **argv)
     qemu_init_cpu_list();
     module_call_init(MODULE_INIT_QOM);
 
-    if ((envlist = envlist_create()) == NULL) {
-        (void) fprintf(stderr, "Unable to allocate envlist\n");
-        exit(EXIT_FAILURE);
-    }
+    envlist = envlist_create();
 
     /* add current environment into the list */
     for (wrk = environ; *wrk != NULL; wrk++) {
@@ -4477,10 +4474,10 @@ int main(int argc, char **argv)
     }
 
     for (wrk = target_environ; *wrk; wrk++) {
-        free(*wrk);
+        g_free(*wrk);
     }
 
-    free(target_environ);
+    g_free(target_environ);
 
     if (qemu_loglevel_mask(CPU_LOG_PAGE)) {
         qemu_log("guest_base  0x%" PRIxPTR "\n", guest_base);
@@ -4813,7 +4810,7 @@ int main(int argc, char **argv)
         int i;
 
         for (i = 0; i < 32; i++) {
-            env->gpr[i] = regs->gpr[i];
+            cpu_set_gpr(env, i, regs->gpr[i]);
         }
         env->pc = regs->pc;
         cpu_set_sr(env, regs->sr);

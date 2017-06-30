@@ -33,20 +33,20 @@ typedef ssize_t (*QCryptoBlockReadFunc)(QCryptoBlock *block,
                                         size_t offset,
                                         uint8_t *buf,
                                         size_t buflen,
-                                        Error **errp,
-                                        void *opaque);
+                                        void *opaque,
+                                        Error **errp);
 
 typedef ssize_t (*QCryptoBlockInitFunc)(QCryptoBlock *block,
                                         size_t headerlen,
-                                        Error **errp,
-                                        void *opaque);
+                                        void *opaque,
+                                        Error **errp);
 
 typedef ssize_t (*QCryptoBlockWriteFunc)(QCryptoBlock *block,
                                          size_t offset,
                                          const uint8_t *buf,
                                          size_t buflen,
-                                         Error **errp,
-                                         void *opaque);
+                                         void *opaque,
+                                         Error **errp);
 
 /**
  * qcrypto_block_has_format:

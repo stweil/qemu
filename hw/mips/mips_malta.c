@@ -37,7 +37,6 @@
 #include "hw/mips/mips.h"
 #include "hw/mips/cpudevs.h"
 #include "hw/pci/pci.h"
-#include "sysemu/char.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/arch_init.h"
 #include "qemu/log.h"
@@ -476,7 +475,7 @@ static void malta_fpga_write(void *opaque, hwaddr addr,
     /* SOFTRES Register */
     case 0x00500:
         if (val == 0x42)
-            qemu_system_reset_request ();
+            qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         break;
 
     /* BRKRES Register */

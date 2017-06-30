@@ -21,18 +21,18 @@ from ordereddict import OrderedDict
 
 builtin_types = {
     'str':      'QTYPE_QSTRING',
-    'int':      'QTYPE_QINT',
-    'number':   'QTYPE_QFLOAT',
+    'int':      'QTYPE_QNUM',
+    'number':   'QTYPE_QNUM',
     'bool':     'QTYPE_QBOOL',
-    'int8':     'QTYPE_QINT',
-    'int16':    'QTYPE_QINT',
-    'int32':    'QTYPE_QINT',
-    'int64':    'QTYPE_QINT',
-    'uint8':    'QTYPE_QINT',
-    'uint16':   'QTYPE_QINT',
-    'uint32':   'QTYPE_QINT',
-    'uint64':   'QTYPE_QINT',
-    'size':     'QTYPE_QINT',
+    'int8':     'QTYPE_QNUM',
+    'int16':    'QTYPE_QNUM',
+    'int32':    'QTYPE_QNUM',
+    'int64':    'QTYPE_QNUM',
+    'uint8':    'QTYPE_QNUM',
+    'uint16':   'QTYPE_QNUM',
+    'uint32':   'QTYPE_QNUM',
+    'uint64':   'QTYPE_QNUM',
+    'size':     'QTYPE_QNUM',
     'any':      None,           # any QType possible, actually
     'QType':    'QTYPE_QSTRING',
 }
@@ -812,11 +812,24 @@ def check_alternate(expr, info):
         if not qtype:
             raise QAPISemError(info, "Alternate '%s' member '%s' cannot use "
                                "type '%s'" % (name, key, value))
-        if qtype in types_seen:
+        conflicting = set([qtype])
+        if qtype == 'QTYPE_QSTRING':
+            enum_expr = enum_types.get(value)
+            if enum_expr:
+                for v in enum_expr['data']:
+                    if v in ['on', 'off']:
+                        conflicting.add('QTYPE_QBOOL')
+                    if re.match(r'[-+0-9.]', v): # lazy, could be tightened
+                        conflicting.add('QTYPE_QNUM')
+            else:
+                conflicting.add('QTYPE_QNUM')
+                conflicting.add('QTYPE_QBOOL')
+        if conflicting & set(types_seen):
             raise QAPISemError(info, "Alternate '%s' member '%s' can't "
                                "be distinguished from member '%s'"
                                % (name, key, types_seen[qtype]))
-        types_seen[qtype] = key
+        for qt in conflicting:
+            types_seen[qt] = key
 
 
 def check_enum(expr, info):
@@ -1044,8 +1057,8 @@ class QAPISchemaType(QAPISchemaEntity):
     def alternate_qtype(self):
         json2qtype = {
             'string':  'QTYPE_QSTRING',
-            'number':  'QTYPE_QFLOAT',
-            'int':     'QTYPE_QINT',
+            'number':  'QTYPE_QNUM',
+            'int':     'QTYPE_QNUM',
             'boolean': 'QTYPE_QBOOL',
             'object':  'QTYPE_QDICT'
         }
@@ -1507,9 +1520,9 @@ class QAPISchema(object):
         self.the_empty_object_type = QAPISchemaObjectType(
             'q_empty', None, None, None, [], None)
         self._def_entity(self.the_empty_object_type)
-        qtype_values = self._make_enum_members(['none', 'qnull', 'qint',
+        qtype_values = self._make_enum_members(['none', 'qnull', 'qnum',
                                                 'qstring', 'qdict', 'qlist',
-                                                'qfloat', 'qbool'])
+                                                'qbool'])
         self._def_entity(QAPISchemaEnumType('QType', None, None,
                                             qtype_values, 'QTYPE'))
 

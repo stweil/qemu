@@ -184,6 +184,7 @@ const S390CPUDef *s390_find_cpu_def(uint16_t type, uint8_t gen, uint8_t ec_ga,
                                     S390FeatBitmap features)
 {
     const S390CPUDef *last_compatible = NULL;
+    const S390CPUDef *matching_cpu_type = NULL;
     int i;
 
     if (!gen) {
@@ -218,7 +219,15 @@ const S390CPUDef *s390_find_cpu_def(uint16_t type, uint8_t gen, uint8_t ec_ga,
         if (def->type == type && def->ec_ga == ec_ga) {
             return def;
         }
+        /* remember if we've at least seen one with the same cpu type */
+        if (def->type == type) {
+            matching_cpu_type = def;
+        }
         last_compatible = def;
+    }
+    /* prefer the model with the same cpu type, esp. don't take the BC for EC */
+    if (matching_cpu_type) {
+        return matching_cpu_type;
     }
     return last_compatible;
 }
@@ -376,12 +385,12 @@ static void cpu_model_from_info(S390CPUModel *model, const CpuModelInfo *info,
 
 static void qdict_add_disabled_feat(const char *name, void *opaque)
 {
-    qdict_put((QDict *) opaque, name, qbool_from_bool(false));
+    qdict_put_bool(opaque, name, false);
 }
 
 static void qdict_add_enabled_feat(const char *name, void *opaque)
 {
-    qdict_put((QDict *) opaque, name, qbool_from_bool(true));
+    qdict_put_bool(opaque, name, true);
 }
 
 /* convert S390CPUDef into a static CpuModelInfo */
@@ -658,6 +667,38 @@ static void check_compatibility(const S390CPUModel *max_model,
                   "available in the configuration: ");
 }
 
+/**
+ * The base TCG CPU model "qemu" is based on the z900. However, we already
+ * can also emulate some additional features of later CPU generations, so
+ * we add these additional feature bits here.
+ */
+static void add_qemu_cpu_model_features(S390FeatBitmap fbm)
+{
+    static const int feats[] = {
+        S390_FEAT_DAT_ENH,
+        S390_FEAT_STFLE,
+        S390_FEAT_EXTENDED_IMMEDIATE,
+        S390_FEAT_EXTENDED_TRANSLATION_2,
+        S390_FEAT_LONG_DISPLACEMENT,
+        S390_FEAT_LONG_DISPLACEMENT_FAST,
+        S390_FEAT_ETF2_ENH,
+        S390_FEAT_STORE_CLOCK_FAST,
+        S390_FEAT_MOVE_WITH_OPTIONAL_SPEC,
+        S390_FEAT_GENERAL_INSTRUCTIONS_EXT,
+        S390_FEAT_EXECUTE_EXT,
+        S390_FEAT_FLOATING_POINT_SUPPPORT_ENH,
+        S390_FEAT_STFLE_45,
+        S390_FEAT_STFLE_49,
+        S390_FEAT_LOCAL_TLB_CLEARING,
+        S390_FEAT_STFLE_53,
+    };
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(feats); i++) {
+        set_bit(feats[i], fbm);
+    }
+}
+
 static S390CPUModel *get_max_cpu_model(Error **errp)
 {
     static S390CPUModel max_model;
@@ -670,10 +711,11 @@ static S390CPUModel *get_max_cpu_model(Error **errp)
     if (kvm_enabled()) {
         kvm_s390_get_host_cpu_model(&max_model, errp);
     } else {
-        /* TCG emulates a z900 */
+        /* TCG emulates a z900 (with some optional additional features) */
         max_model.def = &s390_cpu_defs[0];
         bitmap_copy(max_model.features, max_model.def->default_feat,
                     S390_FEAT_MAX);
+        add_qemu_cpu_model_features(max_model.features);
     }
     if (!*errp) {
         cached = true;
@@ -701,8 +743,6 @@ static inline void apply_cpu_model(const S390CPUModel *model, Error **errp)
 
     if (kvm_enabled()) {
         kvm_s390_apply_cpu_model(model, errp);
-    } else if (model) {
-        /* FIXME TCG - use data for stdip/stfl */
     }
 
     if (!*errp) {
@@ -740,6 +780,7 @@ void s390_realize_cpu_model(CPUState *cs, Error **errp)
     /* copy over properties that can vary */
     cpu->model->lowest_ibc = max_model->lowest_ibc;
     cpu->model->cpu_id = max_model->cpu_id;
+    cpu->model->cpu_id_format = max_model->cpu_id_format;
     cpu->model->cpu_ver = max_model->cpu_ver;
 
     check_consistency(cpu->model);
@@ -749,6 +790,12 @@ void s390_realize_cpu_model(CPUState *cs, Error **errp)
     }
 
     apply_cpu_model(cpu->model, errp);
+
+    cpu->env.cpuid = s390_cpuid_from_cpu_model(cpu->model);
+    if (tcg_enabled()) {
+        /* basic mode, write the cpu address into the first 4 bit of the ID */
+        cpu->env.cpuid = deposit64(cpu->env.cpuid, 54, 4, cpu->env.cpu_num);
+    }
 }
 
 static void get_feature(Object *obj, Visitor *v, const char *name,
@@ -925,11 +972,14 @@ static void s390_host_cpu_model_initfn(Object *obj)
 
 static void s390_qemu_cpu_model_initfn(Object *obj)
 {
+    static S390CPUDef s390_qemu_cpu_defs;
     S390CPU *cpu = S390_CPU(obj);
 
     cpu->model = g_malloc0(sizeof(*cpu->model));
-    /* TCG emulates a z900 */
-    cpu->model->def = &s390_cpu_defs[0];
+    /* TCG emulates a z900 (with some optional additional features) */
+    memcpy(&s390_qemu_cpu_defs, &s390_cpu_defs[0], sizeof(s390_qemu_cpu_defs));
+    add_qemu_cpu_model_features(s390_qemu_cpu_defs.full_feat);
+    cpu->model->def = &s390_qemu_cpu_defs;
     bitmap_copy(cpu->model->features, cpu->model->def->default_feat,
                 S390_FEAT_MAX);
 }

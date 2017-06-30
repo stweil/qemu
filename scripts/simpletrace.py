@@ -42,7 +42,15 @@ def get_record(edict, idtoname, rechdr, fobj):
         event_id = rechdr[0]
         name = idtoname[event_id]
         rec = (name, rechdr[1], rechdr[3])
-        event = edict[name]
+        try:
+            event = edict[name]
+        except KeyError, e:
+            import sys
+            sys.stderr.write('%s event is logged but is not declared ' \
+                             'in the trace events file, try using ' \
+                             'trace-events-all instead.\n' % str(e))
+            sys.exit(1)
+
         for type, name in event.args:
             if is_string(type):
                 l = fobj.read(4)
@@ -116,7 +124,28 @@ class Analyzer(object):
     is invoked.
 
     If a method matching a trace event name exists, it is invoked to process
-    that trace record.  Otherwise the catchall() method is invoked."""
+    that trace record.  Otherwise the catchall() method is invoked.
+
+    Example:
+    The following method handles the runstate_set(int new_state) trace event::
+
+      def runstate_set(self, new_state):
+          ...
+
+    The method can also take a timestamp argument before the trace event
+    arguments::
+
+      def runstate_set(self, timestamp, new_state):
+          ...
+
+    Timestamps have the uint64_t type and are in nanoseconds.
+
+    The pid can be included in addition to the timestamp and is useful when
+    dealing with traces from multiple processes::
+
+      def runstate_set(self, timestamp, pid, new_state):
+          ...
+    """
 
     def begin(self):
         """Called at the start of the trace."""

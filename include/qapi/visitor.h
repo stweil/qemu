@@ -63,8 +63,10 @@
  * The @name parameter of visit_type_FOO() describes the relation
  * between this QAPI value and its parent container.  When visiting
  * the root of a tree, @name is ignored; when visiting a member of an
- * object, @name is the key associated with the value; and when
- * visiting a member of a list, @name is NULL.
+ * object, @name is the key associated with the value; when visiting a
+ * member of a list, @name is NULL; and when visiting the member of an
+ * alternate, @name should equal the name used for visiting the
+ * alternate.
  *
  * The visit_type_FOO() functions expect a non-null @obj argument;
  * they allocate *@obj during input visits, leave it unchanged on
@@ -408,15 +410,13 @@ void visit_end_list(Visitor *v, void **list);
  * the qtype of the next thing to be visited, stored in (*@obj)->type.
  * Other visitors will leave @obj unchanged.
  *
- * If @promote_int, treat integers as QTYPE_FLOAT.
- *
  * If successful, this must be paired with visit_end_alternate() with
  * the same @obj to clean up, even if visiting the contents of the
  * alternate fails.
  */
 void visit_start_alternate(Visitor *v, const char *name,
                            GenericAlternate **obj, size_t size,
-                           bool promote_int, Error **errp);
+                           Error **errp);
 
 /*
  * Finish visiting an alternate type.
@@ -605,6 +605,10 @@ void visit_type_number(Visitor *v, const char *name, double *obj,
  * @obj must be non-NULL.  Input visitors set *@obj to the value;
  * other visitors will leave *@obj unchanged.  *@obj must be non-NULL
  * for output visitors.
+ *
+ * Note that some kinds of input can't express arbitrary QObject.
+ * E.g. the visitor returned by qobject_input_visitor_new_keyval()
+ * can't create numbers or booleans, only strings.
  */
 void visit_type_any(Visitor *v, const char *name, QObject **obj, Error **errp);
 

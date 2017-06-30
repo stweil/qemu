@@ -35,7 +35,7 @@ typedef struct {
 static QOSState *qvirtio_scsi_start(const char *extra_opts)
 {
     const char *arch = qtest_get_arch();
-    const char *cmd = "-drive id=drv0,if=none,file=/dev/null,format=raw "
+    const char *cmd = "-drive id=drv0,if=none,file=null-co://,format=raw "
                       "-device virtio-scsi-pci,id=vs0 "
                       "-device scsi-hd,bus=vs0.0,drive=drv0 %s";
 
@@ -149,7 +149,7 @@ static QVirtIOSCSI *qvirtio_scsi_pci_init(int slot)
 
     vs->qs = qvirtio_scsi_start("-drive file=blkdebug::null-co://,"
                                 "if=none,id=dr1,format=raw,file.align=4k "
-                                "-device scsi-disk,drive=dr1,lun=0,scsi-id=1");
+                                "-device scsi-hd,drive=dr1,lun=0,scsi-id=1");
     dev = qvirtio_pci_device_find(vs->qs->pcibus, VIRTIO_ID_SCSI);
     vs->dev = (QVirtioDevice *)dev;
     g_assert(dev != NULL);
@@ -195,7 +195,8 @@ static void hotplug(void)
     QDict *response;
     QOSState *qs;
 
-    qs = qvirtio_scsi_start("-drive id=drv1,if=none,file=/dev/null,format=raw");
+    qs = qvirtio_scsi_start(
+            "-drive id=drv1,if=none,file=null-co://,format=raw");
     response = qmp("{\"execute\": \"device_add\","
                    " \"arguments\": {"
                    "   \"driver\": \"scsi-hd\","

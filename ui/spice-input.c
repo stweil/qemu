@@ -87,7 +87,7 @@ static void kbd_leds(void *opaque, int ledstate)
     if (ledstate & QEMU_CAPS_LOCK_LED) {
         kbd->ledstate |= SPICE_KEYBOARD_MODIFIER_FLAGS_CAPS_LOCK;
     }
-    spice_server_kbd_leds(&kbd->sin, ledstate);
+    spice_server_kbd_leds(&kbd->sin, kbd->ledstate);
 }
 
 /* mouse bits */
@@ -172,8 +172,8 @@ static void tablet_position(SpiceTabletInstance* sin, int x, int y,
     QemuSpicePointer *pointer = container_of(sin, QemuSpicePointer, tablet);
 
     spice_update_buttons(pointer, 0, buttons_state);
-    qemu_input_queue_abs(NULL, INPUT_AXIS_X, x, pointer->width);
-    qemu_input_queue_abs(NULL, INPUT_AXIS_Y, y, pointer->height);
+    qemu_input_queue_abs(NULL, INPUT_AXIS_X, x, 0, pointer->width);
+    qemu_input_queue_abs(NULL, INPUT_AXIS_Y, y, 0, pointer->height);
     qemu_input_event_sync();
 }
 

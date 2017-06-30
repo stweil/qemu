@@ -201,6 +201,10 @@ static int ioinst_orb_valid(ORB *orb)
         (orb->ctrl1 & ORB_CTRL1_MASK_INVALID)) {
         return 0;
     }
+    /* We don't support MIDA. */
+    if (orb->ctrl1 & ORB_CTRL1_MASK_MIDAW) {
+        return 0;
+    }
     if ((orb->cpa & HIGH_ORDER_BIT) != 0) {
         return 0;
     }
@@ -244,6 +248,15 @@ void ioinst_handle_ssch(S390CPU *cpu, uint64_t reg1, uint32_t ipb)
     case -EBUSY:
         cc = 2;
         break;
+    case -EFAULT:
+        /*
+         * TODO:
+         * I'm wondering whether there is something better
+         * to do for us here (like setting some device or
+         * subchannel status).
+         */
+        program_interrupt(env, PGM_ADDRESSING, 4);
+        return;
     case 0:
         cc = 0;
         break;

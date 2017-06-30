@@ -492,7 +492,7 @@ static int ioreq_map(struct ioreq *ioreq)
     return 0;
 }
 
-#if CONFIG_XEN_CTRL_INTERFACE_VERSION >= 480
+#if CONFIG_XEN_CTRL_INTERFACE_VERSION >= 40800
 
 static void ioreq_free_copy_buffers(struct ioreq *ioreq)
 {
@@ -1082,7 +1082,7 @@ static int blk_connect(struct XenDevice *xendev)
 
         if (strcmp(blkdev->fileproto, "<unset>")) {
             options = qdict_new();
-            qdict_put(options, "driver", qstring_from_str(blkdev->fileproto));
+            qdict_put_str(options, "driver", blkdev->fileproto);
         }
 
         /* setup via xenbus -> create new block driver instance */

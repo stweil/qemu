@@ -598,6 +598,9 @@
 # @postcopy-requests: The number of page requests received from the destination
 #        (since 2.7)
 #
+# @page-size: The number of bytes per page for the various page-based
+#        statistics (since 2.10)
+#
 # Since: 0.14.0
 ##
 { 'struct': 'MigrationStats',
@@ -605,7 +608,7 @@
            'duplicate': 'int', 'skipped': 'int', 'normal': 'int',
            'normal-bytes': 'int', 'dirty-pages-rate' : 'int',
            'mbps' : 'number', 'dirty-sync-count' : 'int',
-           'postcopy-requests' : 'int' } }
+           'postcopy-requests' : 'int', 'page-size' : 'int' } }
 
 ##
 # @XBZRLECacheStats:
@@ -891,11 +894,18 @@
 # @release-ram: if enabled, qemu will free the migrated ram pages on the source
 #        during postcopy-ram migration. (since 2.9)
 #
+# @block: If enabled, QEMU will also migrate the contents of all block
+#          devices.  Default is disabled.  A possible alternative uses
+#          mirror jobs to a builtin NBD server on the destination, which
+#          offers more flexibility.
+#          (Since 2.10)
+#
 # Since: 1.2
 ##
 { 'enum': 'MigrationCapability',
   'data': ['xbzrle', 'rdma-pin-all', 'auto-converge', 'zero-blocks',
-           'compress', 'events', 'postcopy-ram', 'x-colo', 'release-ram'] }
+           'compress', 'events', 'postcopy-ram', 'x-colo', 'release-ram',
+           'block' ] }
 
 ##
 # @MigrationCapabilityStatus:
@@ -1006,13 +1016,20 @@
 # @x-checkpoint-delay: The delay time (in ms) between two COLO checkpoints in
 #          periodic mode. (Since 2.8)
 #
+# @block-incremental: Affects how much storage is migrated when the
+# 	block migration capability is enabled.  When false, the entire
+# 	storage backing chain is migrated into a flattened image at
+# 	the destination; when true, only the active qcow2 layer is
+# 	migrated and the destination must already have access to the
+# 	same backing chain as was used on the source.  (since 2.10)
+#
 # Since: 2.4
 ##
 { 'enum': 'MigrationParameter',
   'data': ['compress-level', 'compress-threads', 'decompress-threads',
            'cpu-throttle-initial', 'cpu-throttle-increment',
            'tls-creds', 'tls-hostname', 'max-bandwidth',
-           'downtime-limit', 'x-checkpoint-delay' ] }
+           'downtime-limit', 'x-checkpoint-delay', 'block-incremental' ] }
 
 ##
 # @migrate-set-parameters:
@@ -1079,6 +1096,13 @@
 #
 # @x-checkpoint-delay: the delay time between two COLO checkpoints. (Since 2.8)
 #
+# @block-incremental: Affects how much storage is migrated when the
+# 	block migration capability is enabled.  When false, the entire
+# 	storage backing chain is migrated into a flattened image at
+# 	the destination; when true, only the active qcow2 layer is
+# 	migrated and the destination must already have access to the
+# 	same backing chain as was used on the source.  (since 2.10)
+#
 # Since: 2.4
 ##
 { 'struct': 'MigrationParameters',
@@ -1091,7 +1115,8 @@
             '*tls-hostname': 'str',
             '*max-bandwidth': 'int',
             '*downtime-limit': 'int',
-            '*x-checkpoint-delay': 'int'} }
+            '*x-checkpoint-delay': 'int',
+            '*block-incremental': 'bool' } }
 
 ##
 # @query-migrate-parameters:
@@ -1322,6 +1347,9 @@
 #
 # @thread_id: ID of the underlying host thread
 #
+# @props: properties describing to which node/socket/core/thread
+#         virtual CPU belongs to, provided if supported by board (since 2.10)
+#
 # @arch: architecture of the cpu, which determines which additional fields
 #        will be listed (since 2.6)
 #
@@ -1332,7 +1360,8 @@
 ##
 { 'union': 'CpuInfo',
   'base': {'CPU': 'int', 'current': 'bool', 'halted': 'bool',
-           'qom_path': 'str', 'thread_id': 'int', 'arch': 'CpuInfoArch' },
+           'qom_path': 'str', 'thread_id': 'int',
+           '*props': 'CpuInstanceProperties', 'arch': 'CpuInfoArch' },
   'discriminator': 'arch',
   'data': { 'x86': 'CpuInfoX86',
             'sparc': 'CpuInfoSPARC',
@@ -3028,8 +3057,6 @@
 # @name: the type name found in the search
 #
 # Since: 1.1
-#
-# Notes: This command is experimental and may change syntax in future releases.
 ##
 { 'struct': 'ObjectTypeInfo',
   'data': { 'name': 'str' } }
@@ -4119,13 +4146,19 @@
     'port': 'str' } }
 
 ##
-# @SocketAddress:
+# @SocketAddressLegacy:
 #
 # Captures the address of a socket, which could also be a named file descriptor
 #
+# Note: This type is deprecated in favor of SocketAddress.  The
+# difference between SocketAddressLegacy and SocketAddress is that the
+# latter is a flat union rather than a simple union. Flat is nicer
+# because it avoids nesting on the wire, i.e. that form has fewer {}.
+
+#
 # Since: 1.3
 ##
-{ 'union': 'SocketAddress',
+{ 'union': 'SocketAddressLegacy',
   'data': {
     'inet': 'InetSocketAddress',
     'unix': 'UnixSocketAddress',
@@ -4133,9 +4166,9 @@
     'fd': 'String' } }
 
 ##
-# @SocketAddressFlatType:
+# @SocketAddressType:
 #
-# Available SocketAddressFlat types
+# Available SocketAddress types
 #
 # @inet:  Internet address
 #
@@ -4143,24 +4176,21 @@
 #
 # Since: 2.9
 ##
-{ 'enum': 'SocketAddressFlatType',
+{ 'enum': 'SocketAddressType',
   'data': [ 'inet', 'unix', 'vsock', 'fd' ] }
 
 ##
-# @SocketAddressFlat:
+# @SocketAddress:
 #
-# Captures the address of a socket
+# Captures the address of a socket, which could also be a named file
+# descriptor
 #
 # @type:       Transport type
 #
-# This is just like SocketAddress, except it's a flat union rather
-# than a simple union.  Nicer because it avoids nesting on the wire,
-# i.e. this form has fewer {}.
-#
 # Since: 2.9
 ##
-{ 'union': 'SocketAddressFlat',
-  'base': { 'type': 'SocketAddressFlatType' },
+{ 'union': 'SocketAddress',
+  'base': { 'type': 'SocketAddressType' },
   'discriminator': 'type',
   'data': { 'inet': 'InetSocketAddress',
             'unix': 'UnixSocketAddress',
@@ -4874,6 +4904,8 @@
 # @nodelay: set TCP_NODELAY socket option (default: false)
 # @telnet: enable telnet protocol on server
 #          sockets (default: false)
+# @tn3270: enable tn3270 protocol on server
+#          sockets (default: false) (Since: 2.10)
 # @reconnect: For a client socket, if a socket is disconnected,
 #          then attempt a reconnect after the given number of seconds.
 #          Setting this to zero disables this function. (default: 0)
@@ -4881,12 +4913,13 @@
 #
 # Since: 1.4
 ##
-{ 'struct': 'ChardevSocket', 'data': { 'addr'       : 'SocketAddress',
+{ 'struct': 'ChardevSocket', 'data': { 'addr'       : 'SocketAddressLegacy',
                                      '*tls-creds'  : 'str',
                                      '*server'    : 'bool',
                                      '*wait'      : 'bool',
                                      '*nodelay'   : 'bool',
                                      '*telnet'    : 'bool',
+                                     '*tn3270'    : 'bool',
                                      '*reconnect' : 'int' },
   'base': 'ChardevCommon' }
 
@@ -4900,8 +4933,8 @@
 #
 # Since: 1.5
 ##
-{ 'struct': 'ChardevUdp', 'data': { 'remote' : 'SocketAddress',
-                                  '*local' : 'SocketAddress' },
+{ 'struct': 'ChardevUdp', 'data': { 'remote' : 'SocketAddressLegacy',
+                                  '*local' : 'SocketAddressLegacy' },
   'base': 'ChardevCommon' }
 
 ##
@@ -5673,10 +5706,16 @@
 ##
 # @NumaOptionsType:
 #
+# @node: NUMA nodes configuration
+#
+# @dist: NUMA distance configuration (since 2.10)
+#
+# @cpu: property based CPU(s) to node mapping (Since: 2.10)
+#
 # Since: 2.1
 ##
 { 'enum': 'NumaOptionsType',
-  'data': [ 'node' ] }
+  'data': [ 'node', 'dist', 'cpu' ] }
 
 ##
 # @NumaOptions:
@@ -5689,7 +5728,9 @@
   'base': { 'type': 'NumaOptionsType' },
   'discriminator': 'type',
   'data': {
-    'node': 'NumaNodeOptions' }}
+    'node': 'NumaNodeOptions',
+    'dist': 'NumaDistOptions',
+    'cpu': 'NumaCpuOptions' }}
 
 ##
 # @NumaNodeOptions:
@@ -5716,6 +5757,41 @@
    '*cpus':   ['uint16'],
    '*mem':    'size',
    '*memdev': 'str' }}
+
+##
+# @NumaDistOptions:
+#
+# Set the distance between 2 NUMA nodes.
+#
+# @src: source NUMA node.
+#
+# @dst: destination NUMA node.
+#
+# @val: NUMA distance from source node to destination node.
+#       When a node is unreachable from another node, set the distance
+#       between them to 255.
+#
+# Since: 2.10
+##
+{ 'struct': 'NumaDistOptions',
+  'data': {
+   'src': 'uint16',
+   'dst': 'uint16',
+   'val': 'uint8' }}
+
+##
+# @NumaCpuOptions:
+#
+# Option "-numa cpu" overrides default cpu to node mapping.
+# It accepts the same set of cpu properties as returned by
+# query-hotpluggable-cpus[].props, where node-id could be used to
+# override default node mapping.
+#
+# Since: 2.10
+##
+{ 'struct': 'NumaCpuOptions',
+   'base': 'CpuInstanceProperties',
+   'data' : {} }
 
 ##
 # @HostMemPolicy:

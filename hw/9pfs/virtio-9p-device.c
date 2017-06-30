@@ -46,11 +46,7 @@ static void handle_9p_output(VirtIODevice *vdev, VirtQueue *vq)
     VirtQueueElement *elem;
 
     while ((pdu = pdu_alloc(s))) {
-        struct {
-            uint32_t size_le;
-            uint8_t id;
-            uint16_t tag_le;
-        } QEMU_PACKED out;
+        P9MsgHeader out;
 
         elem = virtqueue_pop(vq, sizeof(VirtQueueElement));
         if (!elem) {
@@ -74,13 +70,7 @@ static void handle_9p_output(VirtIODevice *vdev, VirtQueue *vq)
             goto out_free_req;
         }
 
-        pdu->size = le32_to_cpu(out.size_le);
-
-        pdu->id = out.id;
-        pdu->tag = le16_to_cpu(out.tag_le);
-
-        qemu_co_queue_init(&pdu->complete);
-        pdu_submit(pdu);
+        pdu_submit(pdu, &out);
     }
 
     return;

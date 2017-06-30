@@ -204,7 +204,7 @@ int s390_cpu_handle_mmu_fault(CPUState *cs, vaddr orig_vaddr,
     if (raddr > ram_size) {
         DPRINTF("%s: raddr %" PRIx64 " > ram_size %" PRIx64 "\n", __func__,
                 (uint64_t)raddr, (uint64_t)ram_size);
-        trigger_pgm_exception(env, PGM_ADDRESSING, ILEN_LATER);
+        trigger_pgm_exception(env, PGM_ADDRESSING, ILEN_AUTO);
         return 1;
     }
 
@@ -266,7 +266,7 @@ void load_psw(CPUS390XState *env, uint64_t mask, uint64_t addr)
         S390CPU *cpu = s390_env_get_cpu(env);
         if (s390_cpu_halt(cpu) == 0) {
 #ifndef CONFIG_USER_ONLY
-            qemu_system_shutdown_request();
+            qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 #endif
         }
     }
@@ -331,16 +331,42 @@ static void do_program_interrupt(CPUS390XState *env)
     LowCore *lowcore;
     int ilen = env->int_pgm_ilen;
 
-    switch (ilen) {
-    case ILEN_LATER:
+    if (ilen == ILEN_AUTO) {
         ilen = get_ilen(cpu_ldub_code(env, env->psw.addr));
-        break;
-    case ILEN_LATER_INC:
-        ilen = get_ilen(cpu_ldub_code(env, env->psw.addr));
+    }
+    assert(ilen == 2 || ilen == 4 || ilen == 6);
+
+    switch (env->int_pgm_code) {
+    case PGM_PER:
+        if (env->per_perc_atmid & PER_CODE_EVENT_NULLIFICATION) {
+            break;
+        }
+        /* FALL THROUGH */
+    case PGM_OPERATION:
+    case PGM_PRIVILEGED:
+    case PGM_EXECUTE:
+    case PGM_PROTECTION:
+    case PGM_ADDRESSING:
+    case PGM_SPECIFICATION:
+    case PGM_DATA:
+    case PGM_FIXPT_OVERFLOW:
+    case PGM_FIXPT_DIVIDE:
+    case PGM_DEC_OVERFLOW:
+    case PGM_DEC_DIVIDE:
+    case PGM_HFP_EXP_OVERFLOW:
+    case PGM_HFP_EXP_UNDERFLOW:
+    case PGM_HFP_SIGNIFICANCE:
+    case PGM_HFP_DIVIDE:
+    case PGM_TRANS_SPEC:
+    case PGM_SPECIAL_OP:
+    case PGM_OPERAND:
+    case PGM_HFP_SQRT:
+    case PGM_PC_TRANS_SPEC:
+    case PGM_ALET_SPEC:
+    case PGM_MONITOR:
+        /* advance the PSW if our exception is not nullifying */
         env->psw.addr += ilen;
         break;
-    default:
-        assert(ilen == 2 || ilen == 4 || ilen == 6);
     }
 
     qemu_log_mask(CPU_LOG_INT, "%s: code=0x%x ilen=%d\n",
@@ -642,6 +668,11 @@ bool s390_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
         S390CPU *cpu = S390_CPU(cs);
         CPUS390XState *env = &cpu->env;
 
+        if (env->ex_value) {
+            /* Execution of the target insn is indivisible from
+               the parent EXECUTE insn.  */
+            return false;
+        }
         if (env->psw.mask & PSW_MASK_EXT) {
             s390_cpu_do_interrupt(cs);
             return true;
@@ -717,5 +748,21 @@ void s390x_cpu_debug_excp_handler(CPUState *cs)
         cpu_watchpoint_remove_all(cs, BP_CPU);
         cpu_loop_exit_noexc(cs);
     }
+}
+
+/* Unaligned accesses are only diagnosed with MO_ALIGN.  At the moment,
+   this is only for the atomic operations, for which we want to raise a
+   specification exception.  */
+void s390x_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
+                                   MMUAccessType access_type,
+                                   int mmu_idx, uintptr_t retaddr)
+{
+    S390CPU *cpu = S390_CPU(cs);
+    CPUS390XState *env = &cpu->env;
+
+    if (retaddr) {
+        cpu_restore_state(cs, retaddr);
+    }
+    program_interrupt(env, PGM_SPECIFICATION, ILEN_AUTO);
 }
 #endif /* CONFIG_USER_ONLY */

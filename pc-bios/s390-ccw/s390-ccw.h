@@ -42,6 +42,13 @@ typedef unsigned long long __u64;
 #ifndef NULL
 #define NULL    0
 #endif
+#ifndef MIN
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
+#ifndef MIN_NON_ZERO
+#define MIN_NON_ZERO(a, b) ((a) == 0 ? (b) : \
+                            ((b) == 0 ? (a) : (MIN(a, b))))
+#endif
 
 #include "cio.h"
 #include "iplb.h"
@@ -62,10 +69,12 @@ void consume_sclp_int(void);
 void panic(const char *string);
 void write_subsystem_identification(void);
 extern char stack[PAGE_SIZE * 8] __attribute__((__aligned__(PAGE_SIZE)));
+unsigned int get_loadparm_index(void);
 
-/* sclp-ascii.c */
+/* sclp.c */
 void sclp_print(const char *string);
 void sclp_setup(void);
+void sclp_get_loadparm_ascii(char *loadparm);
 
 /* virtio.c */
 unsigned long virtio_load_direct(ulong rec_list1, ulong rec_list2,
@@ -186,6 +195,19 @@ static inline void IPL_check(bool term, const char *message)
         sclp_print("\n! WARNING: ");
         sclp_print(message);
         sclp_print(" !\n");
+    }
+}
+
+extern const unsigned char ebc2asc[256];
+static inline void ebcdic_to_ascii(const char *src,
+                                   char *dst,
+                                   unsigned int size)
+{
+    unsigned int i;
+
+    for (i = 0; i < size; i++) {
+        unsigned c = src[i];
+        dst[i] = ebc2asc[c];
     }
 }
 

@@ -30,6 +30,8 @@
 #define TARGET_LONG_BITS 64
 #define TARGET_PAGE_BITS 12
 
+#define TCG_GUEST_DEFAULT_MO 0
+
 /* Note that the official physical address space bits is 62-M where M
    is implementation dependent.  I've not looked up M for the set of
    cpus we emulate at the system level.  */
@@ -480,6 +482,8 @@ struct ppc_slb_t {
 #define DSISR_ISSTORE            0x02000000
 /* Not permitted by virtual page class key protection */
 #define DSISR_AMR                0x00200000
+/* Unsupported Radix Tree Configuration */
+#define DSISR_R_BADCONFIG        0x00080000
 
 /* SRR1 error code fields */
 
@@ -943,6 +947,10 @@ struct ppc_segment_page_sizes {
     struct ppc_one_seg_page_size sps[PPC_PAGE_SIZES_MAX_SZ];
 };
 
+struct ppc_radix_page_info {
+    uint32_t count;
+    uint32_t entries[PPC_PAGE_SIZES_MAX_SZ];
+};
 
 /*****************************************************************************/
 /* The whole PowerPC CPU context */
@@ -1196,6 +1204,8 @@ struct PowerPCCPU {
     uint32_t max_compat;
     uint32_t compat_pvr;
     PPCVirtualHypervisor *vhyp;
+    Object *intc;
+    int32_t node_id; /* NUMA node this CPU belongs to */
 
     /* Fields related to migration compatibility hacks */
     bool pre_2_8_migration;
@@ -1216,6 +1226,7 @@ static inline PowerPCCPU *ppc_env_get_cpu(CPUPPCState *env)
 
 PowerPCCPUClass *ppc_cpu_class_by_pvr(uint32_t pvr);
 PowerPCCPUClass *ppc_cpu_class_by_pvr_mask(uint32_t pvr);
+PowerPCCPUClass *ppc_cpu_get_family_class(PowerPCCPUClass *pcc);
 
 struct PPCVirtualHypervisor {
     Object parent;
