@@ -131,10 +131,10 @@ static void pc_init1(MachineState *machine,
                     lowmem = 0xc0000000;
                 }
                 if (lowmem & ((1ULL << 30) - 1)) {
-                    error_report("Warning: Large machine and max_ram_below_4g "
-                                 "(%" PRIu64 ") not a multiple of 1G; "
-                                 "possible bad performance.",
-                                 pcms->max_ram_below_4g);
+                    warn_report("Large machine and max_ram_below_4g "
+                                "(%" PRIu64 ") not a multiple of 1G; "
+                                "possible bad performance.",
+                                pcms->max_ram_below_4g);
                 }
             }
         }
@@ -314,12 +314,9 @@ static void pc_init1(MachineState *machine,
 static void pc_compat_2_3(MachineState *machine)
 {
     PCMachineState *pcms = PC_MACHINE(machine);
-    savevm_skip_section_footers();
     if (kvm_enabled()) {
         pcms->smm = ON_OFF_AUTO_OFF;
     }
-    global_state_set_optional();
-    savevm_skip_configuration();
 }
 
 static void pc_compat_2_2(MachineState *machine)

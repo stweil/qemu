@@ -479,6 +479,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
 
     if (memory_region_is_iommu(section->mr)) {
         VFIOGuestIOMMU *giommu;
+        IOMMUMemoryRegion *iommu_mr = IOMMU_MEMORY_REGION(section->mr);
 
         trace_vfio_listener_region_add_iommu(iova, end);
         /*
@@ -488,7 +489,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
          * device emulation the VFIO iommu handles to use).
          */
         giommu = g_malloc0(sizeof(*giommu));
-        giommu->iommu = section->mr;
+        giommu->iommu = iommu_mr;
         giommu->iommu_offset = section->offset_within_address_space -
                                section->offset_within_region;
         giommu->container = container;
@@ -501,7 +502,7 @@ static void vfio_listener_region_add(MemoryListener *listener,
                             int128_get64(llend));
         QLIST_INSERT_HEAD(&container->giommu_list, giommu, giommu_next);
 
-        memory_region_register_iommu_notifier(giommu->iommu, &giommu->n);
+        memory_region_register_iommu_notifier(section->mr, &giommu->n);
         memory_region_iommu_replay(giommu->iommu, &giommu->n);
 
         return;
@@ -569,9 +570,9 @@ static void vfio_listener_region_del(MemoryListener *listener,
         VFIOGuestIOMMU *giommu;
 
         QLIST_FOREACH(giommu, &container->giommu_list, giommu_next) {
-            if (giommu->iommu == section->mr &&
+            if (MEMORY_REGION(giommu->iommu) == section->mr &&
                 giommu->n.start == section->offset_within_region) {
-                memory_region_unregister_iommu_notifier(giommu->iommu,
+                memory_region_unregister_iommu_notifier(section->mr,
                                                         &giommu->n);
                 QLIST_REMOVE(giommu, giommu_next);
                 g_free(giommu);
@@ -858,13 +859,15 @@ void vfio_reset_handler(void *opaque)
 
     QLIST_FOREACH(group, &vfio_group_list, next) {
         QLIST_FOREACH(vbasedev, &group->device_list, next) {
-            vbasedev->ops->vfio_compute_needs_reset(vbasedev);
+            if (vbasedev->dev->realized) {
+                vbasedev->ops->vfio_compute_needs_reset(vbasedev);
+            }
         }
     }
 
     QLIST_FOREACH(group, &vfio_group_list, next) {
         QLIST_FOREACH(vbasedev, &group->device_list, next) {
-            if (vbasedev->needs_reset) {
+            if (vbasedev->dev->realized && vbasedev->needs_reset) {
                 vbasedev->ops->vfio_hot_reset_multi(vbasedev);
             }
         }
@@ -1106,6 +1109,14 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
         goto free_container_exit;
     }
 
+    vfio_kvm_device_add_group(group);
+
+    QLIST_INIT(&container->group_list);
+    QLIST_INSERT_HEAD(&space->containers, container, next);
+
+    group->container = container;
+    QLIST_INSERT_HEAD(&container->group_list, group, container_next);
+
     container->listener = vfio_memory_listener;
 
     memory_listener_register(&container->listener, container->space->as);
@@ -1119,14 +1130,11 @@ static int vfio_connect_container(VFIOGroup *group, AddressSpace *as,
 
     container->initialized = true;
 
-    QLIST_INIT(&container->group_list);
-    QLIST_INSERT_HEAD(&space->containers, container, next);
-
-    group->container = container;
-    QLIST_INSERT_HEAD(&container->group_list, group, container_next);
-
     return 0;
 listener_release_exit:
+    QLIST_REMOVE(group, container_next);
+    QLIST_REMOVE(container, next);
+    vfio_kvm_device_del_group(group);
     vfio_listener_release(container);
 
 free_container_exit:
@@ -1161,7 +1169,8 @@ static void vfio_disconnect_container(VFIOGroup *group)
         QLIST_REMOVE(container, next);
 
         QLIST_FOREACH_SAFE(giommu, &container->giommu_list, giommu_next, tmp) {
-            memory_region_unregister_iommu_notifier(giommu->iommu, &giommu->n);
+            memory_region_unregister_iommu_notifier(
+                    MEMORY_REGION(giommu->iommu), &giommu->n);
             QLIST_REMOVE(giommu, giommu_next);
             g_free(giommu);
         }
@@ -1229,8 +1238,6 @@ VFIOGroup *vfio_get_group(int groupid, AddressSpace *as, Error **errp)
     }
 
     QLIST_INSERT_HEAD(&vfio_group_list, group, next);
-
-    vfio_kvm_device_add_group(group);
 
     return group;
 

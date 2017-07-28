@@ -1913,16 +1913,6 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
         build_piix4_pci0_int(dsdt);
     } else {
         sb_scope = aml_scope("_SB");
-        aml_append(sb_scope,
-            aml_operation_region("PCST", AML_SYSTEM_IO, aml_int(0xae00), 0x0c));
-        aml_append(sb_scope,
-            aml_operation_region("PCSB", AML_SYSTEM_IO, aml_int(0xae0c), 0x01));
-        field = aml_field("PCSB", AML_ANY_ACC, AML_NOLOCK, AML_WRITE_AS_ZEROS);
-        aml_append(field, aml_named_field("PCIB", 8));
-        aml_append(sb_scope, field);
-        aml_append(dsdt, sb_scope);
-
-        sb_scope = aml_scope("_SB");
         dev = aml_device("PCI0");
         aml_append(dev, aml_name_decl("_HID", aml_eisaid("PNP0A08")));
         aml_append(dev, aml_name_decl("_CID", aml_eisaid("PNP0A03")));
@@ -2776,17 +2766,17 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
                      ACPI_BUILD_ALIGN_SIZE);
         if (tables_blob->len > legacy_table_size) {
             /* Should happen only with PCI bridges and -M pc-i440fx-2.0.  */
-            error_report("Warning: migration may not work.");
+            warn_report("migration may not work.");
         }
         g_array_set_size(tables_blob, legacy_table_size);
     } else {
         /* Make sure we have a buffer in case we need to resize the tables. */
         if (tables_blob->len > ACPI_BUILD_TABLE_SIZE / 2) {
             /* As of QEMU 2.1, this fires with 160 VCPUs and 255 memory slots.  */
-            error_report("Warning: ACPI tables are larger than 64k.");
-            error_report("Warning: migration may not work.");
-            error_report("Warning: please remove CPUs, NUMA nodes, "
-                         "memory slots or PCI bridges.");
+            warn_report("ACPI tables are larger than 64k.");
+            warn_report("migration may not work.");
+            warn_report("please remove CPUs, NUMA nodes, "
+                        "memory slots or PCI bridges.");
         }
         acpi_align_size(tables_blob, ACPI_BUILD_TABLE_SIZE);
     }

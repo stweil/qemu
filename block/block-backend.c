@@ -83,7 +83,6 @@ static const AIOCBInfo block_backend_aiocb_info = {
 
 static void drive_info_del(DriveInfo *dinfo);
 static BlockBackend *bdrv_first_blk(BlockDriverState *bs);
-static char *blk_get_attached_dev_id(BlockBackend *blk);
 
 /* All BlockBackends */
 static QTAILQ_HEAD(, BlockBackend) block_backends =
@@ -343,7 +342,7 @@ void blk_unref(BlockBackend *blk)
  * Behaves similarly to blk_next() but iterates over all BlockBackends, even the
  * ones which are hidden (i.e. are not referenced by the monitor).
  */
-static BlockBackend *blk_all_next(BlockBackend *blk)
+BlockBackend *blk_all_next(BlockBackend *blk)
 {
     return blk ? QTAILQ_NEXT(blk, link)
                : QTAILQ_FIRST(&block_backends);
@@ -726,7 +725,7 @@ void *blk_get_attached_dev(BlockBackend *blk)
 
 /* Return the qdev ID, or if no ID is assigned the QOM path, of the block
  * device attached to the BlockBackend. */
-static char *blk_get_attached_dev_id(BlockBackend *blk)
+char *blk_get_attached_dev_id(BlockBackend *blk)
 {
     DeviceState *dev;
 
@@ -1773,14 +1772,15 @@ int blk_pwrite_compressed(BlockBackend *blk, int64_t offset, const void *buf,
                    BDRV_REQ_WRITE_COMPRESSED);
 }
 
-int blk_truncate(BlockBackend *blk, int64_t offset, Error **errp)
+int blk_truncate(BlockBackend *blk, int64_t offset, PreallocMode prealloc,
+                 Error **errp)
 {
     if (!blk_is_available(blk)) {
         error_setg(errp, "No medium inserted");
         return -ENOMEDIUM;
     }
 
-    return bdrv_truncate(blk->root, offset, errp);
+    return bdrv_truncate(blk->root, offset, prealloc, errp);
 }
 
 static void blk_pdiscard_entry(void *opaque)

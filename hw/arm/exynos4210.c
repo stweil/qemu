@@ -87,6 +87,9 @@
 /* Clock controller SFR base address */
 #define EXYNOS4210_CLK_BASE_ADDR            0x10030000
 
+/* PRNG/HASH SFR base address */
+#define EXYNOS4210_RNG_BASE_ADDR            0x10830400
+
 /* Display controllers (FIMD) */
 #define EXYNOS4210_FIMD0_BASE_ADDR          0x11C00000
 
@@ -278,7 +281,6 @@ Exynos4210State *exynos4210_init(MemoryRegion *system_mem)
     /* Internal ROM */
     memory_region_init_ram(&s->irom_mem, NULL, "exynos4210.irom",
                            EXYNOS4210_IROM_SIZE, &error_fatal);
-    vmstate_register_ram_global(&s->irom_mem);
     memory_region_set_readonly(&s->irom_mem, true);
     memory_region_add_subregion(system_mem, EXYNOS4210_IROM_BASE_ADDR,
                                 &s->irom_mem);
@@ -294,7 +296,6 @@ Exynos4210State *exynos4210_init(MemoryRegion *system_mem)
     /* Internal RAM */
     memory_region_init_ram(&s->iram_mem, NULL, "exynos4210.iram",
                            EXYNOS4210_IRAM_SIZE, &error_fatal);
-    vmstate_register_ram_global(&s->iram_mem);
     memory_region_add_subregion(system_mem, EXYNOS4210_IRAM_BASE_ADDR,
                                 &s->iram_mem);
 
@@ -305,6 +306,7 @@ Exynos4210State *exynos4210_init(MemoryRegion *system_mem)
     sysbus_create_simple("exynos4210.pmu", EXYNOS4210_PMU_BASE_ADDR, NULL);
 
     sysbus_create_simple("exynos4210.clk", EXYNOS4210_CLK_BASE_ADDR, NULL);
+    sysbus_create_simple("exynos4210.rng", EXYNOS4210_RNG_BASE_ADDR, NULL);
 
     /* PWM */
     sysbus_create_varargs("exynos4210.pwm", EXYNOS4210_PWM_BASE_ADDR,

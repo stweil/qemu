@@ -12,6 +12,7 @@
 #ifndef CSS_H
 #define CSS_H
 
+#include "cpu.h"
 #include "hw/s390x/adapter.h"
 #include "hw/s390x/s390_flic.h"
 #include "hw/s390x/ioinst.h"
@@ -88,13 +89,17 @@ struct SubchDev {
     bool ccw_fmt_1;
     bool thinint_active;
     uint8_t ccw_no_data_cnt;
+    uint16_t migrated_schid; /* used for missmatch detection */
+    ORB orb;
     /* transport-provided data: */
     int (*ccw_cb) (SubchDev *, CCW1);
     void (*disable_cb)(SubchDev *);
-    int (*do_subchannel_work) (SubchDev *, ORB *);
+    int (*do_subchannel_work) (SubchDev *);
     SenseId id;
     void *driver_data;
 };
+
+extern const VMStateDescription vmstate_subch_dev;
 
 /*
  * Identify a device within the channel subsystem.
@@ -109,7 +114,7 @@ typedef struct CssDevId {
     bool valid;
 } CssDevId;
 
-extern PropertyInfo css_devid_propinfo;
+extern const PropertyInfo css_devid_propinfo;
 
 #define DEFINE_PROP_CSS_DEV_ID(_n, _s, _f) \
     DEFINE_PROP(_n, _s, _f, css_devid_propinfo, CssDevId)
@@ -118,9 +123,14 @@ typedef struct IndAddr {
     hwaddr addr;
     uint64_t map;
     unsigned long refcnt;
-    int len;
+    int32_t len;
     QTAILQ_ENTRY(IndAddr) sibling;
 } IndAddr;
+
+extern const VMStateDescription vmstate_ind_addr;
+
+#define VMSTATE_PTR_TO_IND_ADDR(_f, _s)                                   \
+    VMSTATE_STRUCT(_f, _s, 1, vmstate_ind_addr, IndAddr*)
 
 IndAddr *get_indicator(hwaddr ind_addr, int len);
 void release_indicator(AdapterInfo *adapter, IndAddr *indicator);
@@ -128,8 +138,6 @@ int map_indicator(AdapterInfo *adapter, IndAddr *indicator);
 
 typedef SubchDev *(*css_subch_cb_func)(uint8_t m, uint8_t cssid, uint8_t ssid,
                                        uint16_t schid);
-void subch_device_save(SubchDev *s, QEMUFile *f);
-int subch_device_load(SubchDev *s, QEMUFile *f);
 int css_create_css_image(uint8_t cssid, bool default_image);
 bool css_devno_used(uint8_t cssid, uint8_t ssid, uint16_t devno);
 void css_subch_assign(uint8_t cssid, uint8_t ssid, uint16_t schid,
@@ -148,10 +156,9 @@ void css_generate_sch_crws(uint8_t cssid, uint8_t ssid, uint16_t schid,
 void css_generate_chp_crws(uint8_t cssid, uint8_t chpid);
 void css_generate_css_crws(uint8_t cssid);
 void css_clear_sei_pending(void);
-void css_adapter_interrupt(uint8_t isc);
 int s390_ccw_cmd_request(ORB *orb, SCSW *scsw, void *data);
-int do_subchannel_work_virtual(SubchDev *sub, ORB *orb);
-int do_subchannel_work_passthrough(SubchDev *sub, ORB *orb);
+int do_subchannel_work_virtual(SubchDev *sub);
+int do_subchannel_work_passthrough(SubchDev *sub);
 
 typedef enum {
     CSS_IO_ADAPTER_VIRTIO = 0,
@@ -159,9 +166,17 @@ typedef enum {
     CSS_IO_ADAPTER_TYPE_NUMS,
 } CssIoAdapterType;
 
+void css_adapter_interrupt(CssIoAdapterType type, uint8_t isc);
+int css_do_sic(CPUS390XState *env, uint8_t isc, uint16_t mode);
 uint32_t css_get_adapter_id(CssIoAdapterType type, uint8_t isc);
 void css_register_io_adapters(CssIoAdapterType type, bool swap, bool maskable,
-                              Error **errp);
+                              uint8_t flags, Error **errp);
+
+#ifndef CONFIG_KVM
+#define S390_ADAPTER_SUPPRESSIBLE 0x01
+#else
+#define S390_ADAPTER_SUPPRESSIBLE KVM_S390_ADAPTER_SUPPRESSIBLE
+#endif
 
 #ifndef CONFIG_USER_ONLY
 SubchDev *css_find_subch(uint8_t m, uint8_t cssid, uint8_t ssid,
@@ -190,7 +205,7 @@ int css_do_rchp(uint8_t cssid, uint8_t chpid);
 bool css_present(uint8_t cssid);
 #endif
 
-extern PropertyInfo css_devid_ro_propinfo;
+extern const PropertyInfo css_devid_ro_propinfo;
 
 #define DEFINE_PROP_CSS_DEV_ID_RO(_n, _s, _f) \
     DEFINE_PROP(_n, _s, _f, css_devid_ro_propinfo, CssDevId)
@@ -219,4 +234,8 @@ extern PropertyInfo css_devid_ro_propinfo;
  */
 SubchDev *css_create_sch(CssDevId bus_id, bool is_virtual, bool squash_mcss,
                          Error **errp);
+
+/** Turn on css migration */
+void css_register_vmstate(void);
+
 #endif

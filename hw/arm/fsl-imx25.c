@@ -275,7 +275,6 @@ static void fsl_imx25_realize(DeviceState *dev, Error **errp)
     }
     memory_region_add_subregion(get_system_memory(), FSL_IMX25_IRAM_ADDR,
                                 &s->iram);
-    vmstate_register_ram_global(&s->iram);
 
     /* internal RAM (128 KB) is aliased over 128 MB - 128 KB */
     memory_region_init_alias(&s->iram_alias, NULL, "imx25.iram_alias",

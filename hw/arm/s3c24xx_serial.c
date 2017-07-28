@@ -13,7 +13,7 @@
 #include "cpu.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
-#include "sysemu/char.h"
+#include "chardev/char-fe.h"     /* qemu_chr_fe_write */
 #include "sysemu/sysemu.h"
 
 #include "s3c24xx.h"
@@ -263,7 +263,7 @@ s3c24xx_serial_init(S3CState *soc,
                              s3c24xx_serial_can_receive,
                              s3c24xx_serial_receive,
                              s3c24xx_serial_event,
-                             s, NULL, true);
+                             NULL, s, NULL, true);
 
     return s;
 }

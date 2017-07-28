@@ -1761,9 +1761,9 @@ static int iscsi_open(BlockDriverState *bs, QDict *options, int flags,
      * filename encoded options */
     filename = qdict_get_try_str(options, "filename");
     if (filename) {
-        error_report("Warning: 'filename' option specified. "
-                      "This is an unsupported option, and may be deprecated "
-                      "in the future");
+        warn_report("'filename' option specified. "
+                    "This is an unsupported option, and may be deprecated "
+                    "in the future");
         iscsi_parse_filename(filename, options, &local_err);
         if (local_err) {
             ret = -EINVAL;
@@ -2079,10 +2079,17 @@ static void iscsi_reopen_commit(BDRVReopenState *reopen_state)
     }
 }
 
-static int iscsi_truncate(BlockDriverState *bs, int64_t offset, Error **errp)
+static int iscsi_truncate(BlockDriverState *bs, int64_t offset,
+                          PreallocMode prealloc, Error **errp)
 {
     IscsiLun *iscsilun = bs->opaque;
     Error *local_err = NULL;
+
+    if (prealloc != PREALLOC_MODE_OFF) {
+        error_setg(errp, "Unsupported preallocation mode '%s'",
+                   PreallocMode_lookup[prealloc]);
+        return -ENOTSUP;
+    }
 
     if (iscsilun->type != TYPE_DISK) {
         error_setg(errp, "Cannot resize non-disk iSCSI devices");

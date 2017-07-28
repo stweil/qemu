@@ -511,6 +511,7 @@ static void test_visitor_in_null(TestInputVisitorData *data,
 {
     Visitor *v;
     Error *err = NULL;
+    QNull *null;
     char *tmp;
 
     /*
@@ -525,12 +526,15 @@ static void test_visitor_in_null(TestInputVisitorData *data,
     v = visitor_input_test_init_full(data, false,
                                      "{ 'a': null, 'b': '' }");
     visit_start_struct(v, NULL, NULL, 0, &error_abort);
-    visit_type_null(v, "a", &error_abort);
-    visit_type_null(v, "b", &err);
+    visit_type_null(v, "a", &null, &error_abort);
+    g_assert(qobject_type(QOBJECT(null)) == QTYPE_QNULL);
+    QDECREF(null);
+    visit_type_null(v, "b", &null, &err);
     error_free_or_abort(&err);
+    g_assert(!null);
     visit_type_str(v, "c", &tmp, &err);
-    g_assert(!tmp);
     error_free_or_abort(&err);
+    g_assert(!tmp);
     visit_check_struct(v, &error_abort);
     visit_end_struct(v, NULL);
 }
@@ -564,7 +568,6 @@ static void test_visitor_in_alternate(TestInputVisitorData *data,
                                       const void *unused)
 {
     Visitor *v;
-    Error *err = NULL;
     UserDefAlternate *tmp;
     WrapAlternate *wrap;
 
@@ -580,6 +583,11 @@ static void test_visitor_in_alternate(TestInputVisitorData *data,
     g_assert_cmpint(tmp->u.e, ==, ENUM_ONE_VALUE1);
     qapi_free_UserDefAlternate(tmp);
 
+    v = visitor_input_test_init(data, "null");
+    visit_type_UserDefAlternate(v, NULL, &tmp, &error_abort);
+    g_assert_cmpint(tmp->type, ==, QTYPE_QNULL);
+    qapi_free_UserDefAlternate(tmp);
+
     v = visitor_input_test_init(data, "{'integer':1, 'string':'str', "
                                 "'enum1':'value1', 'boolean':true}");
     visit_type_UserDefAlternate(v, NULL, &tmp, &error_abort);
@@ -589,11 +597,6 @@ static void test_visitor_in_alternate(TestInputVisitorData *data,
     g_assert_cmpint(tmp->u.udfu.enum1, ==, ENUM_ONE_VALUE1);
     g_assert_cmpint(tmp->u.udfu.u.value1.boolean, ==, true);
     g_assert_cmpint(tmp->u.udfu.u.value1.has_a_b, ==, false);
-    qapi_free_UserDefAlternate(tmp);
-
-    v = visitor_input_test_init(data, "false");
-    visit_type_UserDefAlternate(v, NULL, &tmp, &err);
-    error_free_or_abort(&err);
     qapi_free_UserDefAlternate(tmp);
 
     v = visitor_input_test_init(data, "{ 'alt': 42 }");
@@ -1088,6 +1091,7 @@ static void test_visitor_in_fail_struct_missing(TestInputVisitorData *data,
     Error *err = NULL;
     Visitor *v;
     QObject *any;
+    QNull *null;
     GenericAlternate *alt;
     bool present;
     int en;
@@ -1121,7 +1125,7 @@ static void test_visitor_in_fail_struct_missing(TestInputVisitorData *data,
     error_free_or_abort(&err);
     visit_type_any(v, "any", &any, &err);
     error_free_or_abort(&err);
-    visit_type_null(v, "null", &err);
+    visit_type_null(v, "null", &null, &err);
     error_free_or_abort(&err);
     visit_start_list(v, "sub", NULL, 0, &error_abort);
     visit_start_struct(v, NULL, NULL, 0, &error_abort);

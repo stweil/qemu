@@ -221,18 +221,29 @@ struct BusState {
     QLIST_ENTRY(BusState) sibling;
 };
 
+/**
+ * Property:
+ * @set_default: true if the default value should be set from @defval,
+ *    in which case @info->set_default_value must not be NULL
+ *    (if false then no default value is set by the property system
+ *     and the field retains whatever value it was given by instance_init).
+ * @defval: default value for the property. This is used only if @set_default
+ *     is true.
+ */
 struct Property {
     const char   *name;
-    PropertyInfo *info;
+    const PropertyInfo *info;
     ptrdiff_t    offset;
     uint8_t      bitnr;
+    bool         set_default;
     union {
         int64_t i;
         uint64_t u;
     } defval;
     int          arrayoffset;
-    PropertyInfo *arrayinfo;
+    const PropertyInfo *arrayinfo;
     int          arrayfieldsize;
+    const char   *link_type;
 };
 
 struct PropertyInfo {
@@ -241,6 +252,7 @@ struct PropertyInfo {
     const char * const *enum_table;
     int (*print)(DeviceState *dev, Property *prop, char *dest, size_t len);
     void (*set_default_value)(Object *obj, const Property *prop);
+    void (*create)(Object *obj, Property *prop, Error **errp);
     ObjectPropertyAccessor *get;
     ObjectPropertyAccessor *set;
     ObjectPropertyRelease *release;

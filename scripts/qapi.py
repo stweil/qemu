@@ -20,6 +20,7 @@ import sys
 from ordereddict import OrderedDict
 
 builtin_types = {
+    'null':     'QTYPE_QNULL',
     'str':      'QTYPE_QSTRING',
     'int':      'QTYPE_QNUM',
     'number':   'QTYPE_QNUM',
@@ -1056,6 +1057,7 @@ class QAPISchemaType(QAPISchemaEntity):
 
     def alternate_qtype(self):
         json2qtype = {
+            'null':    'QTYPE_QNULL',
             'string':  'QTYPE_QSTRING',
             'number':  'QTYPE_QNUM',
             'int':     'QTYPE_QNUM',
@@ -1515,7 +1517,8 @@ class QAPISchema(object):
                   ('uint64', 'int',     'uint64_t'),
                   ('size',   'int',     'uint64_t'),
                   ('bool',   'boolean', 'bool'),
-                  ('any',    'value',   'QObject' + pointer_suffix)]:
+                  ('any',    'value',   'QObject' + pointer_suffix),
+                  ('null',   'null',    'QNull' + pointer_suffix)]:
             self._def_builtin_type(*t)
         self.the_empty_object_type = QAPISchemaObjectType(
             'q_empty', None, None, None, [], None)
@@ -1897,7 +1900,7 @@ extern const char *const %(c_name)s_lookup[];
     return ret
 
 
-def gen_params(arg_type, boxed, extra):
+def build_params(arg_type, boxed, extra):
     if not arg_type:
         assert not boxed
         return extra

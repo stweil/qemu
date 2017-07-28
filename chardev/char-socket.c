@@ -454,7 +454,9 @@ static int tcp_chr_sync_read(Chardev *chr, const uint8_t *buf, int len)
         return 0;
     }
 
+    qio_channel_set_blocking(s->ioc, true, NULL);
     size = tcp_chr_recv(chr, (void *) buf, len);
+    qio_channel_set_blocking(s->ioc, false, NULL);
     if (size == 0) {
         /* connection closed */
         tcp_chr_disconnect(chr);
@@ -765,8 +767,8 @@ static int tcp_chr_wait_connected(Chardev *chr, Error **errp)
      * in TLS and telnet cases, only wait for an accepted socket */
     while (!s->ioc) {
         if (s->is_listen) {
-            error_report("QEMU waiting for connection on: %s",
-                         chr->filename);
+            info_report("QEMU waiting for connection on: %s",
+                        chr->filename);
             qio_channel_set_blocking(QIO_CHANNEL(s->listen_ioc), true, NULL);
             tcp_chr_accept(QIO_CHANNEL(s->listen_ioc), G_IO_IN, chr);
             qio_channel_set_blocking(QIO_CHANNEL(s->listen_ioc), false, NULL);

@@ -24,6 +24,7 @@
 #include "qemu/osdep.h"
 #include "hw.h"
 #include "char/char.h"
+#include "migration/register.h"  /* register_savevm_live */
 #include "isa.h"
 #include "pc.h"
 
@@ -434,6 +435,11 @@ void serial_frequency(SerialState *s, uint32_t frequency)
     s->frequency = frequency;
 }
 
+static SaveVMHandlers savevm_serial = {
+    .save_state = serial_save,
+    .load_state = serial_load
+};
+
 /* If fd is zero, it means that the serial device uses the console */
 SerialState *serial_16450_init(int base, qemu_irq irq, Chardev *chr)
 {
@@ -450,8 +456,8 @@ SerialState *serial_16450_init(int base, qemu_irq irq, Chardev *chr)
     s->frequency = 115200;
     serial_reset(s);
 
-    register_savevm("serial", serial_instance, SERIAL_VERSION,
-                    serial_save, serial_load, s);
+    register_savevm_live("serial", serial_instance, SERIAL_VERSION,
+                         &savevm_serial, s);
     serial_instance++;
 
     if (base != 0) {

@@ -5,31 +5,33 @@
 
 /*** qdev-properties.c ***/
 
-extern PropertyInfo qdev_prop_bit;
-extern PropertyInfo qdev_prop_bit64;
-extern PropertyInfo qdev_prop_bool;
-extern PropertyInfo qdev_prop_uint8;
-extern PropertyInfo qdev_prop_uint16;
-extern PropertyInfo qdev_prop_uint32;
-extern PropertyInfo qdev_prop_int32;
-extern PropertyInfo qdev_prop_uint64;
-extern PropertyInfo qdev_prop_size;
-extern PropertyInfo qdev_prop_string;
-extern PropertyInfo qdev_prop_chr;
-extern PropertyInfo qdev_prop_ptr;
-extern PropertyInfo qdev_prop_macaddr;
-extern PropertyInfo qdev_prop_on_off_auto;
-extern PropertyInfo qdev_prop_losttickpolicy;
-extern PropertyInfo qdev_prop_blockdev_on_error;
-extern PropertyInfo qdev_prop_bios_chs_trans;
-extern PropertyInfo qdev_prop_fdc_drive_type;
-extern PropertyInfo qdev_prop_drive;
-extern PropertyInfo qdev_prop_netdev;
-extern PropertyInfo qdev_prop_vlan;
-extern PropertyInfo qdev_prop_pci_devfn;
-extern PropertyInfo qdev_prop_blocksize;
-extern PropertyInfo qdev_prop_pci_host_devaddr;
-extern PropertyInfo qdev_prop_arraylen;
+extern const PropertyInfo qdev_prop_bit;
+extern const PropertyInfo qdev_prop_bit64;
+extern const PropertyInfo qdev_prop_bool;
+extern const PropertyInfo qdev_prop_uint8;
+extern const PropertyInfo qdev_prop_uint16;
+extern const PropertyInfo qdev_prop_uint32;
+extern const PropertyInfo qdev_prop_int32;
+extern const PropertyInfo qdev_prop_uint64;
+extern const PropertyInfo qdev_prop_int64;
+extern const PropertyInfo qdev_prop_size;
+extern const PropertyInfo qdev_prop_string;
+extern const PropertyInfo qdev_prop_chr;
+extern const PropertyInfo qdev_prop_ptr;
+extern const PropertyInfo qdev_prop_macaddr;
+extern const PropertyInfo qdev_prop_on_off_auto;
+extern const PropertyInfo qdev_prop_losttickpolicy;
+extern const PropertyInfo qdev_prop_blockdev_on_error;
+extern const PropertyInfo qdev_prop_bios_chs_trans;
+extern const PropertyInfo qdev_prop_fdc_drive_type;
+extern const PropertyInfo qdev_prop_drive;
+extern const PropertyInfo qdev_prop_netdev;
+extern const PropertyInfo qdev_prop_vlan;
+extern const PropertyInfo qdev_prop_pci_devfn;
+extern const PropertyInfo qdev_prop_blocksize;
+extern const PropertyInfo qdev_prop_pci_host_devaddr;
+extern const PropertyInfo qdev_prop_arraylen;
+extern const PropertyInfo qdev_prop_link;
 
 #define DEFINE_PROP(_name, _state, _field, _prop, _type) { \
         .name      = (_name),                                    \
@@ -43,7 +45,15 @@ extern PropertyInfo qdev_prop_arraylen;
         .info      = &(_prop),                                          \
         .offset    = offsetof(_state, _field)                           \
             + type_check(_type,typeof_field(_state, _field)),           \
+        .set_default = true,                                            \
         .defval.i  = (_type)_defval,                                    \
+        }
+
+#define DEFINE_PROP_SIGNED_NODEFAULT(_name, _state, _field, _prop, _type) { \
+        .name      = (_name),                                           \
+        .info      = &(_prop),                                          \
+        .offset    = offsetof(_state, _field)                           \
+            + type_check(_type, typeof_field(_state, _field)),          \
         }
 
 #define DEFINE_PROP_BIT(_name, _state, _field, _bit, _defval) {  \
@@ -52,6 +62,7 @@ extern PropertyInfo qdev_prop_arraylen;
         .bitnr    = (_bit),                                      \
         .offset    = offsetof(_state, _field)                    \
             + type_check(uint32_t,typeof_field(_state, _field)), \
+        .set_default = true,                                     \
         .defval.u  = (bool)_defval,                              \
         }
 
@@ -60,7 +71,15 @@ extern PropertyInfo qdev_prop_arraylen;
         .info      = &(_prop),                                          \
         .offset    = offsetof(_state, _field)                           \
             + type_check(_type, typeof_field(_state, _field)),          \
+        .set_default = true,                                            \
         .defval.u  = (_type)_defval,                                    \
+        }
+
+#define DEFINE_PROP_UNSIGNED_NODEFAULT(_name, _state, _field, _prop, _type) { \
+        .name      = (_name),                                           \
+        .info      = &(_prop),                                          \
+        .offset    = offsetof(_state, _field)                           \
+            + type_check(_type, typeof_field(_state, _field)),          \
         }
 
 #define DEFINE_PROP_BIT64(_name, _state, _field, _bit, _defval) {       \
@@ -69,6 +88,7 @@ extern PropertyInfo qdev_prop_arraylen;
         .bitnr    = (_bit),                                             \
         .offset    = offsetof(_state, _field)                           \
             + type_check(uint64_t, typeof_field(_state, _field)),       \
+        .set_default = true,                                            \
         .defval.u  = (bool)_defval,                                     \
         }
 
@@ -77,6 +97,7 @@ extern PropertyInfo qdev_prop_arraylen;
         .info      = &(qdev_prop_bool),                          \
         .offset    = offsetof(_state, _field)                    \
             + type_check(bool, typeof_field(_state, _field)),    \
+        .set_default = true,                                     \
         .defval.u    = (bool)_defval,                            \
         }
 
@@ -110,11 +131,21 @@ extern PropertyInfo qdev_prop_arraylen;
                           _arrayfield, _arrayprop, _arraytype) {        \
         .name = (PROP_ARRAY_LEN_PREFIX _name),                          \
         .info = &(qdev_prop_arraylen),                                  \
+        .set_default = true,                                            \
+        .defval.u = 0,                                                  \
         .offset = offsetof(_state, _field)                              \
             + type_check(uint32_t, typeof_field(_state, _field)),       \
         .arrayinfo = &(_arrayprop),                                     \
         .arrayfieldsize = sizeof(_arraytype),                           \
         .arrayoffset = offsetof(_state, _arrayfield),                   \
+        }
+
+#define DEFINE_PROP_LINK(_name, _state, _field, _type, _ptr_type) {     \
+        .name = (_name),                                                \
+        .info = &(qdev_prop_link),                                      \
+        .offset = offsetof(_state, _field)                              \
+            + type_check(_ptr_type, typeof_field(_state, _field)),      \
+        .link_type  = _type,                                            \
         }
 
 #define DEFINE_PROP_UINT8(_n, _s, _f, _d)                       \
@@ -127,6 +158,8 @@ extern PropertyInfo qdev_prop_arraylen;
     DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_int32, int32_t)
 #define DEFINE_PROP_UINT64(_n, _s, _f, _d)                      \
     DEFINE_PROP_UNSIGNED(_n, _s, _f, _d, qdev_prop_uint64, uint64_t)
+#define DEFINE_PROP_INT64(_n, _s, _f, _d)                      \
+    DEFINE_PROP_SIGNED(_n, _s, _f, _d, qdev_prop_int64, int64_t)
 #define DEFINE_PROP_SIZE(_n, _s, _f, _d)                       \
     DEFINE_PROP_UNSIGNED(_n, _s, _f, _d, qdev_prop_size, uint64_t)
 #define DEFINE_PROP_PCI_DEVFN(_n, _s, _f, _d)                   \
@@ -210,6 +243,35 @@ void error_set_from_qdev_prop_error(Error **errp, int ret, DeviceState *dev,
                                     Property *prop, const char *value);
 
 /**
+ * register_compat_prop:
+ *
+ * Register internal (not user-provided) global property, changing the
+ * default value of a given property in a device type.  This can be used
+ * for enabling machine-type compatibility or for enabling
+ * accelerator-specific defaults in devices.
+ *
+ * The property values set using this function must be always valid and
+ * never report setter errors, as the property will have
+ * GlobalProperty::errp set to &error_abort.
+ *
+ * User-provided global properties should override internal global
+ * properties, so callers of this function should ensure that it is
+ * called before user-provided global properties are registered.
+ *
+ * @driver: Device type to be affected
+ * @property: Property whose default value is going to be changed
+ * @value: New default value for the property
+ */
+void register_compat_prop(const char *driver, const char *property,
+                          const char *value);
+/*
+ * register_compat_props_array(): using register_compat_prop(), which
+ * only registers internal global properties (which has lower priority
+ * than user-provided global properties)
+ */
+void register_compat_props_array(GlobalProperty *prop);
+
+/**
  * qdev_property_add_static:
  * @dev: Device to add the property to.
  * @prop: The qdev property definition.
@@ -243,7 +305,8 @@ void qdev_prop_set_after_realize(DeviceState *dev, const char *name,
  * This function should be used as the check() argument to
  * object_property_add_link().
  */
-void qdev_prop_allow_set_link_before_realize(Object *obj, const char *name,
+void qdev_prop_allow_set_link_before_realize(const Object *obj,
+                                             const char *name,
                                              Object *val, Error **errp);
 
 #endif

@@ -740,7 +740,7 @@ out:
     return ret;
 }
 
-const char *object_get_typename(Object *obj)
+const char *object_get_typename(const Object *obj)
 {
     return obj->class->type->name;
 }
@@ -1428,7 +1428,7 @@ out:
     g_free(type);
 }
 
-void object_property_allow_set_link(Object *obj, const char *name,
+void object_property_allow_set_link(const Object *obj, const char *name,
                                     Object *val, Error **errp)
 {
     /* Allow the link to be set, always */
@@ -1436,7 +1436,7 @@ void object_property_allow_set_link(Object *obj, const char *name,
 
 typedef struct {
     Object **child;
-    void (*check)(Object *, const char *, Object *, Error **);
+    void (*check)(const Object *, const char *, Object *, Error **);
     ObjectPropertyLinkFlags flags;
 } LinkProperty;
 
@@ -1552,7 +1552,7 @@ static void object_release_link_property(Object *obj, const char *name,
 
 void object_property_add_link(Object *obj, const char *name,
                               const char *type, Object **child,
-                              void (*check)(Object *, const char *,
+                              void (*check)(const Object *, const char *,
                                             Object *, Error **),
                               ObjectPropertyLinkFlags flags,
                               Error **errp)
@@ -1712,15 +1712,13 @@ static Object *object_resolve_partial_path(Object *parent,
                                             typename, ambiguous);
         if (found) {
             if (obj) {
-                if (ambiguous) {
-                    *ambiguous = true;
-                }
+                *ambiguous = true;
                 return NULL;
             }
             obj = found;
         }
 
-        if (ambiguous && *ambiguous) {
+        if (*ambiguous) {
             return NULL;
         }
     }
@@ -1729,7 +1727,7 @@ static Object *object_resolve_partial_path(Object *parent,
 }
 
 Object *object_resolve_path_type(const char *path, const char *typename,
-                                 bool *ambiguous)
+                                 bool *ambiguousp)
 {
     Object *obj;
     gchar **parts;
@@ -1738,11 +1736,12 @@ Object *object_resolve_path_type(const char *path, const char *typename,
     assert(parts);
 
     if (parts[0] == NULL || strcmp(parts[0], "") != 0) {
-        if (ambiguous) {
-            *ambiguous = false;
-        }
+        bool ambiguous = false;
         obj = object_resolve_partial_path(object_get_root(), parts,
-                                          typename, ambiguous);
+                                          typename, &ambiguous);
+        if (ambiguousp) {
+            *ambiguousp = ambiguous;
+        }
     } else {
         obj = object_resolve_abs_path(object_get_root(), parts, typename, 1);
     }

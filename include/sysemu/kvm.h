@@ -19,25 +19,17 @@
 #include "exec/memattrs.h"
 #include "hw/irq.h"
 
-#ifdef CONFIG_KVM
-#include <linux/kvm.h>
-#include <linux/kvm_para.h>
+#ifdef NEED_CPU_H
+# ifdef CONFIG_KVM
+#  include <linux/kvm.h>
+#  include <linux/kvm_para.h>
+#  define CONFIG_KVM_IS_POSSIBLE
+# endif
 #else
-/* These constants must never be used at runtime if kvm_enabled() is false.
- * They exist so we don't need #ifdefs around KVM-specific code that already
- * checks kvm_enabled() properly.
- */
-#define KVM_CPUID_SIGNATURE      0
-#define KVM_CPUID_FEATURES       0
-#define KVM_FEATURE_CLOCKSOURCE  0
-#define KVM_FEATURE_NOP_IO_DELAY 0
-#define KVM_FEATURE_MMU_OP       0
-#define KVM_FEATURE_CLOCKSOURCE2 0
-#define KVM_FEATURE_ASYNC_PF     0
-#define KVM_FEATURE_STEAL_TIME   0
-#define KVM_FEATURE_PV_EOI       0
-#define KVM_FEATURE_CLOCKSOURCE_STABLE_BIT 0
+# define CONFIG_KVM_IS_POSSIBLE
 #endif
+
+#ifdef CONFIG_KVM_IS_POSSIBLE
 
 extern bool kvm_allowed;
 extern bool kvm_kernel_irqchip;
@@ -55,7 +47,6 @@ extern bool kvm_direct_msi_allowed;
 extern bool kvm_ioeventfd_any_length_allowed;
 extern bool kvm_msi_use_devid;
 
-#if defined CONFIG_KVM || !defined NEED_CPU_H
 #define kvm_enabled()           (kvm_allowed)
 /**
  * kvm_irqchip_in_kernel:
@@ -178,6 +169,7 @@ extern bool kvm_msi_use_devid;
 #define kvm_msi_devid_required() (kvm_msi_use_devid)
 
 #else
+
 #define kvm_enabled()           (0)
 #define kvm_irqchip_in_kernel() (false)
 #define kvm_irqchip_is_split() (false)
@@ -193,7 +185,8 @@ extern bool kvm_msi_use_devid;
 #define kvm_direct_msi_enabled() (false)
 #define kvm_ioeventfd_any_length_enabled() (false)
 #define kvm_msi_devid_required() (false)
-#endif
+
+#endif  /* CONFIG_KVM_IS_POSSIBLE */
 
 struct kvm_run;
 struct kvm_lapic_state;
@@ -226,6 +219,17 @@ int kvm_has_intx_set_mask(void);
 int kvm_init_vcpu(CPUState *cpu);
 int kvm_cpu_exec(CPUState *cpu);
 int kvm_destroy_vcpu(CPUState *cpu);
+
+/**
+ * kvm_arm_supports_user_irq
+ *
+ * Not all KVM implementations support notifications for kernel generated
+ * interrupt events to user space. This function indicates whether the current
+ * KVM implementation does support them.
+ *
+ * Returns: true if KVM supports using kernel generated IRQs from user space
+ */
+bool kvm_arm_supports_user_irq(void);
 
 #ifdef NEED_CPU_H
 #include "cpu.h"

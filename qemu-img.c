@@ -22,8 +22,11 @@
  * THE SOFTWARE.
  */
 #include "qemu/osdep.h"
+#include <getopt.h>
+
 #include "qemu-version.h"
 #include "qapi/error.h"
+#include "qapi/util.h"
 #include "qapi-visit.h"
 #include "qapi/qobject-output-visitor.h"
 #include "qapi/qmp/qerror.h"
@@ -42,7 +45,6 @@
 #include "block/qapi.h"
 #include "crypto/init.h"
 #include "trace/control.h"
-#include <getopt.h>
 
 #define QEMU_IMG_VERSION "qemu-img version " QEMU_VERSION QEMU_PKGVERSION \
                           "\n" QEMU_COPYRIGHT "\n"
@@ -61,6 +63,8 @@ enum {
     OPTION_FLUSH_INTERVAL = 261,
     OPTION_NO_DRAIN = 262,
     OPTION_TARGET_IMAGE_OPTS = 263,
+    OPTION_SIZE = 264,
+    OPTION_PREALLOCATION = 265,
 };
 
 typedef enum OutputFormat {
@@ -147,9 +151,11 @@ static void QEMU_NORETURN help(void)
            "  'snapshot_id_or_name' is deprecated, use 'snapshot_param'\n"
            "    instead\n"
            "  '-c' indicates that target image must be compressed (qcow format only)\n"
-           "  '-u' enables unsafe rebasing. It is assumed that old and new backing file\n"
-           "       match exactly. The image doesn't need a working backing file before\n"
-           "       rebasing in this case (useful for renaming the backing file)\n"
+           "  '-u' allows unsafe backing chains. For rebasing, it is assumed that old and\n"
+           "       new backing file match exactly. The image doesn't need a working\n"
+           "       backing file before rebasing in this case (useful for renaming the\n"
+           "       backing file). For image creation, allow creating without attempting\n"
+           "       to open the backing file.\n"
            "  '-h' with or without a command shows this help and lists the supported formats\n"
            "  '-p' show progress of command (only certain commands)\n"
            "  '-q' use Quiet mode - do not print any output (except errors)\n"
@@ -260,29 +266,6 @@ static int print_block_option_help(const char *filename, const char *fmt)
 }
 
 
-static int img_open_password(BlockBackend *blk, const char *filename,
-                             int flags, bool quiet)
-{
-    BlockDriverState *bs;
-    char password[256];
-
-    bs = blk_bs(blk);
-    if (bdrv_is_encrypted(bs) && bdrv_key_required(bs) &&
-        !(flags & BDRV_O_NO_IO)) {
-        qprintf(quiet, "Disk image '%s' is encrypted.\n", filename);
-        if (qemu_read_password(password, sizeof(password)) < 0) {
-            error_report("No password given");
-            return -1;
-        }
-        if (bdrv_set_key(bs, password) < 0) {
-            error_report("invalid password");
-            return -1;
-        }
-    }
-    return 0;
-}
-
-
 static BlockBackend *img_open_opts(const char *optstr,
                                    QemuOpts *opts, int flags, bool writethrough,
                                    bool quiet, bool force_share)
@@ -307,10 +290,6 @@ static BlockBackend *img_open_opts(const char *optstr,
     }
     blk_set_enable_write_cache(blk, !writethrough);
 
-    if (img_open_password(blk, optstr, flags, quiet) < 0) {
-        blk_unref(blk);
-        return NULL;
-    }
     return blk;
 }
 
@@ -340,10 +319,6 @@ static BlockBackend *img_open_file(const char *filename,
     }
     blk_set_enable_write_cache(blk, !writethrough);
 
-    if (img_open_password(blk, filename, flags, quiet) < 0) {
-        blk_unref(blk);
-        return NULL;
-    }
     return blk;
 }
 
@@ -355,7 +330,7 @@ static int img_add_key_secrets(void *opaque,
     QDict *options = opaque;
 
     if (g_str_has_suffix(name, "key-secret")) {
-        qdict_put(options, name, qstring_from_str(value));
+        qdict_put_str(options, name, value);
     }
 
     return 0;
@@ -457,6 +432,7 @@ static int img_create(int argc, char **argv)
     char *options = NULL;
     Error *local_err = NULL;
     bool quiet = false;
+    int flags = 0;
 
     for(;;) {
         static const struct option long_options[] = {
@@ -464,7 +440,7 @@ static int img_create(int argc, char **argv)
             {"object", required_argument, 0, OPTION_OBJECT},
             {0, 0, 0, 0}
         };
-        c = getopt_long(argc, argv, ":F:b:f:he6o:q",
+        c = getopt_long(argc, argv, ":F:b:f:ho:qu",
                         long_options, NULL);
         if (c == -1) {
             break;
@@ -488,14 +464,6 @@ static int img_create(int argc, char **argv)
         case 'f':
             fmt = optarg;
             break;
-        case 'e':
-            error_report("option -e is deprecated, please use \'-o "
-                  "encryption\' instead!");
-            goto fail;
-        case '6':
-            error_report("option -6 is deprecated, please use \'-o "
-                  "compat6\' instead!");
-            goto fail;
         case 'o':
             if (!is_valid_option_list(optarg)) {
                 error_report("Invalid option list: %s", optarg);
@@ -511,6 +479,9 @@ static int img_create(int argc, char **argv)
             break;
         case 'q':
             quiet = true;
+            break;
+        case 'u':
+            flags |= BDRV_O_NO_BACKING;
             break;
         case OPTION_OBJECT: {
             QemuOpts *opts;
@@ -564,7 +535,7 @@ static int img_create(int argc, char **argv)
     }
 
     bdrv_img_create(filename, fmt, base_filename, base_fmt,
-                    options, img_size, 0, quiet, &local_err);
+                    options, img_size, flags, quiet, &local_err);
     if (local_err) {
         error_reportf_err(local_err, "%s: ", filename);
         goto fail;
@@ -1516,12 +1487,16 @@ static int img_compare(int argc, char **argv)
         }
 
         for (;;) {
+            int64_t count;
+
             nb_sectors = sectors_to_process(total_sectors_over, sector_num);
             if (nb_sectors <= 0) {
                 break;
             }
-            ret = bdrv_is_allocated_above(blk_bs(blk_over), NULL, sector_num,
-                                          nb_sectors, &pnum);
+            ret = bdrv_is_allocated_above(blk_bs(blk_over), NULL,
+                                          sector_num * BDRV_SECTOR_SIZE,
+                                          nb_sectors * BDRV_SECTOR_SIZE,
+                                          &count);
             if (ret < 0) {
                 ret = 3;
                 error_report("Sector allocation test failed for %s",
@@ -1529,7 +1504,10 @@ static int img_compare(int argc, char **argv)
                 goto out;
 
             }
-            nb_sectors = pnum;
+            /* TODO relax this once bdrv_is_allocated_above does not enforce
+             * sector alignment */
+            assert(QEMU_IS_ALIGNED(count, BDRV_SECTOR_SIZE));
+            nb_sectors = count >> BDRV_SECTOR_BITS;
             if (ret) {
                 ret = check_empty_sectors(blk_over, sector_num, nb_sectors,
                                           filename_over, buf1, quiet);
@@ -1985,7 +1963,7 @@ static int img_convert(int argc, char **argv)
             {"target-image-opts", no_argument, 0, OPTION_TARGET_IMAGE_OPTS},
             {0, 0, 0, 0}
         };
-        c = getopt_long(argc, argv, ":hf:O:B:ce6o:s:l:S:pt:T:qnm:WU",
+        c = getopt_long(argc, argv, ":hf:O:B:co:s:l:S:pt:T:qnm:WU",
                         long_options, NULL);
         if (c == -1) {
             break;
@@ -2012,14 +1990,6 @@ static int img_convert(int argc, char **argv)
         case 'c':
             s.compressed = true;
             break;
-        case 'e':
-            error_report("option -e is deprecated, please use \'-o "
-                  "encryption\' instead!");
-            goto fail_getopt;
-        case '6':
-            error_report("option -6 is deprecated, please use \'-o "
-                  "compat6\' instead!");
-            goto fail_getopt;
         case 'o':
             if (!is_valid_option_list(optarg)) {
                 error_report("Invalid option list: %s", optarg);
@@ -2273,6 +2243,8 @@ static int img_convert(int argc, char **argv)
     if (s.compressed) {
         bool encryption =
             qemu_opt_get_bool(opts, BLOCK_OPT_ENCRYPT, false);
+        const char *encryptfmt =
+            qemu_opt_get(opts, BLOCK_OPT_ENCRYPT_FORMAT);
         const char *preallocation =
             qemu_opt_get(opts, BLOCK_OPT_PREALLOC);
 
@@ -2282,7 +2254,7 @@ static int img_convert(int argc, char **argv)
             goto out;
         }
 
-        if (encryption) {
+        if (encryption || encryptfmt) {
             error_report("Compression and encryption not supported at "
                          "the same time");
             ret = -1;
@@ -3274,6 +3246,7 @@ static int img_rebase(int argc, char **argv)
         int64_t new_backing_num_sectors = 0;
         uint64_t sector;
         int n;
+        int64_t count;
         float local_progress = 0;
 
         buf_old = blk_blockalign(blk, IO_BUF_SIZE);
@@ -3321,12 +3294,17 @@ static int img_rebase(int argc, char **argv)
             }
 
             /* If the cluster is allocated, we don't need to take action */
-            ret = bdrv_is_allocated(bs, sector, n, &n);
+            ret = bdrv_is_allocated(bs, sector << BDRV_SECTOR_BITS,
+                                    n << BDRV_SECTOR_BITS, &count);
             if (ret < 0) {
                 error_report("error while reading image metadata: %s",
                              strerror(-ret));
                 goto out;
             }
+            /* TODO relax this once bdrv_is_allocated does not enforce
+             * sector alignment */
+            assert(QEMU_IS_ALIGNED(count, BDRV_SECTOR_SIZE));
+            n = count >> BDRV_SECTOR_BITS;
             if (ret) {
                 continue;
             }
@@ -3439,9 +3417,10 @@ static int img_resize(int argc, char **argv)
     Error *err = NULL;
     int c, ret, relative;
     const char *filename, *fmt, *size;
-    int64_t n, total_size;
+    int64_t n, total_size, current_size;
     bool quiet = false;
     BlockBackend *blk = NULL;
+    PreallocMode prealloc = PREALLOC_MODE_OFF;
     QemuOpts *param;
 
     static QemuOptsList resize_options = {
@@ -3475,6 +3454,7 @@ static int img_resize(int argc, char **argv)
             {"help", no_argument, 0, 'h'},
             {"object", required_argument, 0, OPTION_OBJECT},
             {"image-opts", no_argument, 0, OPTION_IMAGE_OPTS},
+            {"preallocation", required_argument, 0, OPTION_PREALLOCATION},
             {0, 0, 0, 0}
         };
         c = getopt_long(argc, argv, ":f:hq",
@@ -3508,6 +3488,15 @@ static int img_resize(int argc, char **argv)
         }   break;
         case OPTION_IMAGE_OPTS:
             image_opts = true;
+            break;
+        case OPTION_PREALLOCATION:
+            prealloc = qapi_enum_parse(PreallocMode_lookup, optarg,
+                                       PREALLOC_MODE__MAX, PREALLOC_MODE__MAX,
+                                       NULL);
+            if (prealloc == PREALLOC_MODE__MAX) {
+                error_report("Invalid preallocation mode '%s'", optarg);
+                return 1;
+            }
             break;
         }
     }
@@ -3557,8 +3546,16 @@ static int img_resize(int argc, char **argv)
         goto out;
     }
 
+    current_size = blk_getlength(blk);
+    if (current_size < 0) {
+        error_report("Failed to inquire current image length: %s",
+                     strerror(-current_size));
+        ret = -1;
+        goto out;
+    }
+
     if (relative) {
-        total_size = blk_getlength(blk) + n * relative;
+        total_size = current_size + n * relative;
     } else {
         total_size = n;
     }
@@ -3568,7 +3565,13 @@ static int img_resize(int argc, char **argv)
         goto out;
     }
 
-    ret = blk_truncate(blk, total_size, &err);
+    if (total_size <= current_size && prealloc != PREALLOC_MODE_OFF) {
+        error_report("Preallocation can only be used for growing images");
+        ret = -1;
+        goto out;
+    }
+
+    ret = blk_truncate(blk, total_size, prealloc, &err);
     if (!ret) {
         qprintf(quiet, "Image resized.\n");
     } else {
@@ -4451,6 +4454,239 @@ out:
     return 0;
 }
 
+static void dump_json_block_measure_info(BlockMeasureInfo *info)
+{
+    QString *str;
+    QObject *obj;
+    Visitor *v = qobject_output_visitor_new(&obj);
+
+    visit_type_BlockMeasureInfo(v, NULL, &info, &error_abort);
+    visit_complete(v, &obj);
+    str = qobject_to_json_pretty(obj);
+    assert(str != NULL);
+    printf("%s\n", qstring_get_str(str));
+    qobject_decref(obj);
+    visit_free(v);
+    QDECREF(str);
+}
+
+static int img_measure(int argc, char **argv)
+{
+    static const struct option long_options[] = {
+        {"help", no_argument, 0, 'h'},
+        {"image-opts", no_argument, 0, OPTION_IMAGE_OPTS},
+        {"object", required_argument, 0, OPTION_OBJECT},
+        {"output", required_argument, 0, OPTION_OUTPUT},
+        {"size", required_argument, 0, OPTION_SIZE},
+        {"force-share", no_argument, 0, 'U'},
+        {0, 0, 0, 0}
+    };
+    OutputFormat output_format = OFORMAT_HUMAN;
+    BlockBackend *in_blk = NULL;
+    BlockDriver *drv;
+    const char *filename = NULL;
+    const char *fmt = NULL;
+    const char *out_fmt = "raw";
+    char *options = NULL;
+    char *snapshot_name = NULL;
+    bool force_share = false;
+    QemuOpts *opts = NULL;
+    QemuOpts *object_opts = NULL;
+    QemuOpts *sn_opts = NULL;
+    QemuOptsList *create_opts = NULL;
+    bool image_opts = false;
+    uint64_t img_size = UINT64_MAX;
+    BlockMeasureInfo *info = NULL;
+    Error *local_err = NULL;
+    int ret = 1;
+    int c;
+
+    while ((c = getopt_long(argc, argv, "hf:O:o:l:U",
+                            long_options, NULL)) != -1) {
+        switch (c) {
+        case '?':
+        case 'h':
+            help();
+            break;
+        case 'f':
+            fmt = optarg;
+            break;
+        case 'O':
+            out_fmt = optarg;
+            break;
+        case 'o':
+            if (!is_valid_option_list(optarg)) {
+                error_report("Invalid option list: %s", optarg);
+                goto out;
+            }
+            if (!options) {
+                options = g_strdup(optarg);
+            } else {
+                char *old_options = options;
+                options = g_strdup_printf("%s,%s", options, optarg);
+                g_free(old_options);
+            }
+            break;
+        case 'l':
+            if (strstart(optarg, SNAPSHOT_OPT_BASE, NULL)) {
+                sn_opts = qemu_opts_parse_noisily(&internal_snapshot_opts,
+                                                  optarg, false);
+                if (!sn_opts) {
+                    error_report("Failed in parsing snapshot param '%s'",
+                                 optarg);
+                    goto out;
+                }
+            } else {
+                snapshot_name = optarg;
+            }
+            break;
+        case 'U':
+            force_share = true;
+            break;
+        case OPTION_OBJECT:
+            object_opts = qemu_opts_parse_noisily(&qemu_object_opts,
+                                                  optarg, true);
+            if (!object_opts) {
+                goto out;
+            }
+            break;
+        case OPTION_IMAGE_OPTS:
+            image_opts = true;
+            break;
+        case OPTION_OUTPUT:
+            if (!strcmp(optarg, "json")) {
+                output_format = OFORMAT_JSON;
+            } else if (!strcmp(optarg, "human")) {
+                output_format = OFORMAT_HUMAN;
+            } else {
+                error_report("--output must be used with human or json "
+                             "as argument.");
+                goto out;
+            }
+            break;
+        case OPTION_SIZE:
+        {
+            int64_t sval;
+
+            sval = cvtnum(optarg);
+            if (sval < 0) {
+                if (sval == -ERANGE) {
+                    error_report("Image size must be less than 8 EiB!");
+                } else {
+                    error_report("Invalid image size specified! You may use "
+                                 "k, M, G, T, P or E suffixes for ");
+                    error_report("kilobytes, megabytes, gigabytes, terabytes, "
+                                 "petabytes and exabytes.");
+                }
+                goto out;
+            }
+            img_size = (uint64_t)sval;
+        }
+        break;
+        }
+    }
+
+    if (qemu_opts_foreach(&qemu_object_opts,
+                          user_creatable_add_opts_foreach,
+                          NULL, NULL)) {
+        goto out;
+    }
+
+    if (argc - optind > 1) {
+        error_report("At most one filename argument is allowed.");
+        goto out;
+    } else if (argc - optind == 1) {
+        filename = argv[optind];
+    }
+
+    if (!filename &&
+        (object_opts || image_opts || fmt || snapshot_name || sn_opts)) {
+        error_report("--object, --image-opts, -f, and -l "
+                     "require a filename argument.");
+        goto out;
+    }
+    if (filename && img_size != UINT64_MAX) {
+        error_report("--size N cannot be used together with a filename.");
+        goto out;
+    }
+    if (!filename && img_size == UINT64_MAX) {
+        error_report("Either --size N or one filename must be specified.");
+        goto out;
+    }
+
+    if (filename) {
+        in_blk = img_open(image_opts, filename, fmt, 0,
+                          false, false, force_share);
+        if (!in_blk) {
+            goto out;
+        }
+
+        if (sn_opts) {
+            bdrv_snapshot_load_tmp(blk_bs(in_blk),
+                    qemu_opt_get(sn_opts, SNAPSHOT_OPT_ID),
+                    qemu_opt_get(sn_opts, SNAPSHOT_OPT_NAME),
+                    &local_err);
+        } else if (snapshot_name != NULL) {
+            bdrv_snapshot_load_tmp_by_id_or_name(blk_bs(in_blk),
+                    snapshot_name, &local_err);
+        }
+        if (local_err) {
+            error_reportf_err(local_err, "Failed to load snapshot: ");
+            goto out;
+        }
+    }
+
+    drv = bdrv_find_format(out_fmt);
+    if (!drv) {
+        error_report("Unknown file format '%s'", out_fmt);
+        goto out;
+    }
+    if (!drv->create_opts) {
+        error_report("Format driver '%s' does not support image creation",
+                     drv->format_name);
+        goto out;
+    }
+
+    create_opts = qemu_opts_append(create_opts, drv->create_opts);
+    create_opts = qemu_opts_append(create_opts, bdrv_file.create_opts);
+    opts = qemu_opts_create(create_opts, NULL, 0, &error_abort);
+    if (options) {
+        qemu_opts_do_parse(opts, options, NULL, &local_err);
+        if (local_err) {
+            error_report_err(local_err);
+            error_report("Invalid options for file format '%s'", out_fmt);
+            goto out;
+        }
+    }
+    if (img_size != UINT64_MAX) {
+        qemu_opt_set_number(opts, BLOCK_OPT_SIZE, img_size, &error_abort);
+    }
+
+    info = bdrv_measure(drv, opts, in_blk ? blk_bs(in_blk) : NULL, &local_err);
+    if (local_err) {
+        error_report_err(local_err);
+        goto out;
+    }
+
+    if (output_format == OFORMAT_HUMAN) {
+        printf("required size: %" PRIu64 "\n", info->required);
+        printf("fully allocated size: %" PRIu64 "\n", info->fully_allocated);
+    } else {
+        dump_json_block_measure_info(info);
+    }
+
+    ret = 0;
+
+out:
+    qapi_free_BlockMeasureInfo(info);
+    qemu_opts_del(object_opts);
+    qemu_opts_del(opts);
+    qemu_opts_del(sn_opts);
+    qemu_opts_free(create_opts);
+    g_free(options);
+    blk_unref(in_blk);
+    return ret;
+}
 
 static const img_cmd_t img_cmds[] = {
 #define DEF(option, callback, arg_string)        \

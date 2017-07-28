@@ -239,7 +239,6 @@ void mips_init(MachineState *machine)
         bios = g_new(MemoryRegion, 1);
         memory_region_init_ram(bios, NULL, "mips_r4k.bios", BIOS_SIZE,
                                &error_fatal);
-        vmstate_register_ram_global(bios);
         memory_region_set_readonly(bios, true);
         memory_region_add_subregion(get_system_memory(), 0x1fc00000, bios);
 

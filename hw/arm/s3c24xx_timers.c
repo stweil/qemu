@@ -13,6 +13,7 @@
 #include "cpu.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "migration/register.h"  /* register_savevm_live */
 #include "qemu/timer.h"
 
 #include "s3c24xx.h"
@@ -179,6 +180,11 @@ static int s3c24xx_timers_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static SaveVMHandlers savevm_s3c24xx_timers = {
+    .save_state = s3c24xx_timers_save,
+    .load_state = s3c24xx_timers_load
+};
+
 /* S3c24xx timer initialisation */
 struct s3c24xx_timers_state_s *
 s3c24xx_timers_init(S3CState *soc, hwaddr base_addr, uint32_t tclk0, uint32_t tclk1)
@@ -193,7 +199,8 @@ s3c24xx_timers_init(S3CState *soc, hwaddr base_addr, uint32_t tclk0, uint32_t tc
                           &s3c24xx_timers_ops, s, "s3c24xx-timers", 17 * 4);
     memory_region_add_subregion(system_memory, base_addr, &s->mmio);
 
-    register_savevm(NULL, "s3c24xx_timers", 0, 0, s3c24xx_timers_save, s3c24xx_timers_load, s);
+    register_savevm_live(NULL, "s3c24xx_timers", 0, 0,
+                         &savevm_s3c24xx_timers, s);
 
     s->tclk0 = tclk0;
     s->tclk1 = tclk1;

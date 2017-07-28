@@ -89,6 +89,7 @@ typedef struct CPUS390XState {
     CPU_DoubleU vregs[32][2];  /* vector registers */
     uint32_t aregs[16];    /* access registers */
     uint8_t riccb[64];     /* runtime instrumentation control */
+    uint64_t gscb[4];      /* guarded storage control */
 
     /* Fields up to this point are not cleared by initial CPU reset */
     struct {} start_initial_reset_fields;
@@ -473,10 +474,6 @@ static inline bool get_per_in_range(CPUS390XState *env, uint64_t addr)
     }
 }
 
-#ifndef CONFIG_USER_ONLY
-void trigger_pgm_exception(CPUS390XState *env, uint32_t code, uint32_t ilen);
-#endif
-
 S390CPU *cpu_s390x_init(const char *cpu_model);
 S390CPU *s390x_new_cpu(const char *cpu_model, int64_t id, Error **errp);
 S390CPU *cpu_s390x_create(const char *cpu_model, Error **errp);
@@ -804,6 +801,8 @@ static inline void setcc(S390CPU *cpu, uint64_t cc)
     env->cc_op = cc;
 }
 
+#ifndef CONFIG_USER_ONLY
+
 typedef struct LowCore
 {
     /* prefix area: defined by architecture */
@@ -920,6 +919,11 @@ typedef struct LowCore
 
     uint8_t         pad18[0x2000-0x1400];      /* 0x1400 */
 } QEMU_PACKED LowCore;
+
+LowCore *cpu_map_lowcore(CPUS390XState *env);
+void cpu_unmap_lowcore(LowCore *lowcore);
+
+#endif
 
 /* STSI */
 #define STSI_LEVEL_MASK         0x00000000f0000000ULL
@@ -1097,6 +1101,7 @@ struct sysib_322 {
 #define SIGP_ORDER_MASK 0x000000ff
 
 void load_psw(CPUS390XState *env, uint64_t mask, uint64_t addr);
+uint64_t get_psw_mask(CPUS390XState *env);
 target_ulong mmu_real2abs(CPUS390XState *env, target_ulong raddr);
 int mmu_translate(CPUS390XState *env, target_ulong vaddr, int rw, uint64_t asc,
                   target_ulong *raddr, int *flags, bool exc);
@@ -1145,10 +1150,12 @@ void handle_diag_308(CPUS390XState *env, uint64_t r1, uint64_t r3);
 /* automatically detect the instruction length */
 #define ILEN_AUTO                   0xff
 void program_interrupt(CPUS390XState *env, uint32_t code, int ilen);
+void trigger_pgm_exception(CPUS390XState *env, uint32_t code, uint32_t ilen);
 void QEMU_NORETURN runtime_exception(CPUS390XState *env, int excp,
                                      uintptr_t retaddr);
 
 #ifdef CONFIG_KVM
+void kvm_s390_program_interrupt(S390CPU *cpu, uint16_t code);
 void kvm_s390_io_interrupt(uint16_t subchannel_id,
                            uint16_t subchannel_nr, uint32_t io_int_parm,
                            uint32_t io_int_word);
@@ -1158,6 +1165,7 @@ int kvm_s390_assign_subch_ioeventfd(EventNotifier *notifier, uint32_t sch,
                                     int vq, bool assign);
 int kvm_s390_cpu_restart(S390CPU *cpu);
 int kvm_s390_get_memslot_count(KVMState *s);
+int kvm_s390_cmma_active(void);
 void kvm_s390_cmma_reset(void);
 int kvm_s390_set_cpu_state(S390CPU *cpu, uint8_t cpu_state);
 void kvm_s390_reset_vcpu(S390CPU *cpu);
@@ -1165,8 +1173,12 @@ int kvm_s390_set_mem_limit(KVMState *s, uint64_t new_limit, uint64_t *hw_limit);
 void kvm_s390_vcpu_interrupt_pre_save(S390CPU *cpu);
 int kvm_s390_vcpu_interrupt_post_load(S390CPU *cpu);
 int kvm_s390_get_ri(void);
+int kvm_s390_get_gs(void);
 void kvm_s390_crypto_reset(void);
 #else
+static inline void kvm_s390_program_interrupt(S390CPU *cpu, uint16_t code)
+{
+}
 static inline void kvm_s390_io_interrupt(uint16_t subchannel_id,
                                         uint16_t subchannel_nr,
                                         uint32_t io_int_parm,
@@ -1219,6 +1231,10 @@ static inline int kvm_s390_get_ri(void)
 {
     return 0;
 }
+static inline int kvm_s390_get_gs(void)
+{
+    return 0;
+}
 static inline void kvm_s390_crypto_reset(void)
 {
 }
@@ -1264,7 +1280,11 @@ static inline int s390_assign_subch_ioeventfd(EventNotifier *notifier,
                                               uint32_t sch_id, int vq,
                                               bool assign)
 {
-    return kvm_s390_assign_subch_ioeventfd(notifier, sch_id, vq, assign);
+    if (kvm_enabled()) {
+        return kvm_s390_assign_subch_ioeventfd(notifier, sch_id, vq, assign);
+    } else {
+        return 0;
+    }
 }
 
 static inline void s390_crypto_reset(void)
@@ -1323,6 +1343,7 @@ static inline bool s390_get_squash_mcss(void)
 #define MCIC_VB_CR 0x0000000400000000ULL
 #define MCIC_VB_ST 0x0000000100000000ULL
 #define MCIC_VB_AR 0x0000000040000000ULL
+#define MCIC_VB_GS 0x0000000008000000ULL
 #define MCIC_VB_PR 0x0000000000200000ULL
 #define MCIC_VB_FC 0x0000000000100000ULL
 #define MCIC_VB_CT 0x0000000000020000ULL

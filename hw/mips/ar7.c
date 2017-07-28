@@ -63,7 +63,7 @@
 #include "net/net.h"
 #include "hw/pci/pci.h"
 
-#include "sysemu/char.h"        /* qemu_chr_fe_printf */
+#include "chardev/char.h"        /* qemu_chr_fe_printf */
 #include "sysemu/sysemu.h"      /* serial_hds */
 #include "qemu/timer.h"         /* QEMU_CLOCK_VIRTUAL */
 
@@ -2266,7 +2266,7 @@ static void ar7_reset_write(uint32_t offset, uint32_t val)
 #endif
     } else if (offset == 4) {
         TRACE(RESET, logout("reset\n"));
-        qemu_system_reset_request();
+        qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         //~ CPUMIPSState *env = first_cpu;
         //~ env->active_tc.PC = 0xbfc00000;
     } else {
@@ -3628,13 +3628,13 @@ static void ar7_display_init(CPUMIPSState *env)
     chr = qemu_chr_new("gpio", "vc:400x300");
     qemu_chr_fe_init(&ar7->gpio_display, chr, NULL);
     qemu_chr_fe_set_handlers(&ar7->gpio_display, ar7_display_can_receive,
-                             ar7_display_receive, ar7_display_event, ar7,
+                             ar7_display_receive, ar7_display_event, NULL, ar7,
                              NULL, true);
 
     chr = qemu_chr_new("led-display", "vc:320x200");
     qemu_chr_fe_init(&malta_display.display , chr, NULL);
     qemu_chr_fe_set_handlers(&malta_display.display, NULL, NULL,
-                             malta_fpga_display_event, &malta_display,
+                             malta_fpga_display_event, NULL, &malta_display,
                              NULL, true);
 }
 

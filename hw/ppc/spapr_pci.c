@@ -723,9 +723,7 @@ static PCIINTxRoute spapr_route_intx_pin_to_irq(void *opaque, int pin)
 /*
  * MSI/MSIX memory region implementation.
  * The handler handles both MSI and MSIX.
- * For MSI-X, the vector number is encoded as a part of the address,
- * data is set to 0.
- * For MSI, the vector number is encoded in least bits in data.
+ * The vector number is encoded in least bits in data.
  */
 static void spapr_msi_write(void *opaque, hwaddr addr,
                             uint64_t data, unsigned size)
@@ -1388,8 +1386,8 @@ static uint32_t spapr_phb_get_pci_drc_index(sPAPRPHBState *phb,
     return spapr_drc_index(drc);
 }
 
-static void spapr_phb_hot_plug_child(HotplugHandler *plug_handler,
-                                     DeviceState *plugged_dev, Error **errp)
+static void spapr_pci_plug(HotplugHandler *plug_handler,
+                           DeviceState *plugged_dev, Error **errp)
 {
     sPAPRPHBState *phb = SPAPR_PCI_HOST_BRIDGE(DEVICE(plug_handler));
     PCIDevice *pdev = PCI_DEVICE(plugged_dev);
@@ -1435,8 +1433,7 @@ static void spapr_phb_hot_plug_child(HotplugHandler *plug_handler,
         goto out;
     }
 
-    spapr_drc_attach(drc, DEVICE(pdev), fdt, fdt_start_offset,
-                     !plugged_dev->hotplugged, &local_err);
+    spapr_drc_attach(drc, DEVICE(pdev), fdt, fdt_start_offset, &local_err);
     if (local_err) {
         goto out;
     }
@@ -1444,7 +1441,9 @@ static void spapr_phb_hot_plug_child(HotplugHandler *plug_handler,
     /* If this is function 0, signal hotplug for all the device functions.
      * Otherwise defer sending the hotplug event.
      */
-    if (plugged_dev->hotplugged && PCI_FUNC(pdev->devfn) == 0) {
+    if (!spapr_drc_hotplugged(plugged_dev)) {
+        spapr_drc_reset(drc);
+    } else if (PCI_FUNC(pdev->devfn) == 0) {
         int i;
 
         for (i = 0; i < 8; i++) {
@@ -1470,14 +1469,12 @@ out:
     }
 }
 
-static void spapr_phb_hot_unplug_child(HotplugHandler *plug_handler,
-                                       DeviceState *plugged_dev, Error **errp)
+static void spapr_pci_unplug_request(HotplugHandler *plug_handler,
+                                     DeviceState *plugged_dev, Error **errp)
 {
     sPAPRPHBState *phb = SPAPR_PCI_HOST_BRIDGE(DEVICE(plug_handler));
     PCIDevice *pdev = PCI_DEVICE(plugged_dev);
-    sPAPRDRConnectorClass *drck;
     sPAPRDRConnector *drc = spapr_phb_get_pci_drc(phb, pdev);
-    Error *local_err = NULL;
 
     if (!phb->dr_enabled) {
         error_setg(errp, QERR_BUS_NO_HOTPLUG,
@@ -1486,9 +1483,9 @@ static void spapr_phb_hot_unplug_child(HotplugHandler *plug_handler,
     }
 
     g_assert(drc);
+    g_assert(drc->dev == plugged_dev);
 
-    drck = SPAPR_DR_CONNECTOR_GET_CLASS(drc);
-    if (!drck->release_pending(drc)) {
+    if (!spapr_drc_unplug_requested(drc)) {
         PCIBus *bus = PCI_BUS(qdev_get_parent_bus(DEVICE(pdev)));
         uint32_t slotnr = PCI_SLOT(pdev->devfn);
         sPAPRDRConnector *func_drc;
@@ -1504,7 +1501,7 @@ static void spapr_phb_hot_unplug_child(HotplugHandler *plug_handler,
                 func_drck = SPAPR_DR_CONNECTOR_GET_CLASS(func_drc);
                 state = func_drck->dr_entity_sense(func_drc);
                 if (state == SPAPR_DR_ENTITY_SENSE_PRESENT
-                    && !func_drck->release_pending(func_drc)) {
+                    && !spapr_drc_unplug_requested(func_drc)) {
                     error_setg(errp,
                                "PCI: slot %d, function %d still present. "
                                "Must unplug all non-0 functions first.",
@@ -1514,11 +1511,7 @@ static void spapr_phb_hot_unplug_child(HotplugHandler *plug_handler,
             }
         }
 
-        spapr_drc_detach(drc, DEVICE(pdev), &local_err);
-        if (local_err) {
-            error_propagate(errp, local_err);
-            return;
-        }
+        spapr_drc_detach(drc);
 
         /* if this isn't func 0, defer unplug event. otherwise signal removal
          * for all present functions
@@ -1745,7 +1738,8 @@ static void spapr_phb_realize(DeviceState *dev, Error **errp)
     }
 
     /* DMA setup */
-    if ((sphb->page_size_mask & qemu_getrampagesize()) == 0) {
+    if (((sphb->page_size_mask & qemu_getrampagesize()) == 0)
+        && kvm_enabled()) {
         error_report("System page size 0x%lx is not enabled in page_size_mask "
                      "(0x%"PRIx64"). Performance may be slow",
                      qemu_getrampagesize(), sphb->page_size_mask);
@@ -1848,7 +1842,7 @@ static const VMStateDescription vmstate_spapr_pci_lsi = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_EQUAL(irq, struct spapr_pci_lsi),
+        VMSTATE_UINT32_EQUAL(irq, struct spapr_pci_lsi, NULL),
 
         VMSTATE_END_OF_LIST()
     },
@@ -1873,20 +1867,6 @@ static void spapr_pci_pre_save(void *opaque)
     gpointer key, value;
     int i;
 
-    g_free(sphb->msi_devs);
-    sphb->msi_devs = NULL;
-    sphb->msi_devs_num = g_hash_table_size(sphb->msi);
-    if (!sphb->msi_devs_num) {
-        return;
-    }
-    sphb->msi_devs = g_malloc(sphb->msi_devs_num * sizeof(spapr_pci_msi_mig));
-
-    g_hash_table_iter_init(&iter, sphb->msi);
-    for (i = 0; g_hash_table_iter_next(&iter, &key, &value); ++i) {
-        sphb->msi_devs[i].key = *(uint32_t *) key;
-        sphb->msi_devs[i].value = *(spapr_pci_msi *) value;
-    }
-
     if (sphb->pre_2_8_migration) {
         sphb->mig_liobn = sphb->dma_liobn[0];
         sphb->mig_mem_win_addr = sphb->mem_win_addr;
@@ -1899,6 +1879,20 @@ static void spapr_pci_pre_save(void *opaque)
                 == (sphb->mem_win_addr + sphb->mem_win_size))) {
             sphb->mig_mem_win_size += sphb->mem64_win_size;
         }
+    }
+
+    g_free(sphb->msi_devs);
+    sphb->msi_devs = NULL;
+    sphb->msi_devs_num = g_hash_table_size(sphb->msi);
+    if (!sphb->msi_devs_num) {
+        return;
+    }
+    sphb->msi_devs = g_malloc(sphb->msi_devs_num * sizeof(spapr_pci_msi_mig));
+
+    g_hash_table_iter_init(&iter, sphb->msi);
+    for (i = 0; g_hash_table_iter_next(&iter, &key, &value); ++i) {
+        sphb->msi_devs[i].key = *(uint32_t *) key;
+        sphb->msi_devs[i].value = *(spapr_pci_msi *) value;
     }
 }
 
@@ -1936,7 +1930,7 @@ static const VMStateDescription vmstate_spapr_pci = {
     .pre_save = spapr_pci_pre_save,
     .post_load = spapr_pci_post_load,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT64_EQUAL(buid, sPAPRPHBState),
+        VMSTATE_UINT64_EQUAL(buid, sPAPRPHBState, NULL),
         VMSTATE_UINT32_TEST(mig_liobn, sPAPRPHBState, pre_2_8_migration),
         VMSTATE_UINT64_TEST(mig_mem_win_addr, sPAPRPHBState, pre_2_8_migration),
         VMSTATE_UINT64_TEST(mig_mem_win_size, sPAPRPHBState, pre_2_8_migration),
@@ -1973,8 +1967,8 @@ static void spapr_phb_class_init(ObjectClass *klass, void *data)
     /* Supported by TYPE_SPAPR_MACHINE */
     dc->user_creatable = true;
     set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
-    hp->plug = spapr_phb_hot_plug_child;
-    hp->unplug = spapr_phb_hot_unplug_child;
+    hp->plug = spapr_pci_plug;
+    hp->unplug_request = spapr_pci_unplug_request;
 }
 
 static const TypeInfo spapr_phb_info = {

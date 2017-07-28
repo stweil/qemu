@@ -2102,7 +2102,7 @@ const VMStateDescription vmstate_vga_common = {
         VMSTATE_BUFFER(palette, VGACommonState),
 
         VMSTATE_INT32(bank_offset, VGACommonState),
-        VMSTATE_UINT8_EQUAL(is_vbe_vmstate, VGACommonState),
+        VMSTATE_UINT8_EQUAL(is_vbe_vmstate, VGACommonState, NULL),
         VMSTATE_UINT16(vbe_index, VGACommonState),
         VMSTATE_UINT16_ARRAY(vbe_regs, VGACommonState, VBE_DISPI_INDEX_NB),
         VMSTATE_UINT32(vbe_start_addr, VGACommonState),
@@ -2169,7 +2169,7 @@ void vga_common_init(VGACommonState *s, Object *obj, bool global_vmstate)
     }
 
     s->is_vbe_vmstate = 1;
-    memory_region_init_ram(&s->vram, obj, "vga.vram", s->vram_size,
+    memory_region_init_ram_nomigrate(&s->vram, obj, "vga.vram", s->vram_size,
                            &error_fatal);
     vmstate_register_ram(&s->vram, global_vmstate ? NULL : DEVICE(obj));
     xen_register_framebuffer(&s->vram);

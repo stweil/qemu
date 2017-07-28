@@ -278,7 +278,6 @@ static void integratorcm_init(Object *obj)
                                    1000);
     memory_region_init_ram(&s->flash, obj, "integrator.flash", 0x100000,
                            &error_fatal);
-    vmstate_register_ram_global(&s->flash);
 
     memory_region_init_io(&s->iomem, obj, &integratorcm_ops, s,
                           "integratorcm", 0x00800000);

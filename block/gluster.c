@@ -345,8 +345,7 @@ static int qemu_gluster_parse_uri(BlockdevOptionsGluster *gconf,
         is_unix = true;
     } else if (!strcmp(uri->scheme, "gluster+rdma")) {
         gsconf->type = SOCKET_ADDRESS_TYPE_INET;
-        error_report("Warning: rdma feature is not supported, falling "
-                     "back to tcp");
+        warn_report("rdma feature is not supported, falling back to tcp");
     } else {
         ret = -EINVAL;
         goto out;
@@ -1096,10 +1095,16 @@ static coroutine_fn int qemu_gluster_co_rw(BlockDriverState *bs,
 }
 
 static int qemu_gluster_truncate(BlockDriverState *bs, int64_t offset,
-                                 Error **errp)
+                                 PreallocMode prealloc, Error **errp)
 {
     int ret;
     BDRVGlusterState *s = bs->opaque;
+
+    if (prealloc != PREALLOC_MODE_OFF) {
+        error_setg(errp, "Unsupported preallocation mode '%s'",
+                   PreallocMode_lookup[prealloc]);
+        return -ENOTSUP;
+    }
 
     ret = glfs_ftruncate(s->fd, offset);
     if (ret < 0) {

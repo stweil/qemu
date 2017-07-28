@@ -95,7 +95,7 @@ typedef struct VFIOContainer {
 
 typedef struct VFIOGuestIOMMU {
     VFIOContainer *container;
-    MemoryRegion *iommu;
+    IOMMUMemoryRegion *iommu;
     hwaddr iommu_offset;
     IOMMUNotifier n;
     QLIST_ENTRY(VFIOGuestIOMMU) giommu_next;
@@ -115,6 +115,7 @@ typedef struct VFIODevice {
     struct VFIOGroup *group;
     char *sysfsdev;
     char *name;
+    DeviceState *dev;
     int fd;
     int type;
     bool reset_works;

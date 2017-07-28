@@ -1970,7 +1970,8 @@ static void pxa2xx_fir_realize(DeviceState *dev, Error **errp)
     PXA2xxFIrState *s = PXA2XX_FIR(dev);
 
     qemu_chr_fe_set_handlers(&s->chr, pxa2xx_fir_is_empty,
-                             pxa2xx_fir_rx, pxa2xx_fir_event, s, NULL, true);
+                             pxa2xx_fir_rx, pxa2xx_fir_event, NULL, s, NULL,
+                             true);
 }
 
 static bool pxa2xx_fir_vmstate_validate(void *opaque, int version_id)
@@ -2075,11 +2076,9 @@ PXA2xxState *pxa270_init(MemoryRegion *address_space,
     /* SDRAM & Internal Memory Storage */
     memory_region_init_ram(&s->sdram, NULL, "pxa270.sdram", sdram_size,
                            &error_fatal);
-    vmstate_register_ram_global(&s->sdram);
     memory_region_add_subregion(address_space, PXA2XX_SDRAM_BASE, &s->sdram);
     memory_region_init_ram(&s->internal, NULL, "pxa270.internal", 0x40000,
                            &error_fatal);
-    vmstate_register_ram_global(&s->internal);
     memory_region_add_subregion(address_space, PXA2XX_INTERNAL_BASE,
                                 &s->internal);
 
@@ -2207,11 +2206,9 @@ PXA2xxState *pxa255_init(MemoryRegion *address_space, unsigned int sdram_size)
     /* SDRAM & Internal Memory Storage */
     memory_region_init_ram(&s->sdram, NULL, "pxa255.sdram", sdram_size,
                            &error_fatal);
-    vmstate_register_ram_global(&s->sdram);
     memory_region_add_subregion(address_space, PXA2XX_SDRAM_BASE, &s->sdram);
     memory_region_init_ram(&s->internal, NULL, "pxa255.internal",
                            PXA2XX_INTERNAL_SIZE, &error_fatal);
-    vmstate_register_ram_global(&s->internal);
     memory_region_add_subregion(address_space, PXA2XX_INTERNAL_BASE,
                                 &s->internal);
 

@@ -93,66 +93,6 @@ static uint64_t pc_to_link_info(DisasContext *s, uint64_t pc)
     return pc;
 }
 
-void s390_cpu_dump_state(CPUState *cs, FILE *f, fprintf_function cpu_fprintf,
-                         int flags)
-{
-    S390CPU *cpu = S390_CPU(cs);
-    CPUS390XState *env = &cpu->env;
-    int i;
-
-    if (env->cc_op > 3) {
-        cpu_fprintf(f, "PSW=mask %016" PRIx64 " addr %016" PRIx64 " cc %15s\n",
-                    env->psw.mask, env->psw.addr, cc_name(env->cc_op));
-    } else {
-        cpu_fprintf(f, "PSW=mask %016" PRIx64 " addr %016" PRIx64 " cc %02x\n",
-                    env->psw.mask, env->psw.addr, env->cc_op);
-    }
-
-    for (i = 0; i < 16; i++) {
-        cpu_fprintf(f, "R%02d=%016" PRIx64, i, env->regs[i]);
-        if ((i % 4) == 3) {
-            cpu_fprintf(f, "\n");
-        } else {
-            cpu_fprintf(f, " ");
-        }
-    }
-
-    for (i = 0; i < 16; i++) {
-        cpu_fprintf(f, "F%02d=%016" PRIx64, i, get_freg(env, i)->ll);
-        if ((i % 4) == 3) {
-            cpu_fprintf(f, "\n");
-        } else {
-            cpu_fprintf(f, " ");
-        }
-    }
-
-    for (i = 0; i < 32; i++) {
-        cpu_fprintf(f, "V%02d=%016" PRIx64 "%016" PRIx64, i,
-                    env->vregs[i][0].ll, env->vregs[i][1].ll);
-        cpu_fprintf(f, (i % 2) ? "\n" : " ");
-    }
-
-#ifndef CONFIG_USER_ONLY
-    for (i = 0; i < 16; i++) {
-        cpu_fprintf(f, "C%02d=%016" PRIx64, i, env->cregs[i]);
-        if ((i % 4) == 3) {
-            cpu_fprintf(f, "\n");
-        } else {
-            cpu_fprintf(f, " ");
-        }
-    }
-#endif
-
-#ifdef DEBUG_INLINE_BRANCHES
-    for (i = 0; i < CC_OP_MAX; i++) {
-        cpu_fprintf(f, "  %15s = %10ld\t%10ld\n", cc_name(i),
-                    inline_branch_miss[i], inline_branch_hit[i]);
-    }
-#endif
-
-    cpu_fprintf(f, "\n");
-}
-
 static TCGv_i64 psw_addr;
 static TCGv_i64 psw_mask;
 static TCGv_i64 gbea;
@@ -2033,6 +1973,18 @@ static ExitStatus op_cdsg(DisasContext *s, DisasOps *o)
     return NO_EXIT;
 }
 
+static ExitStatus op_csst(DisasContext *s, DisasOps *o)
+{
+    int r3 = get_field(s->fields, r3);
+    TCGv_i32 t_r3 = tcg_const_i32(r3);
+
+    gen_helper_csst(cc_op, cpu_env, t_r3, o->in1, o->in2);
+    tcg_temp_free_i32(t_r3);
+
+    set_cc_static(s);
+    return NO_EXIT;
+}
+
 #ifndef CONFIG_USER_ONLY
 static ExitStatus op_csp(DisasContext *s, DisasOps *o)
 {
@@ -2107,6 +2059,56 @@ static ExitStatus op_ct(DisasContext *s, DisasOps *o)
     gen_trap(s);
 
     gen_set_label(lab);
+    return NO_EXIT;
+}
+
+static ExitStatus op_cuXX(DisasContext *s, DisasOps *o)
+{
+    int m3 = get_field(s->fields, m3);
+    int r1 = get_field(s->fields, r1);
+    int r2 = get_field(s->fields, r2);
+    TCGv_i32 tr1, tr2, chk;
+
+    /* R1 and R2 must both be even.  */
+    if ((r1 | r2) & 1) {
+        gen_program_exception(s, PGM_SPECIFICATION);
+        return EXIT_NORETURN;
+    }
+    if (!s390_has_feat(S390_FEAT_ETF3_ENH)) {
+        m3 = 0;
+    }
+
+    tr1 = tcg_const_i32(r1);
+    tr2 = tcg_const_i32(r2);
+    chk = tcg_const_i32(m3);
+
+    switch (s->insn->data) {
+    case 12:
+        gen_helper_cu12(cc_op, cpu_env, tr1, tr2, chk);
+        break;
+    case 14:
+        gen_helper_cu14(cc_op, cpu_env, tr1, tr2, chk);
+        break;
+    case 21:
+        gen_helper_cu21(cc_op, cpu_env, tr1, tr2, chk);
+        break;
+    case 24:
+        gen_helper_cu24(cc_op, cpu_env, tr1, tr2, chk);
+        break;
+    case 41:
+        gen_helper_cu41(cc_op, cpu_env, tr1, tr2, chk);
+        break;
+    case 42:
+        gen_helper_cu42(cc_op, cpu_env, tr1, tr2, chk);
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    tcg_temp_free_i32(tr1);
+    tcg_temp_free_i32(tr2);
+    tcg_temp_free_i32(chk);
+    set_cc_static(s);
     return NO_EXIT;
 }
 
@@ -3417,8 +3419,8 @@ static ExitStatus op_risbg(DisasContext *s, DisasOps *o)
     }
 
     /* In some cases we can implement this with extract.  */
-    if (imask == 0 && pos == 0 && len > 0 && rot + len <= 64) {
-        tcg_gen_extract_i64(o->out, o->in2, rot, len);
+    if (imask == 0 && pos == 0 && len > 0 && len <= rot) {
+        tcg_gen_extract_i64(o->out, o->in2, 64 - rot, len);
         return NO_EXIT;
     }
 
@@ -4225,9 +4227,27 @@ static ExitStatus op_stpq(DisasContext *s, DisasOps *o)
 
 static ExitStatus op_srst(DisasContext *s, DisasOps *o)
 {
-    gen_helper_srst(o->in1, cpu_env, regs[0], o->in1, o->in2);
+    TCGv_i32 r1 = tcg_const_i32(get_field(s->fields, r1));
+    TCGv_i32 r2 = tcg_const_i32(get_field(s->fields, r2));
+
+    gen_helper_srst(cpu_env, r1, r2);
+
+    tcg_temp_free_i32(r1);
+    tcg_temp_free_i32(r2);
     set_cc_static(s);
-    return_low128(o->in2);
+    return NO_EXIT;
+}
+
+static ExitStatus op_srstu(DisasContext *s, DisasOps *o)
+{
+    TCGv_i32 r1 = tcg_const_i32(get_field(s->fields, r1));
+    TCGv_i32 r2 = tcg_const_i32(get_field(s->fields, r2));
+
+    gen_helper_srstu(cpu_env, r1, r2);
+
+    tcg_temp_free_i32(r1);
+    tcg_temp_free_i32(r2);
+    set_cc_static(s);
     return NO_EXIT;
 }
 
@@ -4362,6 +4382,15 @@ static ExitStatus op_trt(DisasContext *s, DisasOps *o)
 {
     TCGv_i32 l = tcg_const_i32(get_field(s->fields, l1));
     gen_helper_trt(cc_op, cpu_env, l, o->addr1, o->in2);
+    tcg_temp_free_i32(l);
+    set_cc_static(s);
+    return NO_EXIT;
+}
+
+static ExitStatus op_trtr(DisasContext *s, DisasOps *o)
+{
+    TCGv_i32 l = tcg_const_i32(get_field(s->fields, l1));
+    gen_helper_trtr(cc_op, cpu_env, l, o->addr1, o->in2);
     tcg_temp_free_i32(l);
     set_cc_static(s);
     return NO_EXIT;
@@ -5437,7 +5466,6 @@ enum DisasInsnEnum {
 /* Give smaller names to the various facilities.  */
 #define FAC_Z           S390_FEAT_ZARCH
 #define FAC_CASS        S390_FEAT_COMPARE_AND_SWAP_AND_STORE
-#define FAC_CASS2       S390_FEAT_COMPARE_AND_SWAP_AND_STORE_2
 #define FAC_DFP         S390_FEAT_DFP
 #define FAC_DFPR        S390_FEAT_FLOATING_POINT_SUPPPORT_ENH /* DFP-rounding */
 #define FAC_DO          S390_FEAT_STFLE_45 /* distinct-operands */
@@ -5466,6 +5494,7 @@ enum DisasInsnEnum {
 #define FAC_EH          S390_FEAT_STFLE_49 /* execution-hint */
 #define FAC_PPA         S390_FEAT_STFLE_49 /* processor-assist */
 #define FAC_LZRB        S390_FEAT_STFLE_53 /* load-and-zero-rightmost-byte */
+#define FAC_ETF3        S390_FEAT_EXTENDED_TRANSLATION_3
 
 static const DisasInsn insn_info[] = {
 #include "insn-data.def"
@@ -5764,10 +5793,9 @@ static ExitStatus translate_one(CPUS390XState *env, DisasContext *s)
     return ret;
 }
 
-void gen_intermediate_code(CPUS390XState *env, struct TranslationBlock *tb)
+void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
 {
-    S390CPU *cpu = s390_env_get_cpu(env);
-    CPUState *cs = CPU(cpu);
+    CPUS390XState *env = cs->env_ptr;
     DisasContext dc;
     target_ulong pc_start;
     uint64_t next_page_start;

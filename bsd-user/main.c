@@ -25,7 +25,6 @@
 #include "qemu/config-file.h"
 #include "qemu/path.h"
 #include "qemu/help_option.h"
-/* For tb_lock */
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "tcg.h"
@@ -620,9 +619,10 @@ void cpu_loop(CPUSPARCState *env)
             break;
         case EXCP_DEBUG:
             {
-                int sig;
-
-                sig = gdb_handlesig(cs, TARGET_SIGTRAP);
+#if 0
+                int sig =
+#endif
+                gdb_handlesig(cs, TARGET_SIGTRAP);
 #if 0
                 if (sig)
                   {

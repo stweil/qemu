@@ -26,7 +26,7 @@
 #include "sysemu/sysemu.h"
 #include "qemu/timer.h"
 #include "block/block.h"
-#include "sysemu/char.h"        /* qemu_chr_new */
+#include "chardev/char.h"        /* qemu_chr_new */
 #include "ui/console.h"
 
 #include "s3c2440.h"

@@ -260,7 +260,6 @@ static void r2d_init(MachineState *machine)
 
     /* Allocate memory space */
     memory_region_init_ram(sdram, NULL, "r2d.sdram", SDRAM_SIZE, &error_fatal);
-    vmstate_register_ram_global(sdram);
     memory_region_add_subregion(address_space_mem, SDRAM_BASE, sdram);
     /* Register peripherals */
     s = sh7750_init(cpu, address_space_mem);

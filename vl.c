@@ -195,7 +195,6 @@ bool boot_strict;
 uint8_t *boot_splash_filedata;
 size_t boot_splash_filedata_size;
 uint8_t qemu_extra_params_fw[2];
-int only_migratable; /* turn it off unless user states otherwise */
 
 int icount_align_option;
 
@@ -963,8 +962,8 @@ static void bt_vhci_add(int vlan_id)
     struct bt_scatternet_s *vlan = qemu_find_bt_vlan(vlan_id);
 
     if (!vlan->slave)
-        error_report("warning: adding a VHCI to an empty scatternet %i",
-                     vlan_id);
+        warn_report("adding a VHCI to an empty scatternet %i",
+                    vlan_id);
 
     bt_vhci_init(bt_new_hci(vlan));
 }
@@ -990,8 +989,8 @@ static struct bt_device_s *bt_device_add(const char *opt)
     vlan = qemu_find_bt_vlan(vlan_id);
 
     if (!vlan->slave)
-        error_report("warning: adding a slave device to an empty scatternet %i",
-                     vlan_id);
+        warn_report("adding a slave device to an empty scatternet %i",
+                    vlan_id);
 
     if (!strcmp(devname, "keyboard"))
         return bt_keyboard_init(vlan);
@@ -2349,8 +2348,8 @@ static int parse_fw_cfg(void *opaque, QemuOpts *opts, Error **errp)
         return -1;
     }
     if (strncmp(name, "opt/", 4) != 0) {
-        error_report("warning: externally provided fw_cfg item names "
-                     "should be prefixed with \"opt/\"");
+        warn_report("externally provided fw_cfg item names "
+                    "should be prefixed with \"opt/\"");
     }
     if (nonempty_str(str)) {
         size = strlen(str); /* NUL terminator NOT included in fw_cfg blob */
@@ -3013,6 +3012,25 @@ static int qemu_read_default_config_file(void)
     }
 
     return 0;
+}
+
+static void user_register_global_props(void)
+{
+    qemu_opts_foreach(qemu_find_opts("global"),
+                      global_init_func, NULL, NULL);
+}
+
+/*
+ * Note: we should see that these properties are actually having a
+ * priority: accel < machine < user. This means e.g. when user
+ * specifies something in "-global", it'll always be used with highest
+ * priority than either machine/accelerator compat properties.
+ */
+static void register_global_properties(MachineState *ms)
+{
+    accel_register_compat_props(ms->accelerator);
+    machine_register_compat_props(ms);
+    user_register_global_props();
 }
 
 int main(int argc, char **argv)
@@ -3788,7 +3806,7 @@ int main(int argc, char **argv)
                 qemu_opts_parse_noisily(olist, "accel=tcg", false);
                 break;
             case QEMU_OPTION_no_kvm_pit: {
-                error_report("warning: ignoring deprecated option");
+                warn_report("ignoring deprecated option");
                 break;
             }
             case QEMU_OPTION_no_kvm_pit_reinjection: {
@@ -3798,8 +3816,8 @@ int main(int argc, char **argv)
                     .value    = "discard",
                 };
 
-                error_report("warning: deprecated, replaced by "
-                             "-global kvm-pit.lost_tick_policy=discard");
+                warn_report("deprecated, replaced by "
+                            "-global kvm-pit.lost_tick_policy=discard");
                 qdev_prop_register_global(&kvm_pit_lost_tick_policy);
                 break;
             }
@@ -3924,7 +3942,7 @@ int main(int argc, char **argv)
                 }
                 break;
             case QEMU_OPTION_tdf:
-                error_report("warning: ignoring deprecated option");
+                warn_report("ignoring deprecated option");
                 break;
             case QEMU_OPTION_name:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("name"),
@@ -3961,9 +3979,13 @@ int main(int argc, char **argv)
                 configure_rtc(opts);
                 break;
             case QEMU_OPTION_tb_size:
-                tcg_tb_size = strtol(optarg, NULL, 0);
-                if (tcg_tb_size < 0) {
-                    tcg_tb_size = 0;
+#ifndef CONFIG_TCG
+                error_report("TCG is disabled");
+                exit(1);
+#endif
+                if (qemu_strtoul(optarg, NULL, 0, &tcg_tb_size) < 0) {
+                    error_report("Invalid argument to -tb-size");
+                    exit(1);
                 }
                 break;
             case QEMU_OPTION_icount:
@@ -3980,7 +4002,13 @@ int main(int argc, char **argv)
                 incoming = optarg;
                 break;
             case QEMU_OPTION_only_migratable:
-                only_migratable = 1;
+                /*
+                 * TODO: we can remove this option one day, and we
+                 * should all use:
+                 *
+                 * "-global migration.only-migratable=true"
+                 */
+                qemu_global_option("migration.only-migratable=true");
                 break;
             case QEMU_OPTION_nodefaults:
                 has_defaults = 0;
@@ -4439,6 +4467,18 @@ int main(int argc, char **argv)
 
     configure_accelerator(current_machine);
 
+    /*
+     * Register all the global properties, including accel properties,
+     * machine properties, and user-specified ones.
+     */
+    register_global_properties(current_machine);
+
+    /*
+     * Migration object can only be created after global properties
+     * are applied correctly.
+     */
+    migration_object_init();
+
     if (qtest_chrdev) {
         qtest_init(qtest_chrdev, qtest_log, &error_fatal);
     }
@@ -4506,7 +4546,9 @@ int main(int argc, char **argv)
         qemu_opts_del(icount_opts);
     }
 
-    qemu_tcg_configure(accel_opts, &error_fatal);
+    if (tcg_enabled()) {
+        qemu_tcg_configure(accel_opts, &error_fatal);
+    }
 
     if (default_net) {
         QemuOptsList *net = qemu_find_opts("net");
@@ -4619,11 +4661,6 @@ int main(int argc, char **argv)
         if (i > 0)
             exit (i == 1 ? 1 : 0);
     }
-
-    machine_register_compat_props(current_machine);
-
-    qemu_opts_foreach(qemu_find_opts("global"),
-                      global_init_func, NULL, NULL);
 
     /* This checkpoint is required by replay to separate prior clock
        reading from the other reads, because timer polling functions query

@@ -34,8 +34,86 @@
 #include "virtio-ccw.h"
 #include "trace.h"
 #include "hw/s390x/css-bridge.h"
+#include "hw/s390x/s390-virtio-ccw.h"
 
 #define NR_CLASSIC_INDICATOR_BITS 64
+
+static int virtio_ccw_dev_post_load(void *opaque, int version_id)
+{
+    VirtioCcwDevice *dev = VIRTIO_CCW_DEVICE(opaque);
+    CcwDevice *ccw_dev = CCW_DEVICE(dev);
+    CCWDeviceClass *ck = CCW_DEVICE_GET_CLASS(ccw_dev);
+
+    ccw_dev->sch->driver_data = dev;
+    if (ccw_dev->sch->thinint_active) {
+        dev->routes.adapter.adapter_id = css_get_adapter_id(
+                                         CSS_IO_ADAPTER_VIRTIO,
+                                         dev->thinint_isc);
+    }
+    /* Re-fill subch_id after loading the subchannel states.*/
+    if (ck->refill_ids) {
+        ck->refill_ids(ccw_dev);
+    }
+    return 0;
+}
+
+typedef struct VirtioCcwDeviceTmp {
+    VirtioCcwDevice *parent;
+    uint16_t config_vector;
+} VirtioCcwDeviceTmp;
+
+static void virtio_ccw_dev_tmp_pre_save(void *opaque)
+{
+    VirtioCcwDeviceTmp *tmp = opaque;
+    VirtioCcwDevice *dev = tmp->parent;
+    VirtIODevice *vdev = virtio_bus_get_device(&dev->bus);
+
+    tmp->config_vector = vdev->config_vector;
+}
+
+static int virtio_ccw_dev_tmp_post_load(void *opaque, int version_id)
+{
+    VirtioCcwDeviceTmp *tmp = opaque;
+    VirtioCcwDevice *dev = tmp->parent;
+    VirtIODevice *vdev = virtio_bus_get_device(&dev->bus);
+
+    vdev->config_vector = tmp->config_vector;
+    return 0;
+}
+
+const VMStateDescription vmstate_virtio_ccw_dev_tmp = {
+    .name = "s390_virtio_ccw_dev_tmp",
+    .pre_save = virtio_ccw_dev_tmp_pre_save,
+    .post_load = virtio_ccw_dev_tmp_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT16(config_vector, VirtioCcwDeviceTmp),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+const VMStateDescription vmstate_virtio_ccw_dev = {
+    .name = "s390_virtio_ccw_dev",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .post_load = virtio_ccw_dev_post_load,
+    .fields = (VMStateField[]) {
+        VMSTATE_CCW_DEVICE(parent_obj, VirtioCcwDevice),
+        VMSTATE_PTR_TO_IND_ADDR(indicators, VirtioCcwDevice),
+        VMSTATE_PTR_TO_IND_ADDR(indicators2, VirtioCcwDevice),
+        VMSTATE_PTR_TO_IND_ADDR(summary_indicator, VirtioCcwDevice),
+        /*
+         * Ugly hack because VirtIODevice does not migrate itself.
+         * This also makes legacy via vmstate_save_state possible.
+         */
+        VMSTATE_WITH_TMP(VirtioCcwDevice, VirtioCcwDeviceTmp,
+                         vmstate_virtio_ccw_dev_tmp),
+        VMSTATE_STRUCT(routes, VirtioCcwDevice, 1, vmstate_adapter_routes,
+                       AdapterRoutes),
+        VMSTATE_UINT8(thinint_isc, VirtioCcwDevice),
+        VMSTATE_INT32(revision, VirtioCcwDevice),
+        VMSTATE_END_OF_LIST()
+    }
+};
 
 static void virtio_ccw_bus_new(VirtioBusState *bus, size_t bus_size,
                                VirtioCcwDevice *dev);
@@ -711,7 +789,7 @@ static void virtio_ccw_device_realize(VirtioCcwDevice *dev, Error **errp)
         sch->cssid, sch->ssid, sch->schid, sch->devno,
         ccw_dev->devno.valid ? "user-configured" : "auto-configured");
 
-    if (!kvm_eventfds_enabled()) {
+    if (kvm_enabled() && !kvm_eventfds_enabled()) {
         dev->flags &= ~VIRTIO_CCW_FLAG_USE_IOEVENTFD;
     }
 
@@ -789,8 +867,6 @@ static void virtio_ccw_blk_instance_init(Object *obj)
 
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VIRTIO_BLK);
-    object_property_add_alias(obj, "iothread", OBJECT(&dev->vdev),"iothread",
-                              &error_abort);
     object_property_add_alias(obj, "bootindex", OBJECT(&dev->vdev),
                               "bootindex", &error_abort);
 }
@@ -874,8 +950,6 @@ static void virtio_ccw_scsi_instance_init(Object *obj)
 
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VIRTIO_SCSI);
-    object_property_add_alias(obj, "iothread", OBJECT(&dev->vdev), "iothread",
-                              &error_abort);
 }
 
 #ifdef CONFIG_VHOST_SCSI
@@ -996,7 +1070,7 @@ static void virtio_ccw_notify(DeviceState *d, uint16_t vector)
                                   0x80 >> ((ind_bit + vector) % 8));
             if (!virtio_set_ind_atomic(sch, dev->summary_indicator->addr,
                                        0x01)) {
-                css_adapter_interrupt(dev->thinint_isc);
+                css_adapter_interrupt(CSS_IO_ADAPTER_VIRTIO, dev->thinint_isc);
             }
         } else {
             indicators = address_space_ldq(&address_space_memory,
@@ -1239,89 +1313,13 @@ static int virtio_ccw_load_queue(DeviceState *d, int n, QEMUFile *f)
 static void virtio_ccw_save_config(DeviceState *d, QEMUFile *f)
 {
     VirtioCcwDevice *dev = VIRTIO_CCW_DEVICE(d);
-    CcwDevice *ccw_dev = CCW_DEVICE(d);
-    SubchDev *s = ccw_dev->sch;
-    VirtIODevice *vdev = virtio_ccw_get_vdev(s);
-
-    subch_device_save(s, f);
-    if (dev->indicators != NULL) {
-        qemu_put_be32(f, dev->indicators->len);
-        qemu_put_be64(f, dev->indicators->addr);
-    } else {
-        qemu_put_be32(f, 0);
-        qemu_put_be64(f, 0UL);
-    }
-    if (dev->indicators2 != NULL) {
-        qemu_put_be32(f, dev->indicators2->len);
-        qemu_put_be64(f, dev->indicators2->addr);
-    } else {
-        qemu_put_be32(f, 0);
-        qemu_put_be64(f, 0UL);
-    }
-    if (dev->summary_indicator != NULL) {
-        qemu_put_be32(f, dev->summary_indicator->len);
-        qemu_put_be64(f, dev->summary_indicator->addr);
-    } else {
-        qemu_put_be32(f, 0);
-        qemu_put_be64(f, 0UL);
-    }
-    qemu_put_be16(f, vdev->config_vector);
-    qemu_put_be64(f, dev->routes.adapter.ind_offset);
-    qemu_put_byte(f, dev->thinint_isc);
-    qemu_put_be32(f, dev->revision);
+    vmstate_save_state(f, &vmstate_virtio_ccw_dev, dev, NULL);
 }
 
 static int virtio_ccw_load_config(DeviceState *d, QEMUFile *f)
 {
     VirtioCcwDevice *dev = VIRTIO_CCW_DEVICE(d);
-    CcwDevice *ccw_dev = CCW_DEVICE(d);
-    CCWDeviceClass *ck = CCW_DEVICE_GET_CLASS(ccw_dev);
-    SubchDev *s = ccw_dev->sch;
-    VirtIODevice *vdev = virtio_ccw_get_vdev(s);
-    int len;
-    int ret;
-
-    s->driver_data = dev;
-    ret = subch_device_load(s, f);
-    if (ret) {
-        return ret;
-    }
-    /* Re-fill subch_id after loading the subchannel states.*/
-    if (ck->refill_ids) {
-        ck->refill_ids(ccw_dev);
-    }
-    len = qemu_get_be32(f);
-    if (len != 0) {
-        dev->indicators = get_indicator(qemu_get_be64(f), len);
-    } else {
-        qemu_get_be64(f);
-        dev->indicators = NULL;
-    }
-    len = qemu_get_be32(f);
-    if (len != 0) {
-        dev->indicators2 = get_indicator(qemu_get_be64(f), len);
-    } else {
-        qemu_get_be64(f);
-        dev->indicators2 = NULL;
-    }
-    len = qemu_get_be32(f);
-    if (len != 0) {
-        dev->summary_indicator = get_indicator(qemu_get_be64(f), len);
-    } else {
-        qemu_get_be64(f);
-        dev->summary_indicator = NULL;
-    }
-    qemu_get_be16s(f, &vdev->config_vector);
-    dev->routes.adapter.ind_offset = qemu_get_be64(f);
-    dev->thinint_isc = qemu_get_byte(f);
-    dev->revision = qemu_get_be32(f);
-    if (s->thinint_active) {
-        dev->routes.adapter.adapter_id = css_get_adapter_id(
-                                         CSS_IO_ADAPTER_VIRTIO,
-                                         dev->thinint_isc);
-    }
-
-    return 0;
+    return vmstate_load_state(f, &vmstate_virtio_ccw_dev, dev, 1);
 }
 
 static void virtio_ccw_pre_plugged(DeviceState *d, Error **errp)
@@ -1550,8 +1548,6 @@ static void virtio_ccw_rng_instance_init(Object *obj)
 
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VIRTIO_RNG);
-    object_property_add_alias(obj, "rng", OBJECT(&dev->vdev),
-                              "rng", &error_abort);
 }
 
 static Property virtio_ccw_rng_properties[] = {
@@ -1598,9 +1594,6 @@ static void virtio_ccw_crypto_instance_init(Object *obj)
     ccw_dev->force_revision_1 = true;
     virtio_instance_init_common(obj, &dev->vdev, sizeof(dev->vdev),
                                 TYPE_VIRTIO_CRYPTO);
-
-    object_property_add_alias(obj, "cryptodev", OBJECT(&dev->vdev),
-                              "cryptodev", &error_abort);
 }
 
 static void virtio_ccw_crypto_class_init(ObjectClass *klass, void *data)

@@ -25,6 +25,7 @@
 #include "qemu/notify.h"
 #include "qom/object.h"
 #include "qemu/rcu.h"
+#include "hw/qdev-core.h"
 
 #define RAM_ADDR_INVALID (~(ram_addr_t)0)
 
@@ -34,6 +35,16 @@
 #define TYPE_MEMORY_REGION "qemu:memory-region"
 #define MEMORY_REGION(obj) \
         OBJECT_CHECK(MemoryRegion, (obj), TYPE_MEMORY_REGION)
+
+#define TYPE_IOMMU_MEMORY_REGION "qemu:iommu-memory-region"
+#define IOMMU_MEMORY_REGION(obj) \
+        OBJECT_CHECK(IOMMUMemoryRegion, (obj), TYPE_IOMMU_MEMORY_REGION)
+#define IOMMU_MEMORY_REGION_CLASS(klass) \
+        OBJECT_CLASS_CHECK(IOMMUMemoryRegionClass, (klass), \
+                         TYPE_IOMMU_MEMORY_REGION)
+#define IOMMU_MEMORY_REGION_GET_CLASS(obj) \
+        OBJECT_GET_CLASS(IOMMUMemoryRegionClass, (obj), \
+                         TYPE_IOMMU_MEMORY_REGION)
 
 typedef struct MemoryRegionOps MemoryRegionOps;
 typedef struct MemoryRegionMmio MemoryRegionMmio;
@@ -189,26 +200,27 @@ struct MemoryRegionOps {
     const MemoryRegionMmio old_mmio;
 };
 
-typedef struct MemoryRegionIOMMUOps MemoryRegionIOMMUOps;
+typedef struct IOMMUMemoryRegionClass {
+    /* private */
+    struct DeviceClass parent_class;
 
-struct MemoryRegionIOMMUOps {
     /*
      * Return a TLB entry that contains a given address. Flag should
      * be the access permission of this translation operation. We can
      * set flag to IOMMU_NONE to mean that we don't need any
      * read/write permission checks, like, when for region replay.
      */
-    IOMMUTLBEntry (*translate)(MemoryRegion *iommu, hwaddr addr,
+    IOMMUTLBEntry (*translate)(IOMMUMemoryRegion *iommu, hwaddr addr,
                                IOMMUAccessFlags flag);
     /* Returns minimum supported page size */
-    uint64_t (*get_min_page_size)(MemoryRegion *iommu);
+    uint64_t (*get_min_page_size)(IOMMUMemoryRegion *iommu);
     /* Called when IOMMU Notifier flag changed */
-    void (*notify_flag_changed)(MemoryRegion *iommu,
+    void (*notify_flag_changed)(IOMMUMemoryRegion *iommu,
                                 IOMMUNotifierFlag old_flags,
                                 IOMMUNotifierFlag new_flags);
     /* Set this up to provide customized IOMMU replay function */
-    void (*replay)(MemoryRegion *iommu, IOMMUNotifier *notifier);
-};
+    void (*replay)(IOMMUMemoryRegion *iommu, IOMMUNotifier *notifier);
+} IOMMUMemoryRegionClass;
 
 typedef struct CoalescedMemoryRange CoalescedMemoryRange;
 typedef struct MemoryRegionIoeventfd MemoryRegionIoeventfd;
@@ -227,9 +239,9 @@ struct MemoryRegion {
     bool flush_coalesced_mmio;
     bool global_locking;
     uint8_t dirty_log_mask;
+    bool is_iommu;
     RAMBlock *ram_block;
     Object *owner;
-    const MemoryRegionIOMMUOps *iommu_ops;
 
     const MemoryRegionOps *ops;
     void *opaque;
@@ -252,6 +264,11 @@ struct MemoryRegion {
     const char *name;
     unsigned ioeventfd_nb;
     MemoryRegionIoeventfd *ioeventfds;
+};
+
+struct IOMMUMemoryRegion {
+    MemoryRegion parent_obj;
+
     QLIST_HEAD(, IOMMUNotifier) iommu_notify;
     IOMMUNotifierFlag iommu_notify_flags;
 };
@@ -403,8 +420,9 @@ void memory_region_init_io(MemoryRegion *mr,
                            uint64_t size);
 
 /**
- * memory_region_init_ram:  Initialize RAM memory region.  Accesses into the
- *                          region will modify memory directly.
+ * memory_region_init_ram_nomigrate:  Initialize RAM memory region.  Accesses
+ *                                    into the region will modify memory
+ *                                    directly.
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
@@ -412,12 +430,15 @@ void memory_region_init_io(MemoryRegion *mr,
  *        must be unique within any device
  * @size: size of the region.
  * @errp: pointer to Error*, to store an error if it happens.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM memory region to be migrated; that is the responsibility of the caller.
  */
-void memory_region_init_ram(MemoryRegion *mr,
-                            struct Object *owner,
-                            const char *name,
-                            uint64_t size,
-                            Error **errp);
+void memory_region_init_ram_nomigrate(MemoryRegion *mr,
+                                      struct Object *owner,
+                                      const char *name,
+                                      uint64_t size,
+                                      Error **errp);
 
 /**
  * memory_region_init_resizeable_ram:  Initialize memory region with resizeable
@@ -434,6 +455,9 @@ void memory_region_init_ram(MemoryRegion *mr,
  * @max_size: max size of the region.
  * @resized: callback to notify owner about used size change.
  * @errp: pointer to Error*, to store an error if it happens.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM memory region to be migrated; that is the responsibility of the caller.
  */
 void memory_region_init_resizeable_ram(MemoryRegion *mr,
                                        struct Object *owner,
@@ -457,6 +481,9 @@ void memory_region_init_resizeable_ram(MemoryRegion *mr,
  * @share: %true if memory must be mmaped with the MAP_SHARED flag
  * @path: the path in which to allocate the RAM.
  * @errp: pointer to Error*, to store an error if it happens.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM memory region to be migrated; that is the responsibility of the caller.
  */
 void memory_region_init_ram_from_file(MemoryRegion *mr,
                                       struct Object *owner,
@@ -477,6 +504,9 @@ void memory_region_init_ram_from_file(MemoryRegion *mr,
  * @share: %true if memory must be mmaped with the MAP_SHARED flag
  * @fd: the fd to mmap.
  * @errp: pointer to Error*, to store an error if it happens.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM memory region to be migrated; that is the responsibility of the caller.
  */
 void memory_region_init_ram_from_fd(MemoryRegion *mr,
                                     struct Object *owner,
@@ -498,6 +528,9 @@ void memory_region_init_ram_from_fd(MemoryRegion *mr,
  *        must be unique within any device
  * @size: size of the region.
  * @ptr: memory to be mapped; must contain at least @size bytes.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM memory region to be migrated; that is the responsibility of the caller.
  */
 void memory_region_init_ram_ptr(MemoryRegion *mr,
                                 struct Object *owner,
@@ -522,6 +555,10 @@ void memory_region_init_ram_ptr(MemoryRegion *mr,
  * @name: the name of the region.
  * @size: size of the region.
  * @ptr: memory to be mapped; must contain at least @size bytes.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM memory region to be migrated; that is the responsibility of the caller.
+ * (For RAM device memory regions, migrating the contents rarely makes sense.)
  */
 void memory_region_init_ram_device_ptr(MemoryRegion *mr,
                                        struct Object *owner,
@@ -549,11 +586,15 @@ void memory_region_init_alias(MemoryRegion *mr,
                               uint64_t size);
 
 /**
- * memory_region_init_rom: Initialize a ROM memory region.
+ * memory_region_init_rom_nomigrate: Initialize a ROM memory region.
  *
- * This has the same effect as calling memory_region_init_ram()
+ * This has the same effect as calling memory_region_init_ram_nomigrate()
  * and then marking the resulting region read-only with
  * memory_region_set_readonly().
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM side of the memory region to be migrated; that is the responsibility
+ * of the caller.
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
@@ -562,15 +603,19 @@ void memory_region_init_alias(MemoryRegion *mr,
  * @size: size of the region.
  * @errp: pointer to Error*, to store an error if it happens.
  */
-void memory_region_init_rom(MemoryRegion *mr,
-                            struct Object *owner,
-                            const char *name,
-                            uint64_t size,
-                            Error **errp);
+void memory_region_init_rom_nomigrate(MemoryRegion *mr,
+                                      struct Object *owner,
+                                      const char *name,
+                                      uint64_t size,
+                                      Error **errp);
 
 /**
- * memory_region_init_rom_device:  Initialize a ROM memory region.  Writes are
- *                                 handled via callbacks.
+ * memory_region_init_rom_device_nomigrate:  Initialize a ROM memory region.
+ *                                 Writes are handled via callbacks.
+ *
+ * Note that this function does not do anything to cause the data in the
+ * RAM side of the memory region to be migrated; that is the responsibility
+ * of the caller.
  *
  * @mr: the #MemoryRegion to be initialized.
  * @owner: the object that tracks the region's reference count
@@ -580,13 +625,13 @@ void memory_region_init_rom(MemoryRegion *mr,
  * @size: size of the region.
  * @errp: pointer to Error*, to store an error if it happens.
  */
-void memory_region_init_rom_device(MemoryRegion *mr,
-                                   struct Object *owner,
-                                   const MemoryRegionOps *ops,
-                                   void *opaque,
-                                   const char *name,
-                                   uint64_t size,
-                                   Error **errp);
+void memory_region_init_rom_device_nomigrate(MemoryRegion *mr,
+                                             struct Object *owner,
+                                             const MemoryRegionOps *ops,
+                                             void *opaque,
+                                             const char *name,
+                                             uint64_t size,
+                                             Error **errp);
 
 /**
  * memory_region_init_reservation: Initialize a memory region that reserves
@@ -612,23 +657,114 @@ static inline void memory_region_init_reservation(MemoryRegion *mr,
 }
 
 /**
- * memory_region_init_iommu: Initialize a memory region that translates
- * addresses
+ * memory_region_init_iommu: Initialize a memory region of a custom type
+ * that translates addresses
  *
  * An IOMMU region translates addresses and forwards accesses to a target
  * memory region.
  *
- * @mr: the #MemoryRegion to be initialized
+ * @typename: QOM class name
+ * @_iommu_mr: the #IOMMUMemoryRegion to be initialized
+ * @instance_size: the IOMMUMemoryRegion subclass instance size
  * @owner: the object that tracks the region's reference count
  * @ops: a function that translates addresses into the @target region
  * @name: used for debugging; not visible to the user or ABI
  * @size: size of the region.
  */
-void memory_region_init_iommu(MemoryRegion *mr,
-                              struct Object *owner,
-                              const MemoryRegionIOMMUOps *ops,
+void memory_region_init_iommu(void *_iommu_mr,
+                              size_t instance_size,
+                              const char *mrtypename,
+                              Object *owner,
                               const char *name,
                               uint64_t size);
+
+/**
+ * memory_region_init_ram - Initialize RAM memory region.  Accesses into the
+ *                          region will modify memory directly.
+ *
+ * @mr: the #MemoryRegion to be initialized
+ * @owner: the object that tracks the region's reference count (must be
+ *         TYPE_DEVICE or a subclass of TYPE_DEVICE, or NULL)
+ * @name: name of the memory region
+ * @size: size of the region in bytes
+ * @errp: pointer to Error*, to store an error if it happens.
+ *
+ * This function allocates RAM for a board model or device, and
+ * arranges for it to be migrated (by calling vmstate_register_ram()
+ * if @owner is a DeviceState, or vmstate_register_ram_global() if
+ * @owner is NULL).
+ *
+ * TODO: Currently we restrict @owner to being either NULL (for
+ * global RAM regions with no owner) or devices, so that we can
+ * give the RAM block a unique name for migration purposes.
+ * We should lift this restriction and allow arbitrary Objects.
+ * If you pass a non-NULL non-device @owner then we will assert.
+ */
+void memory_region_init_ram(MemoryRegion *mr,
+                            struct Object *owner,
+                            const char *name,
+                            uint64_t size,
+                            Error **errp);
+
+/**
+ * memory_region_init_rom: Initialize a ROM memory region.
+ *
+ * This has the same effect as calling memory_region_init_ram()
+ * and then marking the resulting region read-only with
+ * memory_region_set_readonly(). This includes arranging for the
+ * contents to be migrated.
+ *
+ * TODO: Currently we restrict @owner to being either NULL (for
+ * global RAM regions with no owner) or devices, so that we can
+ * give the RAM block a unique name for migration purposes.
+ * We should lift this restriction and allow arbitrary Objects.
+ * If you pass a non-NULL non-device @owner then we will assert.
+ *
+ * @mr: the #MemoryRegion to be initialized.
+ * @owner: the object that tracks the region's reference count
+ * @name: Region name, becomes part of RAMBlock name used in migration stream
+ *        must be unique within any device
+ * @size: size of the region.
+ * @errp: pointer to Error*, to store an error if it happens.
+ */
+void memory_region_init_rom(MemoryRegion *mr,
+                            struct Object *owner,
+                            const char *name,
+                            uint64_t size,
+                            Error **errp);
+
+/**
+ * memory_region_init_rom_device:  Initialize a ROM memory region.
+ *                                 Writes are handled via callbacks.
+ *
+ * This function initializes a memory region backed by RAM for reads
+ * and callbacks for writes, and arranges for the RAM backing to
+ * be migrated (by calling vmstate_register_ram()
+ * if @owner is a DeviceState, or vmstate_register_ram_global() if
+ * @owner is NULL).
+ *
+ * TODO: Currently we restrict @owner to being either NULL (for
+ * global RAM regions with no owner) or devices, so that we can
+ * give the RAM block a unique name for migration purposes.
+ * We should lift this restriction and allow arbitrary Objects.
+ * If you pass a non-NULL non-device @owner then we will assert.
+ *
+ * @mr: the #MemoryRegion to be initialized.
+ * @owner: the object that tracks the region's reference count
+ * @ops: callbacks for write access handling (must not be NULL).
+ * @name: Region name, becomes part of RAMBlock name used in migration stream
+ *        must be unique within any device
+ * @size: size of the region.
+ * @errp: pointer to Error*, to store an error if it happens.
+ */
+void memory_region_init_rom_device(MemoryRegion *mr,
+                                   struct Object *owner,
+                                   const MemoryRegionOps *ops,
+                                   void *opaque,
+                                   const char *name,
+                                   uint64_t size,
+                                   Error **errp);
+
 
 /**
  * memory_region_owner: get a memory region's owner.
@@ -679,20 +815,40 @@ static inline bool memory_region_is_romd(MemoryRegion *mr)
 }
 
 /**
- * memory_region_is_iommu: check whether a memory region is an iommu
+ * memory_region_get_iommu: check whether a memory region is an iommu
  *
- * Returns %true is a memory region is an iommu.
+ * Returns pointer to IOMMUMemoryRegion if a memory region is an iommu,
+ * otherwise NULL.
  *
  * @mr: the memory region being queried
  */
-static inline bool memory_region_is_iommu(MemoryRegion *mr)
+static inline IOMMUMemoryRegion *memory_region_get_iommu(MemoryRegion *mr)
 {
     if (mr->alias) {
-        return memory_region_is_iommu(mr->alias);
+        return memory_region_get_iommu(mr->alias);
     }
-    return mr->iommu_ops;
+    if (mr->is_iommu) {
+        return (IOMMUMemoryRegion *) mr;
+    }
+    return NULL;
 }
 
+/**
+ * memory_region_get_iommu_class_nocheck: returns iommu memory region class
+ *   if an iommu or NULL if not
+ *
+ * Returns pointer to IOMMUMemoryRegioniClass if a memory region is an iommu,
+ * otherwise NULL. This is fast path avoinding QOM checking, use with caution.
+ *
+ * @mr: the memory region being queried
+ */
+static inline IOMMUMemoryRegionClass *memory_region_get_iommu_class_nocheck(
+        IOMMUMemoryRegion *iommu_mr)
+{
+    return (IOMMUMemoryRegionClass *) (((Object *)iommu_mr)->class);
+}
+
+#define memory_region_is_iommu(mr) (memory_region_get_iommu(mr) != NULL)
 
 /**
  * memory_region_iommu_get_min_page_size: get minimum supported page size
@@ -700,9 +856,9 @@ static inline bool memory_region_is_iommu(MemoryRegion *mr)
  *
  * Returns minimum supported page size for an iommu.
  *
- * @mr: the memory region being queried
+ * @iommu_mr: the memory region being queried
  */
-uint64_t memory_region_iommu_get_min_page_size(MemoryRegion *mr);
+uint64_t memory_region_iommu_get_min_page_size(IOMMUMemoryRegion *iommu_mr);
 
 /**
  * memory_region_notify_iommu: notify a change in an IOMMU translation entry.
@@ -716,12 +872,12 @@ uint64_t memory_region_iommu_get_min_page_size(MemoryRegion *mr);
  * Note: for any IOMMU implementation, an in-place mapping change
  * should be notified with an UNMAP followed by a MAP.
  *
- * @mr: the memory region that was changed
+ * @iommu_mr: the memory region that was changed
  * @entry: the new entry in the IOMMU translation table.  The entry
  *         replaces all old entries for the same virtual I/O address range.
  *         Deleted entries have .@perm == 0.
  */
-void memory_region_notify_iommu(MemoryRegion *mr,
+void memory_region_notify_iommu(IOMMUMemoryRegion *iommu_mr,
                                 IOMMUTLBEntry entry);
 
 /**
@@ -756,18 +912,18 @@ void memory_region_register_iommu_notifier(MemoryRegion *mr,
  * a notifier with the minimum page granularity returned by
  * mr->iommu_ops->get_page_size().
  *
- * @mr: the memory region to observe
+ * @iommu_mr: the memory region to observe
  * @n: the notifier to which to replay iommu mappings
  */
-void memory_region_iommu_replay(MemoryRegion *mr, IOMMUNotifier *n);
+void memory_region_iommu_replay(IOMMUMemoryRegion *iommu_mr, IOMMUNotifier *n);
 
 /**
  * memory_region_iommu_replay_all: replay existing IOMMU translations
  * to all the notifiers registered.
  *
- * @mr: the memory region to observe
+ * @iommu_mr: the memory region to observe
  */
-void memory_region_iommu_replay_all(MemoryRegion *mr);
+void memory_region_iommu_replay_all(IOMMUMemoryRegion *iommu_mr);
 
 /**
  * memory_region_unregister_iommu_notifier: unregister a notifier for

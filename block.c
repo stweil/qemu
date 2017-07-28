@@ -2186,6 +2186,7 @@ int bdrv_open_backing_file(BlockDriverState *bs, QDict *parent_options,
         ret = -EINVAL;
         goto free_exit;
     }
+    bdrv_set_aio_context(backing_hd, bdrv_get_aio_context(bs));
 
     /* Hook up the backing file link; drop our reference, bs owns the
      * backing_hd reference now */
@@ -2574,15 +2575,7 @@ static BlockDriverState *bdrv_open_inherit(const char *filename,
         goto close_and_fail;
     }
 
-    if (!bdrv_key_required(bs)) {
-        bdrv_parent_cb_change_media(bs, true);
-    } else if (!runstate_check(RUN_STATE_PRELAUNCH)
-               && !runstate_check(RUN_STATE_INMIGRATE)
-               && !runstate_check(RUN_STATE_PAUSED)) { /* HACK */
-        error_setg(errp,
-                   "Guest must be stopped for opening of encrypted image");
-        goto close_and_fail;
-    }
+    bdrv_parent_cb_change_media(bs, true);
 
     QDECREF(options);
 
@@ -2990,10 +2983,16 @@ error:
 void bdrv_reopen_commit(BDRVReopenState *reopen_state)
 {
     BlockDriver *drv;
+    BlockDriverState *bs;
+    bool old_can_write, new_can_write;
 
     assert(reopen_state != NULL);
-    drv = reopen_state->bs->drv;
+    bs = reopen_state->bs;
+    drv = bs->drv;
     assert(drv != NULL);
+
+    old_can_write =
+        !bdrv_is_read_only(bs) && !(bdrv_get_flags(bs) & BDRV_O_INACTIVE);
 
     /* If there are any driver level actions to take */
     if (drv->bdrv_reopen_commit) {
@@ -3001,13 +3000,28 @@ void bdrv_reopen_commit(BDRVReopenState *reopen_state)
     }
 
     /* set BDS specific flags now */
-    QDECREF(reopen_state->bs->explicit_options);
+    QDECREF(bs->explicit_options);
 
-    reopen_state->bs->explicit_options   = reopen_state->explicit_options;
-    reopen_state->bs->open_flags         = reopen_state->flags;
-    reopen_state->bs->read_only = !(reopen_state->flags & BDRV_O_RDWR);
+    bs->explicit_options   = reopen_state->explicit_options;
+    bs->open_flags         = reopen_state->flags;
+    bs->read_only = !(reopen_state->flags & BDRV_O_RDWR);
 
-    bdrv_refresh_limits(reopen_state->bs, NULL);
+    bdrv_refresh_limits(bs, NULL);
+
+    new_can_write =
+        !bdrv_is_read_only(bs) && !(bdrv_get_flags(bs) & BDRV_O_INACTIVE);
+    if (!old_can_write && new_can_write && drv->bdrv_reopen_bitmaps_rw) {
+        Error *local_err = NULL;
+        if (drv->bdrv_reopen_bitmaps_rw(bs, &local_err) < 0) {
+            /* This is not fatal, bitmaps just left read-only, so all following
+             * writes will fail. User can remove read-only bitmaps to unblock
+             * writes.
+             */
+            error_reportf_err(local_err,
+                              "%s: Failed to make dirty bitmaps writable: ",
+                              bdrv_get_node_name(bs));
+        }
+    }
 }
 
 /*
@@ -3041,9 +3055,6 @@ static void bdrv_close(BlockDriverState *bs)
     bdrv_flush(bs);
     bdrv_drain(bs); /* in case flush left pending I/O */
 
-    bdrv_release_named_dirty_bitmaps(bs);
-    assert(QLIST_EMPTY(&bs->dirty_bitmaps));
-
     if (bs->drv) {
         BdrvChild *child, *next;
 
@@ -3073,7 +3084,6 @@ static void bdrv_close(BlockDriverState *bs)
         bs->backing_format[0] = '\0';
         bs->total_sectors = 0;
         bs->encrypted = false;
-        bs->valid_key = false;
         bs->sg = false;
         QDECREF(bs->options);
         QDECREF(bs->explicit_options);
@@ -3081,6 +3091,9 @@ static void bdrv_close(BlockDriverState *bs)
         QDECREF(bs->full_open_options);
         bs->full_open_options = NULL;
     }
+
+    bdrv_release_named_dirty_bitmaps(bs);
+    assert(QLIST_EMPTY(&bs->dirty_bitmaps));
 
     QLIST_FOREACH_SAFE(ban, &bs->aio_notifiers, list, ban_next) {
         g_free(ban);
@@ -3399,7 +3412,8 @@ exit:
 /**
  * Truncate file to 'offset' bytes (needed only for file protocols)
  */
-int bdrv_truncate(BdrvChild *child, int64_t offset, Error **errp)
+int bdrv_truncate(BdrvChild *child, int64_t offset, PreallocMode prealloc,
+                  Error **errp)
 {
     BlockDriverState *bs = child->bs;
     BlockDriver *drv = bs->drv;
@@ -3422,7 +3436,7 @@ int bdrv_truncate(BdrvChild *child, int64_t offset, Error **errp)
 
     assert(!(bs->open_flags & BDRV_O_INACTIVE));
 
-    ret = drv->bdrv_truncate(bs, offset, errp);
+    ret = drv->bdrv_truncate(bs, offset, prealloc, errp);
     if (ret == 0) {
         ret = refresh_total_sectors(bs, offset >> BDRV_SECTOR_BITS);
         bdrv_dirty_bitmap_truncate(bs);
@@ -3449,6 +3463,41 @@ int64_t bdrv_get_allocated_file_size(BlockDriverState *bs)
         return bdrv_get_allocated_file_size(bs->file->bs);
     }
     return -ENOTSUP;
+}
+
+/*
+ * bdrv_measure:
+ * @drv: Format driver
+ * @opts: Creation options for new image
+ * @in_bs: Existing image containing data for new image (may be NULL)
+ * @errp: Error object
+ * Returns: A #BlockMeasureInfo (free using qapi_free_BlockMeasureInfo())
+ *          or NULL on error
+ *
+ * Calculate file size required to create a new image.
+ *
+ * If @in_bs is given then space for allocated clusters and zero clusters
+ * from that image are included in the calculation.  If @opts contains a
+ * backing file that is shared by @in_bs then backing clusters may be omitted
+ * from the calculation.
+ *
+ * If @in_bs is NULL then the calculation includes no allocated clusters
+ * unless a preallocation option is given in @opts.
+ *
+ * Note that @in_bs may use a different BlockDriver from @drv.
+ *
+ * If an error occurs the @errp pointer is set.
+ */
+BlockMeasureInfo *bdrv_measure(BlockDriver *drv, QemuOpts *opts,
+                               BlockDriverState *in_bs, Error **errp)
+{
+    if (!drv->bdrv_measure) {
+        error_setg(errp, "Block driver '%s' does not support size measurement",
+                   drv->format_name);
+        return NULL;
+    }
+
+    return drv->bdrv_measure(opts, in_bs, errp);
 }
 
 /**
@@ -3501,72 +3550,6 @@ bool bdrv_is_encrypted(BlockDriverState *bs)
         return true;
     }
     return bs->encrypted;
-}
-
-bool bdrv_key_required(BlockDriverState *bs)
-{
-    BdrvChild *backing = bs->backing;
-
-    if (backing && backing->bs->encrypted && !backing->bs->valid_key) {
-        return true;
-    }
-    return (bs->encrypted && !bs->valid_key);
-}
-
-int bdrv_set_key(BlockDriverState *bs, const char *key)
-{
-    int ret;
-    if (bs->backing && bs->backing->bs->encrypted) {
-        ret = bdrv_set_key(bs->backing->bs, key);
-        if (ret < 0)
-            return ret;
-        if (!bs->encrypted)
-            return 0;
-    }
-    if (!bs->encrypted) {
-        return -EINVAL;
-    } else if (!bs->drv || !bs->drv->bdrv_set_key) {
-        return -ENOMEDIUM;
-    }
-    ret = bs->drv->bdrv_set_key(bs, key);
-    if (ret < 0) {
-        bs->valid_key = false;
-    } else if (!bs->valid_key) {
-        /* call the change callback now, we skipped it on open */
-        bs->valid_key = true;
-        bdrv_parent_cb_change_media(bs, true);
-    }
-    return ret;
-}
-
-/*
- * Provide an encryption key for @bs.
- * If @key is non-null:
- *     If @bs is not encrypted, fail.
- *     Else if the key is invalid, fail.
- *     Else set @bs's key to @key, replacing the existing key, if any.
- * If @key is null:
- *     If @bs is encrypted and still lacks a key, fail.
- *     Else do nothing.
- * On failure, store an error object through @errp if non-null.
- */
-void bdrv_add_key(BlockDriverState *bs, const char *key, Error **errp)
-{
-    if (key) {
-        if (!bdrv_is_encrypted(bs)) {
-            error_setg(errp, "Node '%s' is not encrypted",
-                      bdrv_get_device_or_node_name(bs));
-        } else if (bdrv_set_key(bs, key) < 0) {
-            error_setg(errp, QERR_INVALID_PASSWORD);
-        }
-    } else {
-        if (bdrv_key_required(bs)) {
-            error_set(errp, ERROR_CLASS_DEVICE_ENCRYPTED,
-                      "'%s' (%s) is encrypted",
-                      bdrv_get_device_or_node_name(bs),
-                      bdrv_get_encrypted_filename(bs));
-        }
-    }
 }
 
 const char *bdrv_get_format_name(BlockDriverState *bs)
@@ -3991,19 +3974,6 @@ BlockDriverState *bdrv_find_backing_image(BlockDriverState *bs,
     return retval;
 }
 
-int bdrv_get_backing_file_depth(BlockDriverState *bs)
-{
-    if (!bs->drv) {
-        return 0;
-    }
-
-    if (!bs->backing) {
-        return 0;
-    }
-
-    return 1 + bdrv_get_backing_file_depth(bs->backing->bs);
-}
-
 void bdrv_init(void)
 {
     module_call_init(MODULE_INIT_BLOCK);
@@ -4135,6 +4105,10 @@ static int bdrv_inactivate_recurse(BlockDriverState *bs,
             return ret;
         }
     }
+
+    /* At this point persistent bitmaps should be already stored by the format
+     * driver */
+    bdrv_release_persistent_dirty_bitmaps(bs);
 
     return 0;
 }
@@ -4268,11 +4242,9 @@ bool bdrv_op_is_blocked(BlockDriverState *bs, BlockOpType op, Error **errp)
     assert((int) op >= 0 && op < BLOCK_OP_TYPE_MAX);
     if (!QLIST_EMPTY(&bs->op_blockers[op])) {
         blocker = QLIST_FIRST(&bs->op_blockers[op]);
-        if (errp) {
-            *errp = error_copy(blocker->reason);
-            error_prepend(errp, "Node '%s' is busy: ",
-                          bdrv_get_device_or_node_name(bs));
-        }
+        error_propagate(errp, error_copy(blocker->reason));
+        error_prepend(errp, "Node '%s' is busy: ",
+                      bdrv_get_device_or_node_name(bs));
         return true;
     }
     return false;
@@ -4412,55 +4384,65 @@ void bdrv_img_create(const char *filename, const char *fmt,
 
     backing_fmt = qemu_opt_get(opts, BLOCK_OPT_BACKING_FMT);
 
-    // The size for the image must always be specified, with one exception:
-    // If we are using a backing file, we can obtain the size from there
+    /* The size for the image must always be specified, unless we have a backing
+     * file and we have not been forbidden from opening it. */
     size = qemu_opt_get_size(opts, BLOCK_OPT_SIZE, 0);
-    if (size == -1) {
-        if (backing_file) {
-            BlockDriverState *bs;
-            char *full_backing = g_new0(char, PATH_MAX);
-            int64_t size;
-            int back_flags;
-            QDict *backing_options = NULL;
+    if (backing_file && !(flags & BDRV_O_NO_BACKING)) {
+        BlockDriverState *bs;
+        char *full_backing = g_new0(char, PATH_MAX);
+        int back_flags;
+        QDict *backing_options = NULL;
 
-            bdrv_get_full_backing_filename_from_filename(filename, backing_file,
-                                                         full_backing, PATH_MAX,
-                                                         &local_err);
-            if (local_err) {
-                g_free(full_backing);
-                goto out;
-            }
-
-            /* backing files always opened read-only */
-            back_flags = flags;
-            back_flags &= ~(BDRV_O_RDWR | BDRV_O_SNAPSHOT | BDRV_O_NO_BACKING);
-
-            if (backing_fmt) {
-                backing_options = qdict_new();
-                qdict_put_str(backing_options, "driver", backing_fmt);
-            }
-
-            bs = bdrv_open(full_backing, NULL, backing_options, back_flags,
-                           &local_err);
+        bdrv_get_full_backing_filename_from_filename(filename, backing_file,
+                                                     full_backing, PATH_MAX,
+                                                     &local_err);
+        if (local_err) {
             g_free(full_backing);
-            if (!bs) {
-                goto out;
-            }
-            size = bdrv_getlength(bs);
-            if (size < 0) {
-                error_setg_errno(errp, -size, "Could not get size of '%s'",
-                                 backing_file);
-                bdrv_unref(bs);
-                goto out;
-            }
-
-            qemu_opt_set_number(opts, BLOCK_OPT_SIZE, size, &error_abort);
-
-            bdrv_unref(bs);
-        } else {
-            error_setg(errp, "Image creation needs a size parameter");
             goto out;
         }
+
+        /* backing files always opened read-only */
+        back_flags = flags;
+        back_flags &= ~(BDRV_O_RDWR | BDRV_O_SNAPSHOT | BDRV_O_NO_BACKING);
+
+        if (backing_fmt) {
+            backing_options = qdict_new();
+            qdict_put_str(backing_options, "driver", backing_fmt);
+        }
+
+        bs = bdrv_open(full_backing, NULL, backing_options, back_flags,
+                       &local_err);
+        g_free(full_backing);
+        if (!bs && size != -1) {
+            /* Couldn't open BS, but we have a size, so it's nonfatal */
+            warn_reportf_err(local_err,
+                            "Could not verify backing image. "
+                            "This may become an error in future versions.\n");
+            local_err = NULL;
+        } else if (!bs) {
+            /* Couldn't open bs, do not have size */
+            error_append_hint(&local_err,
+                              "Could not open backing image to determine size.\n");
+            goto out;
+        } else {
+            if (size == -1) {
+                /* Opened BS, have no size */
+                size = bdrv_getlength(bs);
+                if (size < 0) {
+                    error_setg_errno(errp, -size, "Could not get size of '%s'",
+                                     backing_file);
+                    bdrv_unref(bs);
+                    goto out;
+                }
+                qemu_opt_set_number(opts, BLOCK_OPT_SIZE, size, &error_abort);
+            }
+            bdrv_unref(bs);
+        }
+    } /* (backing_file && !(flags & BDRV_O_NO_BACKING)) */
+
+    if (size == -1) {
+        error_setg(errp, "Image creation needs a size parameter");
+        goto out;
     }
 
     if (!quiet) {
@@ -4933,4 +4915,26 @@ void bdrv_del_child(BlockDriverState *parent_bs, BdrvChild *child, Error **errp)
     }
 
     parent_bs->drv->bdrv_del_child(parent_bs, child, errp);
+}
+
+bool bdrv_can_store_new_dirty_bitmap(BlockDriverState *bs, const char *name,
+                                     uint32_t granularity, Error **errp)
+{
+    BlockDriver *drv = bs->drv;
+
+    if (!drv) {
+        error_setg_errno(errp, ENOMEDIUM,
+                         "Can't store persistent bitmaps to %s",
+                         bdrv_get_device_or_node_name(bs));
+        return false;
+    }
+
+    if (!drv->bdrv_can_store_new_dirty_bitmap) {
+        error_setg_errno(errp, ENOTSUP,
+                         "Can't store persistent bitmaps to %s",
+                         bdrv_get_device_or_node_name(bs));
+        return false;
+    }
+
+    return drv->bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp);
 }

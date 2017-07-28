@@ -81,6 +81,7 @@
 
 #if defined(TARGET_S390X)
 #include "hw/s390x/storage-keys.h"
+#include "hw/s390x/storage-attributes.h"
 #endif
 
 /*
@@ -1078,15 +1079,27 @@ int monitor_get_cpu_index(void)
 
 static void hmp_info_registers(Monitor *mon, const QDict *qdict)
 {
-    CPUState *cs = mon_get_cpu();
+    bool all_cpus = qdict_get_try_bool(qdict, "cpustate_all", false);
+    CPUState *cs;
 
-    if (!cs) {
-        monitor_printf(mon, "No CPU available\n");
-        return;
+    if (all_cpus) {
+        CPU_FOREACH(cs) {
+            monitor_printf(mon, "\nCPU#%d\n", cs->cpu_index);
+            cpu_dump_state(cs, (FILE *)mon, monitor_fprintf, CPU_DUMP_FPU);
+        }
+    } else {
+        cs = mon_get_cpu();
+
+        if (!cs) {
+            monitor_printf(mon, "No CPU available\n");
+            return;
+        }
+
+        cpu_dump_state(cs, (FILE *)mon, monitor_fprintf, CPU_DUMP_FPU);
     }
-    cpu_dump_state(cs, (FILE *)mon, monitor_fprintf, CPU_DUMP_FPU);
 }
 
+#ifdef CONFIG_TCG
 static void hmp_info_jit(Monitor *mon, const QDict *qdict)
 {
     if (!tcg_enabled()) {
@@ -1102,6 +1115,7 @@ static void hmp_info_opcount(Monitor *mon, const QDict *qdict)
 {
     dump_opcount_info((FILE *)mon, monitor_fprintf);
 }
+#endif
 
 static void hmp_info_history(Monitor *mon, const QDict *qdict)
 {
@@ -3829,7 +3843,7 @@ static void handle_qmp_command(JSONMessageParser *parser, GQueue *tokens)
 
     req_json = qobject_to_json(req);
     trace_handle_qmp_command(mon, qstring_get_str(req_json));
-    qobject_decref(QOBJECT(req_json));
+    QDECREF(req_json);
 
     rsp = qmp_dispatch(cur_mon->qmp.commands, req);
 
@@ -4097,12 +4111,12 @@ void monitor_init(Chardev *chr, int flags)
 
     if (monitor_is_qmp(mon)) {
         qemu_chr_fe_set_handlers(&mon->chr, monitor_can_read, monitor_qmp_read,
-                                 monitor_qmp_event, mon, NULL, true);
+                                 monitor_qmp_event, NULL, mon, NULL, true);
         qemu_chr_fe_set_echo(&mon->chr, true);
         json_message_parser_init(&mon->qmp.parser, handle_qmp_command);
     } else {
         qemu_chr_fe_set_handlers(&mon->chr, monitor_can_read, monitor_read,
-                                 monitor_event, mon, NULL, true);
+                                 monitor_event, NULL, mon, NULL, true);
     }
 
     qemu_mutex_lock(&monitor_lock);
@@ -4121,74 +4135,6 @@ void monitor_cleanup(void)
         g_free(mon);
     }
     qemu_mutex_unlock(&monitor_lock);
-}
-
-static void bdrv_password_cb(void *opaque, const char *password,
-                             void *readline_opaque)
-{
-    Monitor *mon = opaque;
-    BlockDriverState *bs = readline_opaque;
-    int ret = 0;
-    Error *local_err = NULL;
-
-    bdrv_add_key(bs, password, &local_err);
-    if (local_err) {
-        error_report_err(local_err);
-        ret = -EPERM;
-    }
-    if (mon->password_completion_cb)
-        mon->password_completion_cb(mon->password_opaque, ret);
-
-    monitor_read_command(mon, 1);
-}
-
-int monitor_read_bdrv_key_start(Monitor *mon, BlockDriverState *bs,
-                                BlockCompletionFunc *completion_cb,
-                                void *opaque)
-{
-    int err;
-
-    monitor_printf(mon, "%s (%s) is encrypted.\n", bdrv_get_device_name(bs),
-                   bdrv_get_encrypted_filename(bs));
-
-    mon->password_completion_cb = completion_cb;
-    mon->password_opaque = opaque;
-
-    err = monitor_read_password(mon, bdrv_password_cb, bs);
-
-    if (err && completion_cb)
-        completion_cb(opaque, err);
-
-    return err;
-}
-
-int monitor_read_block_device_key(Monitor *mon, const char *device,
-                                  BlockCompletionFunc *completion_cb,
-                                  void *opaque)
-{
-    Error *err = NULL;
-    BlockBackend *blk;
-
-    blk = blk_by_name(device);
-    if (!blk) {
-        monitor_printf(mon, "Device not found %s\n", device);
-        return -1;
-    }
-    if (!blk_bs(blk)) {
-        monitor_printf(mon, "Device '%s' has no medium\n", device);
-        return -1;
-    }
-
-    bdrv_add_key(blk_bs(blk), NULL, &err);
-    if (err) {
-        error_free(err);
-        return monitor_read_bdrv_key_start(mon, blk_bs(blk), completion_cb, opaque);
-    }
-
-    if (completion_cb) {
-        completion_cb(opaque, 0);
-    }
-    return 0;
 }
 
 QemuOptsList qemu_mon_opts = {

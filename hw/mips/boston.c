@@ -484,7 +484,7 @@ static void boston_mach_init(MachineState *machine)
     sysbus_mmio_map_overlap(SYS_BUS_DEVICE(s->cps), 0, 0, 1);
 
     flash =  g_new(MemoryRegion, 1);
-    memory_region_init_rom_device(flash, NULL, &boston_flash_ops, s,
+    memory_region_init_rom_device_nomigrate(flash, NULL, &boston_flash_ops, s,
                                   "boston.flash", 128 * M_BYTE, &err);
     memory_region_add_subregion_overlap(sys_mem, 0x18000000, flash, 0);
 
@@ -533,13 +533,13 @@ static void boston_mach_init(MachineState *machine)
     chr = qemu_chr_new("lcd", "vc:320x240");
     qemu_chr_fe_init(&s->lcd_display, chr, NULL);
     qemu_chr_fe_set_handlers(&s->lcd_display, NULL, NULL,
-                             boston_lcd_event, s, NULL, true);
+                             boston_lcd_event, NULL, s, NULL, true);
 
     ahci = pci_create_simple_multifunction(&PCI_BRIDGE(&pcie2->root)->sec_bus,
                                            PCI_DEVFN(0, 0),
                                            true, TYPE_ICH9_AHCI);
-    g_assert(ARRAY_SIZE(hd) == ICH_AHCI(ahci)->ahci.ports);
-    ide_drive_get(hd, ICH_AHCI(ahci)->ahci.ports);
+    g_assert(ARRAY_SIZE(hd) == ahci_get_num_ports(ahci));
+    ide_drive_get(hd, ahci_get_num_ports(ahci));
     ahci_ide_create_devs(ahci, hd);
 
     if (machine->firmware) {

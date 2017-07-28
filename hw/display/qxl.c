@@ -2091,14 +2091,12 @@ static void qxl_realize_common(PCIQXLDevice *qxl, Error **errp)
     qxl->rom_size = qxl_rom_size();
     memory_region_init_ram(&qxl->rom_bar, OBJECT(qxl), "qxl.vrom",
                            qxl->rom_size, &error_fatal);
-    vmstate_register_ram(&qxl->rom_bar, &qxl->pci.qdev);
     init_qxl_rom(qxl);
     init_qxl_ram(qxl);
 
     qxl->guest_surfaces.cmds = g_new0(QXLPHYSICAL, qxl->ssd.num_surfaces);
     memory_region_init_ram(&qxl->vram_bar, OBJECT(qxl), "qxl.vram",
                            qxl->vram_size, &error_fatal);
-    vmstate_register_ram(&qxl->vram_bar, &qxl->pci.qdev);
     memory_region_init_alias(&qxl->vram32_bar, OBJECT(qxl), "qxl.vram32",
                              &qxl->vram_bar, 0, qxl->vram32_size);
 
@@ -2200,7 +2198,6 @@ static void qxl_realize_secondary(PCIDevice *dev, Error **errp)
     qxl_init_ramsize(qxl);
     memory_region_init_ram(&qxl->vga.vram, OBJECT(dev), "qxl.vgavram",
                            qxl->vga.vram_size, &error_fatal);
-    vmstate_register_ram(&qxl->vga.vram, &qxl->pci.qdev);
     qxl->vga.vram_ptr = memory_region_get_ram_ptr(&qxl->vga.vram);
     qxl->vga.con = graphic_console_init(DEVICE(dev), 0, &qxl_ops, qxl);
 
@@ -2373,12 +2370,12 @@ static VMStateDescription qxl_vmstate = {
         VMSTATE_UINT32(last_release_offset, PCIQXLDevice),
         VMSTATE_UINT32(mode, PCIQXLDevice),
         VMSTATE_UINT32(ssd.unique, PCIQXLDevice),
-        VMSTATE_INT32_EQUAL(num_memslots, PCIQXLDevice),
+        VMSTATE_INT32_EQUAL(num_memslots, PCIQXLDevice, NULL),
         VMSTATE_STRUCT_ARRAY(guest_slots, PCIQXLDevice, NUM_MEMSLOTS, 0,
                              qxl_memslot, struct guest_slots),
         VMSTATE_STRUCT(guest_primary.surface, PCIQXLDevice, 0,
                        qxl_surface, QXLSurfaceCreate),
-        VMSTATE_INT32_EQUAL(ssd.num_surfaces, PCIQXLDevice),
+        VMSTATE_INT32_EQUAL(ssd.num_surfaces, PCIQXLDevice, NULL),
         VMSTATE_VARRAY_INT32(guest_surfaces.cmds, PCIQXLDevice,
                              ssd.num_surfaces, 0,
                              vmstate_info_uint64, uint64_t),

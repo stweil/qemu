@@ -55,6 +55,7 @@
 #include "exec/tb-hash.h"
 #include "translate-all.h"
 #include "qemu/bitmap.h"
+#include "qemu/error-report.h"
 #include "qemu/timer.h"
 #include "qemu/main-loop.h"
 #include "exec/log.h"
@@ -113,8 +114,10 @@ typedef struct PageDesc {
 #define V_L2_BITS 10
 #define V_L2_SIZE (1 << V_L2_BITS)
 
-uintptr_t qemu_host_page_size;
-intptr_t qemu_host_page_mask;
+/* Make sure all possible CPU event bits fit in tb->trace_vcpu_dstate */
+QEMU_BUILD_BUG_ON(CPU_TRACE_DSTATE_MAX_EVENTS >
+                  sizeof(((TranslationBlock *)0)->trace_vcpu_dstate)
+                  * BITS_PER_BYTE);
 
 /*
  * L1 Mapping properties
@@ -364,21 +367,6 @@ bool cpu_restore_state(CPUState *cpu, uintptr_t retaddr)
     return r;
 }
 
-void page_size_init(void)
-{
-    /* NOTE: we can always suppose that qemu_host_page_size >=
-       TARGET_PAGE_SIZE */
-    qemu_real_host_page_size = getpagesize();
-    qemu_real_host_page_mask = -(intptr_t)qemu_real_host_page_size;
-    if (qemu_host_page_size == 0) {
-        qemu_host_page_size = qemu_real_host_page_size;
-    }
-    if (qemu_host_page_size < TARGET_PAGE_SIZE) {
-        qemu_host_page_size = TARGET_PAGE_SIZE;
-    }
-    qemu_host_page_mask = -(intptr_t)qemu_host_page_size;
-}
-
 static void page_init(void)
 {
     page_size_init();
@@ -523,7 +511,7 @@ static inline PageDesc *page_find(tb_page_addr_t index)
 #elif defined(__powerpc__)
 # define MAX_CODE_GEN_BUFFER_SIZE  (32u * 1024 * 1024)
 #elif defined(__aarch64__)
-# define MAX_CODE_GEN_BUFFER_SIZE  (128ul * 1024 * 1024)
+# define MAX_CODE_GEN_BUFFER_SIZE  (2ul * 1024 * 1024 * 1024)
 #elif defined(__s390x__)
   /* We have a +- 4GB range on the branches; leave some slop.  */
 # define MAX_CODE_GEN_BUFFER_SIZE  (3ul * 1024 * 1024 * 1024)
@@ -803,6 +791,7 @@ static void tb_htable_init(void)
    size. */
 void tcg_exec_init(uintptr_t tb_size)
 {
+    tcg_allowed = true;
     cpu_gen_init();
     page_init();
     tb_htable_init();
@@ -812,11 +801,6 @@ void tcg_exec_init(uintptr_t tb_size)
        initialize the prologue now.  */
     tcg_prologue_init(&tcg_ctx);
 #endif
-}
-
-bool tcg_enabled(void)
-{
-    return tcg_ctx.code_gen_buffer != NULL;
 }
 
 /*
@@ -929,11 +913,7 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     }
 
     CPU_FOREACH(cpu) {
-        int i;
-
-        for (i = 0; i < TB_JMP_CACHE_SIZE; ++i) {
-            atomic_set(&cpu->tb_jmp_cache[i], NULL);
-        }
+        cpu_tb_jmp_cache_clear(cpu);
     }
 
     tcg_ctx.tb_ctx.nb_tbs = 0;
@@ -1098,7 +1078,7 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
 
     /* remove the TB from the hash list */
     phys_pc = tb->page_addr[0] + (tb->pc & ~TARGET_PAGE_MASK);
-    h = tb_hash_func(phys_pc, tb->pc, tb->flags);
+    h = tb_hash_func(phys_pc, tb->pc, tb->flags, tb->trace_vcpu_dstate);
     qht_remove(&tcg_ctx.tb_ctx.htable, tb, h);
 
     /* remove the TB from the page list */
@@ -1243,7 +1223,7 @@ static void tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
     }
 
     /* add in the hash table */
-    h = tb_hash_func(phys_pc, tb->pc, tb->flags);
+    h = tb_hash_func(phys_pc, tb->pc, tb->flags, tb->trace_vcpu_dstate);
     qht_insert(&tcg_ctx.tb_ctx.htable, tb, h);
 
 #ifdef DEBUG_TB_CHECK
@@ -1289,6 +1269,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->cs_base = cs_base;
     tb->flags = flags;
     tb->cflags = cflags;
+    tb->trace_vcpu_dstate = *cpu->trace_dstate;
     tb->invalid = false;
 
 #ifdef CONFIG_PROFILER
@@ -1300,7 +1281,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tcg_func_start(&tcg_ctx);
 
     tcg_ctx.cpu = ENV_GET_CPU(env);
-    gen_intermediate_code(env, tb);
+    gen_intermediate_code(cpu, tb);
     tcg_ctx.cpu = NULL;
 
     trace_translate_block(tb, tb->pc, tb->tc_ptr);
@@ -1822,19 +1803,21 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
     cpu_loop_exit_noexc(cpu);
 }
 
+static void tb_jmp_cache_clear_page(CPUState *cpu, target_ulong page_addr)
+{
+    unsigned int i, i0 = tb_jmp_cache_hash_page(page_addr);
+
+    for (i = 0; i < TB_JMP_PAGE_SIZE; i++) {
+        atomic_set(&cpu->tb_jmp_cache[i0 + i], NULL);
+    }
+}
+
 void tb_flush_jmp_cache(CPUState *cpu, target_ulong addr)
 {
-    unsigned int i;
-
     /* Discard jump cache entries for any tb which might potentially
        overlap the flushed page.  */
-    i = tb_jmp_cache_hash_page(addr - TARGET_PAGE_SIZE);
-    memset(&cpu->tb_jmp_cache[i], 0,
-           TB_JMP_PAGE_SIZE * sizeof(TranslationBlock *));
-
-    i = tb_jmp_cache_hash_page(addr);
-    memset(&cpu->tb_jmp_cache[i], 0,
-           TB_JMP_PAGE_SIZE * sizeof(TranslationBlock *));
+    tb_jmp_cache_clear_page(cpu, addr - TARGET_PAGE_SIZE);
+    tb_jmp_cache_clear_page(cpu, addr);
 }
 
 static void print_qht_statistics(FILE *f, fprintf_function cpu_fprintf,
@@ -2234,3 +2217,11 @@ int page_unprotect(target_ulong address, uintptr_t pc)
     return 0;
 }
 #endif /* CONFIG_USER_ONLY */
+
+/* This is a wrapper for common code that can not use CONFIG_SOFTMMU */
+void tcg_flush_softmmu_tlb(CPUState *cs)
+{
+#ifdef CONFIG_SOFTMMU
+    tlb_flush(cs);
+#endif
+}

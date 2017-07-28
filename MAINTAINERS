@@ -84,14 +84,10 @@ M: Paolo Bonzini <pbonzini@redhat.com>
 M: Peter Crosthwaite <crosthwaite.peter@gmail.com>
 M: Richard Henderson <rth@twiddle.net>
 S: Maintained
-F: cpu-exec.c
-F: cpu-exec-common.c
 F: cpus.c
-F: cputlb.c
 F: exec.c
 F: softmmu_template.h
-F: translate-all.*
-F: translate-common.c
+F: accel/tcg/
 F: include/exec/cpu*.h
 F: include/exec/exec-all.h
 F: include/exec/helper*.h
@@ -277,8 +273,8 @@ Overall
 M: Paolo Bonzini <pbonzini@redhat.com>
 L: kvm@vger.kernel.org
 S: Supported
-F: kvm-*
 F: */kvm.*
+F: accel/kvm/
 F: include/sysemu/kvm*.h
 
 ARM
@@ -299,7 +295,7 @@ F: target/ppc/kvm.c
 
 S390
 M: Christian Borntraeger <borntraeger@de.ibm.com>
-M: Cornelia Huck <cornelia.huck@de.ibm.com>
+M: Cornelia Huck <cohuck@redhat.com>
 M: Alexander Graf <agraf@suse.de>
 S: Maintained
 F: target/s390x/kvm.c
@@ -327,7 +323,6 @@ M: Stefano Stabellini <sstabellini@kernel.org>
 M: Anthony Perard <anthony.perard@citrix.com>
 L: xen-devel@lists.xenproject.org
 S: Supported
-F: xen-*
 F: */xen*
 F: hw/9pfs/xen-9p-backend.c
 F: hw/char/xen_console.c
@@ -380,7 +375,7 @@ F: hw/*/allwinner*
 F: include/hw/*/allwinner*
 F: hw/arm/cubieboard.c
 
-ARM PrimeCell
+ARM PrimeCell and CMSDK devices
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
 S: Maintained
@@ -394,6 +389,10 @@ F: hw/intc/pl190.c
 F: hw/sd/pl181.c
 F: hw/timer/pl031.c
 F: include/hw/arm/primecell.h
+F: hw/timer/cmsdk-apb-timer.c
+F: include/hw/timer/cmsdk-apb-timer.h
+F: hw/char/cmsdk-apb-uart.c
+F: include/hw/char/cmsdk-apb-uart.h
 
 ARM cores
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -454,6 +453,14 @@ L: qemu-arm@nongnu.org
 S: Maintained
 F: hw/arm/integratorcp.c
 F: hw/misc/arm_integrator_debug.c
+
+MPS2
+M: Peter Maydell <peter.maydell@linaro.org>
+L: qemu-arm@nongnu.org
+S: Maintained
+F: hw/arm/mps2.c
+F: hw/misc/mps2-scc.c
+F: include/hw/misc/mps2-scc.h
 
 Musicpal
 M: Jan Kiszka <jan.kiszka@web.de>
@@ -778,7 +785,7 @@ F: include/hw/sparc/grlib.h
 S390 Machines
 -------------
 S390 Virtio-ccw
-M: Cornelia Huck <cornelia.huck@de.ibm.com>
+M: Cornelia Huck <cohuck@redhat.com>
 M: Christian Borntraeger <borntraeger@de.ibm.com>
 M: Alexander Graf <agraf@suse.de>
 S: Supported
@@ -1006,7 +1013,7 @@ F: hw/vfio/*
 F: include/hw/vfio/
 
 vfio-ccw
-M: Cornelia Huck <cornelia.huck@de.ibm.com>
+M: Cornelia Huck <cohuck@redhat.com>
 S: Supported
 F: hw/vfio/ccw.c
 F: hw/s390x/s390-ccw.c
@@ -1048,7 +1055,7 @@ F: tests/virtio-blk-test.c
 T: git git://github.com/stefanha/qemu.git block
 
 virtio-ccw
-M: Cornelia Huck <cornelia.huck@de.ibm.com>
+M: Cornelia Huck <cohuck@redhat.com>
 M: Christian Borntraeger <borntraeger@de.ibm.com>
 S: Supported
 F: hw/s390x/virtio-ccw.[hc]
@@ -1159,6 +1166,13 @@ F: include/hw/acpi/vmgenid.h
 F: docs/specs/vmgenid.txt
 F: tests/vmgenid-test.c
 F: stubs/vmgenid.c
+
+Unimplemented device
+M: Peter Maydell <peter.maydell@linaro.org>
+R: Philippe Mathieu-Daudé <f4bug@amsat.org>
+S: Maintained
+F: include/hw/misc/unimp.h
+F: hw/misc/unimp.c
 
 Subsystems
 ----------
@@ -1347,15 +1361,6 @@ M: Vincenzo Maffione <v.maffione@gmail.com>
 W: http://info.iet.unipi.it/~luigi/netmap/
 S: Maintained
 F: net/netmap.c
-
-Network Block Device (NBD)
-M: Paolo Bonzini <pbonzini@redhat.com>
-S: Odd Fixes
-F: block/nbd*
-F: nbd/
-F: include/block/nbd*
-F: qemu-nbd.c
-T: git git://github.com/bonzini/qemu.git nbd-next
 
 NUMA
 M: Eduardo Habkost <ehabkost@redhat.com>
@@ -1659,7 +1664,7 @@ TCI target
 M: Stefan Weil <sw@weilnetz.de>
 S: Maintained
 F: tcg/tci/
-F: tci.c
+F: tcg/tci.c
 F: disas/tci.c
 
 Block drivers
@@ -1709,6 +1714,18 @@ L: qemu-block@nongnu.org
 S: Supported
 F: block/iscsi.c
 F: block/iscsi-opts.c
+
+Network Block Device (NBD)
+M: Eric Blake <eblake@redhat.com>
+M: Paolo Bonzini <pbonzini@redhat.com>
+L: qemu-block@nongnu.org
+S: Maintained
+F: block/nbd*
+F: nbd/
+F: include/block/nbd*
+F: qemu-nbd.*
+F: blockdev-nbd.c
+T: git git://repo.or.cz/qemu/ericb.git nbd
 
 NFS
 M: Jeff Cody <jcody@redhat.com>

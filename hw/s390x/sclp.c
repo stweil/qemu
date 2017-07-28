@@ -273,7 +273,6 @@ static void assign_storage(SCLPDevice *sclp, SCCB *sccb)
              * instead of doing it via the ref count of the MemoryRegion. */
             object_ref(OBJECT(standby_ram));
             object_unparent(OBJECT(standby_ram));
-            vmstate_register_ram_global(standby_ram);
             memory_region_add_subregion(sysmem, offset, standby_ram);
         }
         /* The specified subregion is no longer in standby */

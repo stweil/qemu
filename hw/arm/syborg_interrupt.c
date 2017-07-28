@@ -25,6 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
+#include "migration/register.h"  /* register_savevm_live */
 #include "syborg.h"
 
 //#define DEBUG_SYBORG_INT
@@ -201,6 +202,11 @@ static int syborg_int_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static SaveVMHandlers savevm_syborg_int = {
+    .save_state = syborg_int_save,
+    .load_state = syborg_int_load
+};
+
 static int syborg_int_init(SysBusDevice *sbd)
 {
     DeviceState *dev = DEVICE(sbd);
@@ -213,8 +219,8 @@ static int syborg_int_init(SysBusDevice *sbd)
     sysbus_init_mmio(sbd, &s->iomem);
     s->flags = g_malloc0(s->num_irqs * sizeof(syborg_int_flags));
 
-    register_savevm(&dev->qdev, "syborg_int", -1, 1, syborg_int_save,
-                    syborg_int_load, s);
+    register_savevm_live(&dev->qdev, "syborg_int", -1, 1,
+                         &savevm_syborg_int, s);
     return 0;
 }
 

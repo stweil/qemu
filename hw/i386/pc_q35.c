@@ -36,6 +36,7 @@
 #include "hw/timer/mc146818rtc.h"
 #include "hw/xen/xen.h"
 #include "sysemu/kvm.h"
+#include "kvm_i386.h"
 #include "hw/kvm/clock.h"
 #include "hw/pci-host/q35.h"
 #include "exec/address-spaces.h"
@@ -100,9 +101,9 @@ static void pc_q35_init(MachineState *machine)
         lowmem = pcms->max_ram_below_4g;
         if (machine->ram_size - lowmem > lowmem &&
             lowmem & ((1ULL << 30) - 1)) {
-            error_report("Warning: Large machine and max_ram_below_4g(%"PRIu64
-                         ") not a multiple of 1G; possible bad performance.",
-                         pcms->max_ram_below_4g);
+            warn_report("Large machine and max_ram_below_4g(%"PRIu64
+                        ") not a multiple of 1G; possible bad performance.",
+                        pcms->max_ram_below_4g);
         }
     }
 
@@ -241,8 +242,8 @@ static void pc_q35_init(MachineState *machine)
                                                true, "ich9-ahci");
         idebus[0] = qdev_get_child_bus(&ahci->qdev, "ide.0");
         idebus[1] = qdev_get_child_bus(&ahci->qdev, "ide.1");
-        g_assert(MAX_SATA_PORTS == ICH_AHCI(ahci)->ahci.ports);
-        ide_drive_get(hd, ICH_AHCI(ahci)->ahci.ports);
+        g_assert(MAX_SATA_PORTS == ahci_get_num_ports(ahci));
+        ide_drive_get(hd, ahci_get_num_ports(ahci));
         ahci_ide_create_devs(ahci, hd);
     } else {
         idebus[0] = idebus[1] = NULL;

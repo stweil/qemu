@@ -1153,6 +1153,22 @@ STEXI
 Save guest storage keys to a file.
 ETEXI
 
+#if defined(TARGET_S390X)
+    {
+        .name       = "migration_mode",
+        .args_type  = "mode:i",
+        .params     = "mode",
+        .help       = "Enables or disables migration mode\n",
+        .cmd        = hmp_migrationmode,
+    },
+#endif
+
+STEXI
+@item migration_mode @var{mode}
+@findex migration_mode
+Enables or disables migration mode.
+ETEXI
+
     {
         .name       = "snapshot_blkdev",
         .args_type  = "reuse:-n,device:B,snapshot-file:s?,format:s?",
@@ -1646,6 +1662,8 @@ STEXI
 @item block_passwd @var{device} @var{password}
 @findex block_passwd
 Set the encrypted device @var{device} password to @var{password}
+
+This command is now obsolete and will always return an error since 2.10
 ETEXI
 
     {
@@ -1724,7 +1742,23 @@ ETEXI
 STEXI
 @item chardev-add args
 @findex chardev-add
-chardev_add accepts the same parameters as the -chardev command line switch.
+chardev-add accepts the same parameters as the -chardev command line switch.
+
+ETEXI
+
+    {
+        .name       = "chardev-change",
+        .args_type  = "id:s,args:s",
+        .params     = "id args",
+        .help       = "change chardev",
+        .cmd        = hmp_chardev_change,
+    },
+
+STEXI
+@item chardev-change args
+@findex chardev-change
+chardev-change accepts existing chardev @var{id} and then the same arguments
+as the -chardev command line switch (except for "id").
 
 ETEXI
 
@@ -1741,6 +1775,22 @@ STEXI
 @item chardev-remove id
 @findex chardev-remove
 Removes the chardev @var{id}.
+
+ETEXI
+
+    {
+        .name       = "chardev-send-break",
+        .args_type  = "id:s",
+        .params     = "id",
+        .help       = "send a break on chardev",
+        .cmd        = hmp_chardev_send_break,
+        .command_completion = chardev_remove_completion,
+    },
+
+STEXI
+@item chardev-send-break id
+@findex chardev-send-break
+Send a break on the chardev @var{id}.
 
 ETEXI
 

@@ -40,14 +40,18 @@ printf " '%s'" "$0" "$@" >> config.log
 echo >> config.log
 echo "#" >> config.log
 
-error_exit() {
-    echo
+print_error() {
+    (echo
     echo "ERROR: $1"
     while test -n "$2"; do
         echo "       $2"
         shift
     done
-    echo
+    echo) >&2
+}
+
+error_exit() {
+    print_error "$@"
     exit 1
 }
 
@@ -164,6 +168,79 @@ have_backend () {
     echo "$trace_backends" | grep "$1" >/dev/null
 }
 
+glob() {
+    eval test -z '"${1#'"$2"'}"'
+}
+
+supported_hax_target() {
+    test "$hax" = "yes" || return 1
+    glob "$1" "*-softmmu" || return 1
+    case "${1%-softmmu}" in
+        i386|x86_64)
+            return 0
+        ;;
+    esac
+    return 1
+}
+
+supported_kvm_target() {
+    test "$kvm" = "yes" || return 1
+    glob "$1" "*-softmmu" || return 1
+    case "${1%-softmmu}:$cpu" in
+        arm:arm | aarch64:aarch64 | \
+        i386:i386 | i386:x86_64 | i386:x32 | \
+        x86_64:i386 | x86_64:x86_64 | x86_64:x32 | \
+        mips:mips | mipsel:mips | \
+        ppc:ppc | ppcemb:ppc | ppc64:ppc | \
+        ppc:ppc64 | ppcemb:ppc64 | ppc64:ppc64 | \
+        s390x:s390x)
+            return 0
+        ;;
+    esac
+    return 1
+}
+
+supported_xen_target() {
+    test "$xen" = "yes" || return 1
+    glob "$1" "*-softmmu" || return 1
+    # Only i386 and x86_64 provide the xenpv machine.
+    case "${1%-softmmu}" in
+        i386|x86_64)
+            return 0
+        ;;
+    esac
+    return 1
+}
+
+supported_target() {
+    case "$1" in
+        *-softmmu)
+            ;;
+        *-linux-user)
+            if test "$linux" != "yes"; then
+                print_error "Target '$target' is only available on a Linux host"
+                return 1
+            fi
+            ;;
+        *-bsd-user)
+            if test "$bsd" != "yes"; then
+                print_error "Target '$target' is only available on a BSD host"
+                return 1
+            fi
+            ;;
+        *)
+            print_error "Invalid target name '$target'"
+            return 1
+            ;;
+    esac
+    test "$tcg" = "yes" && return 0
+    supported_kvm_target "$1" && return 0
+    supported_xen_target "$1" && return 0
+    supported_hax_target "$1" && return 0
+    print_error "TCG disabled, but hardware accelerator not available for '$target'"
+    return 1
+}
+
 # default parameters
 source_path=$(dirname "$0")
 cpu=""
@@ -225,6 +302,7 @@ cap_ng=""
 attr=""
 libattr=""
 xfs=""
+tcg="yes"
 
 vhost_net="no"
 vhost_scsi="no"
@@ -282,6 +360,7 @@ libusb=""
 usb_redir=""
 opengl=""
 opengl_dmabuf="no"
+cpuid_h="no"
 avx2_opt="no"
 zlib="yes"
 lzo=""
@@ -299,6 +378,7 @@ libnfs=""
 coroutine=""
 coroutine_pool=""
 debug_stack_usage="no"
+crypto_afalg="no"
 seccomp=""
 glusterfs=""
 glusterfs_xlator_opt="no"
@@ -472,8 +552,24 @@ elif check_define __sun__ ; then
   targetos='SunOS'
 elif check_define __HAIKU__ ; then
   targetos='Haiku'
+elif check_define __FreeBSD__ ; then
+  targetos='FreeBSD'
+elif check_define __FreeBSD_kernel__ && check_define __GLIBC__; then
+  targetos='GNU/kFreeBSD'
+elif check_define __DragonFly__ ; then
+  targetos='DragonFly'
+elif check_define __NetBSD__; then
+  targetos='NetBSD'
+elif check_define __APPLE__; then
+  targetos='Darwin'
+elif check_define _AIX; then
+  targetos='AIX'
 else
-  targetos=$(uname -s)
+  # This is a fatal error, but don't report it yet, because we
+  # might be going to just print the --help text, or it might
+  # be the result of a missing compiler.
+  targetos='bogus'
+  bogus_os='yes'
 fi
 
 # Some host OSes need non-standard checks for which CPU to use.
@@ -676,23 +772,6 @@ SunOS)
   install="${INSTALL-ginstall}"
   ld="gld"
   smbd="${SMBD-/usr/sfw/sbin/smbd}"
-  needs_libsunmath="no"
-  solarisrev=$(uname -r | cut -f2 -d.)
-  if [ "$cpu" = "i386" -o "$cpu" = "x86_64" ] ; then
-    if test "$solarisrev" -le 9 ; then
-      if test -f /opt/SUNWspro/prod/lib/libsunmath.so.1; then
-        needs_libsunmath="yes"
-        QEMU_CFLAGS="-I/opt/SUNWspro/prod/include/cc $QEMU_CFLAGS"
-        LDFLAGS="-L/opt/SUNWspro/prod/lib -R/opt/SUNWspro/prod/lib $LDFLAGS"
-        LIBS="-lsunmath $LIBS"
-      else
-        error_exit "QEMU will not link correctly on Solaris 8/X86 or 9/x86 without" \
-            "libsunmath from the Sun Studio compilers tools, due to a lack of" \
-            "C99 math features in libm.so in Solaris 8/x86 and Solaris 9/x86" \
-            "Studio 11 can be downloaded from www.sun.com."
-      fi
-    fi
-  fi
   if test -f /usr/include/sys/soundcard.h ; then
     audio_drv_list="oss"
   fi
@@ -726,12 +805,6 @@ Linux)
   vhost_vsock="yes"
   QEMU_INCLUDES="-I\$(SRC_PATH)/linux-headers -I$(pwd)/linux-headers $QEMU_INCLUDES"
   supported_os="yes"
-;;
-*)
-  # This is a fatal error, but don't report it yet, because we
-  # might be going to just print the --help text, or it might
-  # be the result of a missing compiler.
-  bogus_os="yes"
 ;;
 esac
 
@@ -988,6 +1061,10 @@ for opt do
   ;;
   --enable-cap-ng) cap_ng="yes"
   ;;
+  --disable-tcg) tcg="no"
+  ;;
+  --enable-tcg) tcg="yes"
+  ;;
   --disable-spice) spice="no"
   ;;
   --enable-spice) spice="yes"
@@ -1068,6 +1145,10 @@ for opt do
   --enable-coroutine-pool) coroutine_pool="yes"
   ;;
   --enable-debug-stack-usage) debug_stack_usage="yes"
+  ;;
+  --enable-crypto-afalg) crypto_afalg="yes"
+  ;;
+  --disable-crypto-afalg) crypto_afalg="no"
   ;;
   --disable-docs) docs="no"
   ;;
@@ -1463,6 +1544,7 @@ disabled with --disable-FEATURE, default is enabled if available:
   qom-cast-debug  cast debugging support
   tools           build qemu-io, qemu-nbd and qemu-image tools
   vxhs            Veritas HyperScale vDisk backend support
+  crypto-afalg    Linux AF_ALG crypto backend driver
 
 NOTE: The object files are built at the place where configure is launched
 EOF
@@ -1521,14 +1603,14 @@ if test "$bogus_os" = "yes"; then
     # the compiler works (so the results of the check_defines we used
     # to identify the OS are reliable), if we didn't recognize the
     # host OS we should stop now.
-    error_exit "Unrecognized host OS $targetos"
+    error_exit "Unrecognized host OS (uname -s reports '$(uname -s)')"
 fi
 
 gcc_flags="-Wold-style-declaration -Wold-style-definition -Wtype-limits"
 gcc_flags="-Wformat-security -Wformat-y2k -Winit-self -Wignored-qualifiers $gcc_flags"
 gcc_flags="-Wno-missing-include-dirs -Wempty-body -Wnested-externs $gcc_flags"
 gcc_flags="-Wendif-labels -Wno-shift-negative-value $gcc_flags"
-gcc_flags="-Wno-initializer-overrides $gcc_flags"
+gcc_flags="-Wno-initializer-overrides -Wexpansion-to-defined $gcc_flags"
 gcc_flags="-Wno-string-plus-int $gcc_flags"
 # Note that we do not add -Werror to gcc_flags here, because that would
 # enable it for all configure tests. If a configure test failed due
@@ -1720,22 +1802,26 @@ if test "$solaris" = "yes" ; then
 fi
 
 if test -z "${target_list+xxx}" ; then
-    target_list="$default_target_list"
+    for target in $default_target_list; do
+        supported_target $target 2>/dev/null && \
+            target_list="$target_list $target"
+    done
+    target_list="${target_list# }"
 else
     target_list=$(echo "$target_list" | sed -e 's/,/ /g')
+    for target in $target_list; do
+        # Check that we recognised the target name; this allows a more
+        # friendly error message than if we let it fall through.
+        case " $default_target_list " in
+            *" $target "*)
+                ;;
+            *)
+                error_exit "Unknown target name '$target'"
+                ;;
+        esac
+        supported_target $target || exit 1
+    done
 fi
-
-# Check that we recognised the target name; this allows a more
-# friendly error message than if we let it fall through.
-for target in $target_list; do
-    case " $default_target_list " in
-        *" $target "*)
-            ;;
-        *)
-            error_exit "Unknown target name '$target'"
-            ;;
-    esac
-done
 
 # see if system emulation was really requested
 case " $target_list " in
@@ -1877,24 +1963,6 @@ EOF
 fi
 
 ##########################################
-# avx2 optimization requirement check
-
-cat > $TMPC << EOF
-#pragma GCC push_options
-#pragma GCC target("avx2")
-#include <cpuid.h>
-#include <immintrin.h>
-static int bar(void *a) {
-    __m256i x = *(__m256i *)a;
-    return _mm256_testz_si256(x, x);
-}
-int main(int argc, char *argv[]) { return bar(argv[0]); }
-EOF
-if compile_object "" ; then
-  avx2_opt="yes"
-fi
-
-##########################################
 # lzo check
 
 if test "$lzo" != "no" ; then
@@ -2032,6 +2100,24 @@ EOF
       xen=no
 
     # Xen unstable
+    elif
+        cat > $TMPC <<EOF &&
+#undef XC_WANT_COMPAT_MAP_FOREIGN_API
+#include <xenforeignmemory.h>
+int main(void) {
+  xenforeignmemory_handle *xfmem;
+
+  xfmem = xenforeignmemory_open(0, 0);
+  xenforeignmemory_map2(xfmem, 0, 0, 0, 0, 0, 0, 0);
+
+  return 0;
+}
+EOF
+        compile_prog "" "$xen_libs -lxendevicemodel $xen_stable_libs"
+      then
+      xen_stable_libs="-lxendevicemodel $xen_stable_libs"
+      xen_ctrl_version=41000
+      xen=yes
     elif
         cat > $TMPC <<EOF &&
 #undef XC_WANT_COMPAT_DEVICEMODEL_API
@@ -2660,7 +2746,11 @@ int main( void ) { return SDL_Init (SDL_INIT_VIDEO); }
 EOF
   sdl_cflags=$($sdlconfig --cflags 2>/dev/null)
   if test "$static" = "yes" ; then
-    sdl_libs=$($sdlconfig --static-libs 2>/dev/null)
+    if $pkg_config $sdlname --exists; then
+      sdl_libs=$($pkg_config $sdlname --static --libs 2>/dev/null)
+    else
+      sdl_libs=$($sdlconfig --static-libs 2>/dev/null)
+    fi
   else
     sdl_libs=$($sdlconfig --libs 2>/dev/null)
   fi
@@ -4594,7 +4684,6 @@ fi
 ########################################
 # check if cpuid.h is usable.
 
-cpuid_h=no
 cat > $TMPC << EOF
 #include <cpuid.h>
 int main(void) {
@@ -4614,6 +4703,29 @@ int main(void) {
 EOF
 if compile_prog "" "" ; then
     cpuid_h=yes
+fi
+
+##########################################
+# avx2 optimization requirement check
+#
+# There is no point enabling this if cpuid.h is not usable,
+# since we won't be able to select the new routines.
+
+if test $cpuid_h = yes; then
+  cat > $TMPC << EOF
+#pragma GCC push_options
+#pragma GCC target("avx2")
+#include <cpuid.h>
+#include <immintrin.h>
+static int bar(void *a) {
+    __m256i x = *(__m256i *)a;
+    return _mm256_testz_si256(x, x);
+}
+int main(int argc, char *argv[]) { return bar(argv[0]); }
+EOF
+  if compile_object "" ; then
+    avx2_opt="yes"
+  fi
 fi
 
 ########################################
@@ -4736,7 +4848,7 @@ fi
 if test "$fortify_source" != "no"; then
   if echo | $cc -dM -E - | grep __clang__ > /dev/null 2>&1 ; then
     fortify_source="no";
-  elif test -n "$cxx" &&
+  elif test -n "$cxx" && has $cxx &&
        echo | $cxx -dM -E - | grep __clang__ >/dev/null 2>&1 ; then
     fortify_source="no";
   else
@@ -4798,6 +4910,32 @@ EOF
 if compile_prog "" "" ; then
     have_af_vsock=yes
 fi
+
+##########################################
+# check for usable AF_ALG environment
+hava_afalg=no
+cat > $TMPC << EOF
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <linux/if_alg.h>
+int main(void) {
+    int sock;
+    sock = socket(AF_ALG, SOCK_SEQPACKET, 0);
+    return sock;
+}
+EOF
+if compile_prog "" "" ; then
+    have_afalg=yes
+fi
+if test "$crypto_afalg" = "yes"
+then
+    if test "$have_afalg" != "yes"
+    then
+	error_exit "AF_ALG requested but could not be detected"
+    fi
+fi
+
 
 #################################################
 # Sparc implicitly links with --relax, which is
@@ -4880,6 +5018,21 @@ if compile_prog "" "" ; then
 fi
 
 ##########################################
+# check for utmpx.h, it is missing e.g. on OpenBSD
+
+have_utmpx=no
+cat > $TMPC << EOF
+#include <utmpx.h>
+struct utmpx user_info;
+int main(void) {
+    return 0;
+}
+EOF
+if compile_prog "" "" ; then
+    have_utmpx=yes
+fi
+
+##########################################
 # End of CC checks
 # After here, no more $cc or $ld runs
 
@@ -4941,10 +5094,17 @@ qemu_moddir=$libdir$confsuffix
 qemu_datadir=$datadir$confsuffix
 qemu_localedir="$datadir/locale"
 
+# We can only support ivshmem if we have eventfd
+if [ "$eventfd" = "yes" ]; then
+  ivshmem=yes
+fi
+
 tools=""
 tools="qemu-img\$(EXESUF) qemu-io\$(EXESUF) $tools"
 if [ "$linux" = "yes" -o "$bsd" = "yes" -o "$solaris" = "yes" ] ; then
   tools="qemu-nbd\$(EXESUF) $tools"
+fi
+if [ "$ivshmem" = "yes" ]; then
   tools="ivshmem-client\$(EXESUF) ivshmem-server\$(EXESUF) $tools"
 fi
 if test "$softmmu" = yes ; then
@@ -5175,7 +5335,6 @@ echo "module support    $modules"
 echo "host CPU          $cpu"
 echo "host big endian   $bigendian"
 echo "target list       $target_list"
-echo "tcg debug enabled $debug_tcg"
 echo "gprof enabled     $gprof"
 echo "sparse enabled    $sparse"
 echo "strip binaries    $strip_opt"
@@ -5236,8 +5395,12 @@ echo "(X)ATTR support   $attr"
 echo "Install blobs     $blobs"
 echo "KVM support       $kvm"
 echo "HAX support       $hax"
+echo "TCG support       $tcg"
+if test "$tcg" = "yes" ; then
+    echo "TCG debug enabled $debug_tcg"
+    echo "TCG interpreter   $tcg_interpreter"
+fi
 echo "RDMA support      $rdma"
-echo "TCG interpreter   $tcg_interpreter"
 echo "fdt support       $fdt"
 echo "preadv support    $preadv"
 echo "fdatasync         $fdatasync"
@@ -5269,6 +5432,7 @@ echo "seccomp support   $seccomp"
 echo "coroutine backend $coroutine"
 echo "coroutine pool    $coroutine_pool"
 echo "debug stack usage $debug_stack_usage"
+echo "crypto afalg      $crypto_afalg"
 echo "GlusterFS support $glusterfs"
 echo "gcov              $gcov_tool"
 echo "gcov enabled      $gcov"
@@ -5404,10 +5568,6 @@ fi
 
 if test "$solaris" = "yes" ; then
   echo "CONFIG_SOLARIS=y" >> $config_host_mak
-  echo "CONFIG_SOLARIS_VERSION=$solarisrev" >> $config_host_mak
-  if test "$needs_libsunmath" = "yes" ; then
-    echo "CONFIG_NEEDS_LIBSUNMATH=y" >> $config_host_mak
-  fi
 fi
 if test "$haiku" = "yes" ; then
   echo "CONFIG_HAIKU=y" >> $config_host_mak
@@ -5684,8 +5844,11 @@ fi
 if test "$signalfd" = "yes" ; then
   echo "CONFIG_SIGNALFD=y" >> $config_host_mak
 fi
-if test "$tcg_interpreter" = "yes" ; then
-  echo "CONFIG_TCG_INTERPRETER=y" >> $config_host_mak
+if test "$tcg" = "yes"; then
+  echo "CONFIG_TCG=y" >> $config_host_mak
+  if test "$tcg_interpreter" = "yes" ; then
+    echo "CONFIG_TCG_INTERPRETER=y" >> $config_host_mak
+  fi
 fi
 if test "$fdatasync" = "yes" ; then
   echo "CONFIG_FDATASYNC=y" >> $config_host_mak
@@ -5779,6 +5942,10 @@ fi
 
 if test "$debug_stack_usage" = "yes" ; then
   echo "CONFIG_DEBUG_STACK_USAGE=y" >> $config_host_mak
+fi
+
+if test "$crypto_afalg" = "yes" ; then
+  echo "CONFIG_AF_ALG=y" >> $config_host_mak
 fi
 
 if test "$open_by_handle_at" = "yes" ; then
@@ -5929,6 +6096,14 @@ if test "$have_static_assert" = "yes" ; then
   echo "CONFIG_STATIC_ASSERT=y" >> $config_host_mak
 fi
 
+if test "$have_utmpx" = "yes" ; then
+  echo "HAVE_UTMPX=y" >> $config_host_mak
+fi
+
+if test "$ivshmem" = "yes" ; then
+  echo "CONFIG_IVSHMEM=y" >> $config_host_mak
+fi
+
 # Hold two types of flag:
 #   CONFIG_THREAD_SETNAME_BYTHREAD  - we've got a way of setting the name on
 #                                     a thread we have a handle to
@@ -6072,16 +6247,10 @@ case "$target" in
     target_softmmu="yes"
     ;;
   ${target_name}-linux-user)
-    if test "$linux" != "yes" ; then
-      error_exit "Target '$target' is only available on a Linux host"
-    fi
     target_user_only="yes"
     target_linux_user="yes"
     ;;
   ${target_name}-bsd-user)
-    if test "$bsd" != "yes" ; then
-      error_exit "Target '$target' is only available on a BSD host"
-    fi
     target_user_only="yes"
     target_bsd_user="yes"
     ;;
@@ -6207,7 +6376,7 @@ case "$target_name" in
     echo "TARGET_ABI32=y" >> $config_target_mak
   ;;
   s390x)
-    gdb_xml_files="s390x-core64.xml s390-acr.xml s390-fpr.xml s390-vx.xml s390-cr.xml s390-virt.xml"
+    gdb_xml_files="s390x-core64.xml s390-acr.xml s390-fpr.xml s390-vx.xml s390-cr.xml s390-virt.xml s390-gs.xml"
   ;;
   tilegx)
   ;;
@@ -6244,46 +6413,22 @@ echo "TARGET_ABI_DIR=$TARGET_ABI_DIR" >> $config_target_mak
 if [ "$HOST_VARIANT_DIR" != "" ]; then
     echo "HOST_VARIANT_DIR=$HOST_VARIANT_DIR" >> $config_target_mak
 fi
-case "$target_name" in
-  i386|x86_64)
-    if test "$xen" = "yes" -a "$target_softmmu" = "yes" ; then
-      echo "CONFIG_XEN=y" >> $config_target_mak
-      if test "$xen_pci_passthrough" = yes; then
+
+if supported_xen_target $target; then
+    echo "CONFIG_XEN=y" >> $config_target_mak
+    if test "$xen_pci_passthrough" = yes; then
         echo "CONFIG_XEN_PCI_PASSTHROUGH=y" >> "$config_target_mak"
-      fi
     fi
-    ;;
-  *)
-esac
-case "$target_name" in
-  aarch64|arm|i386|x86_64|ppcemb|ppc|ppc64|s390x|mipsel|mips)
-    # Make sure the target and host cpus are compatible
-    if test "$kvm" = "yes" -a "$target_softmmu" = "yes" -a \
-      \( "$target_name" = "$cpu" -o \
-      \( "$target_name" = "ppcemb" -a "$cpu" = "ppc" \) -o \
-      \( "$target_name" = "ppc64"  -a "$cpu" = "ppc" \) -o \
-      \( "$target_name" = "ppc"    -a "$cpu" = "ppc64" \) -o \
-      \( "$target_name" = "ppcemb" -a "$cpu" = "ppc64" \) -o \
-      \( "$target_name" = "mipsel" -a "$cpu" = "mips" \) -o \
-      \( "$target_name" = "x86_64" -a "$cpu" = "i386"   \) -o \
-      \( "$target_name" = "i386"   -a "$cpu" = "x86_64" \) -o \
-      \( "$target_name" = "x86_64" -a "$cpu" = "x32"   \) -o \
-      \( "$target_name" = "i386"   -a "$cpu" = "x32" \) \) ; then
-      echo "CONFIG_KVM=y" >> $config_target_mak
-      if test "$vhost_net" = "yes" ; then
+fi
+if supported_kvm_target $target; then
+    echo "CONFIG_KVM=y" >> $config_target_mak
+    if test "$vhost_net" = "yes" ; then
         echo "CONFIG_VHOST_NET=y" >> $config_target_mak
         echo "CONFIG_VHOST_NET_TEST_$target_name=y" >> $config_host_mak
-      fi
     fi
-esac
-if test "$hax" = "yes" ; then
-  if test "$target_softmmu" = "yes" ; then
-    case "$target_name" in
-    i386|x86_64)
-      echo "CONFIG_HAX=y" >> $config_target_mak
-    ;;
-    esac
-  fi
+fi
+if supported_hax_target $target; then
+    echo "CONFIG_HAX=y" >> $config_target_mak
 fi
 if test "$target_bigendian" = "yes" ; then
   echo "TARGET_WORDS_BIGENDIAN=y" >> $config_target_mak

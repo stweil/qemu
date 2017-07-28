@@ -13,6 +13,7 @@
 #include "cpu.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "migration/register.h"  /* register_savevm_live */
 
 #include "s3c24xx.h"
 
@@ -110,6 +111,11 @@ static int s3c24xx_clkcon_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static SaveVMHandlers savevm_s3c24xx_clkcon = {
+    .save_state = s3c24xx_clkcon_save,
+    .load_state = s3c24xx_clkcon_load
+};
+
 struct s3c24xx_clkcon_state_s *
 s3c24xx_clkcon_init(S3CState *soc, hwaddr base_addr, uint32_t ref_freq)
 {
@@ -118,7 +124,7 @@ s3c24xx_clkcon_init(S3CState *soc, hwaddr base_addr, uint32_t ref_freq)
     memory_region_init_io(&s->mmio, OBJECT(s), &s3c24xx_clkcon_ops, s,
                           "s3c24xx.clkcon", ARRAY_SIZE(s->clkcon_reg) * 4);
     memory_region_add_subregion(get_system_memory(), base_addr, &s->mmio);
-    register_savevm(NULL, "s3c24xx_clkcon", 0, 0, s3c24xx_clkcon_save, s3c24xx_clkcon_load, s);
+    register_savevm_live(NULL, "s3c24xx_clkcon", 0, 0, &savevm_s3c24xx_clkcon, s);
 
     s->cpu_env = &soc->cpu->env;
     s->ref_freq = ref_freq;

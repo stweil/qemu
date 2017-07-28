@@ -149,6 +149,37 @@ bool bdrv_requests_pending(BlockDriverState *bs)
     return false;
 }
 
+typedef struct {
+    Coroutine *co;
+    BlockDriverState *bs;
+    bool done;
+} BdrvCoDrainData;
+
+static void coroutine_fn bdrv_drain_invoke_entry(void *opaque)
+{
+    BdrvCoDrainData *data = opaque;
+    BlockDriverState *bs = data->bs;
+
+    bs->drv->bdrv_co_drain(bs);
+
+    /* Set data->done before reading bs->wakeup.  */
+    atomic_mb_set(&data->done, true);
+    bdrv_wakeup(bs);
+}
+
+static void bdrv_drain_invoke(BlockDriverState *bs)
+{
+    BdrvCoDrainData data = { .bs = bs, .done = false };
+
+    if (!bs->drv || !bs->drv->bdrv_co_drain) {
+        return;
+    }
+
+    data.co = qemu_coroutine_create(bdrv_drain_invoke_entry, &data);
+    bdrv_coroutine_enter(bs, data.co);
+    BDRV_POLL_WHILE(bs, !data.done);
+}
+
 static bool bdrv_drain_recurse(BlockDriverState *bs)
 {
     BdrvChild *child, *tmp;
@@ -156,9 +187,8 @@ static bool bdrv_drain_recurse(BlockDriverState *bs)
 
     waited = BDRV_POLL_WHILE(bs, atomic_read(&bs->in_flight) > 0);
 
-    if (bs->drv && bs->drv->bdrv_drain) {
-        bs->drv->bdrv_drain(bs);
-    }
+    /* Ensure any pending metadata writes are submitted to bs->file.  */
+    bdrv_drain_invoke(bs);
 
     QLIST_FOREACH_SAFE(child, &bs->children, next, tmp) {
         BlockDriverState *bs = child->bs;
@@ -183,12 +213,6 @@ static bool bdrv_drain_recurse(BlockDriverState *bs)
 
     return waited;
 }
-
-typedef struct {
-    Coroutine *co;
-    BlockDriverState *bs;
-    bool done;
-} BdrvCoDrainData;
 
 static void bdrv_co_drain_bh_cb(void *opaque)
 {
@@ -416,27 +440,6 @@ static void mark_request_serialising(BdrvTrackedRequest *req, uint64_t align)
 
     req->overlap_offset = MIN(req->overlap_offset, overlap_offset);
     req->overlap_bytes = MAX(req->overlap_bytes, overlap_bytes);
-}
-
-/**
- * Round a region to cluster boundaries (sector-based)
- */
-void bdrv_round_sectors_to_clusters(BlockDriverState *bs,
-                                    int64_t sector_num, int nb_sectors,
-                                    int64_t *cluster_sector_num,
-                                    int *cluster_nb_sectors)
-{
-    BlockDriverInfo bdi;
-
-    if (bdrv_get_info(bs, &bdi) < 0 || bdi.cluster_size == 0) {
-        *cluster_sector_num = sector_num;
-        *cluster_nb_sectors = nb_sectors;
-    } else {
-        int64_t c = bdi.cluster_size / BDRV_SECTOR_SIZE;
-        *cluster_sector_num = QEMU_ALIGN_DOWN(sector_num, c);
-        *cluster_nb_sectors = QEMU_ALIGN_UP(sector_num - *cluster_sector_num +
-                                            nb_sectors, c);
-    }
 }
 
 /**
@@ -1054,17 +1057,18 @@ static int coroutine_fn bdrv_aligned_preadv(BdrvChild *child,
     }
 
     if (flags & BDRV_REQ_COPY_ON_READ) {
-        int64_t start_sector = offset >> BDRV_SECTOR_BITS;
-        int64_t end_sector = DIV_ROUND_UP(offset + bytes, BDRV_SECTOR_SIZE);
-        unsigned int nb_sectors = end_sector - start_sector;
-        int pnum;
+        /* TODO: Simplify further once bdrv_is_allocated no longer
+         * requires sector alignment */
+        int64_t start = QEMU_ALIGN_DOWN(offset, BDRV_SECTOR_SIZE);
+        int64_t end = QEMU_ALIGN_UP(offset + bytes, BDRV_SECTOR_SIZE);
+        int64_t pnum;
 
-        ret = bdrv_is_allocated(bs, start_sector, nb_sectors, &pnum);
+        ret = bdrv_is_allocated(bs, start, end - start, &pnum);
         if (ret < 0) {
             goto out;
         }
 
-        if (!ret || pnum != nb_sectors) {
+        if (!ret || pnum != end - start) {
             ret = bdrv_co_do_copy_on_readv(child, offset, bytes, qiov);
             goto out;
         }
@@ -1334,6 +1338,10 @@ static int coroutine_fn bdrv_aligned_pwritev(BdrvChild *child,
     int64_t end_sector = DIV_ROUND_UP(offset + bytes, BDRV_SECTOR_SIZE);
     uint64_t bytes_remaining = bytes;
     int max_transfer;
+
+    if (bdrv_has_readonly_bitmaps(bs)) {
+        return -EPERM;
+    }
 
     assert(is_power_of_2(align));
     assert((offset & (align - 1)) == 0);
@@ -1711,15 +1719,16 @@ typedef struct BdrvCoGetBlockStatusData {
  * Drivers not implementing the functionality are assumed to not support
  * backing files, hence all their sectors are reported as allocated.
  *
- * If 'sector_num' is beyond the end of the disk image the return value is 0
- * and 'pnum' is set to 0.
+ * If 'sector_num' is beyond the end of the disk image the return value is
+ * BDRV_BLOCK_EOF and 'pnum' is set to 0.
  *
  * 'pnum' is set to the number of sectors (including and immediately following
  * the specified sector) that are known to be in the same
  * allocated/unallocated state.
  *
  * 'nb_sectors' is the max value 'pnum' should be set to.  If nb_sectors goes
- * beyond the end of the disk image it will be clamped.
+ * beyond the end of the disk image it will be clamped; if 'pnum' is set to
+ * the end of the image, then the returned value will include BDRV_BLOCK_EOF.
  *
  * If returned value is positive and BDRV_BLOCK_OFFSET_VALID bit is set, 'file'
  * points to the BDS which the sector range is allocated in.
@@ -1733,6 +1742,7 @@ static int64_t coroutine_fn bdrv_co_get_block_status(BlockDriverState *bs,
     int64_t n;
     int64_t ret, ret2;
 
+    *file = NULL;
     total_sectors = bdrv_nb_sectors(bs);
     if (total_sectors < 0) {
         return total_sectors;
@@ -1740,7 +1750,7 @@ static int64_t coroutine_fn bdrv_co_get_block_status(BlockDriverState *bs,
 
     if (sector_num >= total_sectors) {
         *pnum = 0;
-        return 0;
+        return BDRV_BLOCK_EOF;
     }
 
     n = total_sectors - sector_num;
@@ -1751,13 +1761,16 @@ static int64_t coroutine_fn bdrv_co_get_block_status(BlockDriverState *bs,
     if (!bs->drv->bdrv_co_get_block_status) {
         *pnum = nb_sectors;
         ret = BDRV_BLOCK_DATA | BDRV_BLOCK_ALLOCATED;
+        if (sector_num + nb_sectors == total_sectors) {
+            ret |= BDRV_BLOCK_EOF;
+        }
         if (bs->drv->protocol_name) {
             ret |= BDRV_BLOCK_OFFSET_VALID | (sector_num * BDRV_SECTOR_SIZE);
+            *file = bs;
         }
         return ret;
     }
 
-    *file = NULL;
     bdrv_inc_in_flight(bs);
     ret = bs->drv->bdrv_co_get_block_status(bs, sector_num, nb_sectors, pnum,
                                             file);
@@ -1767,7 +1780,7 @@ static int64_t coroutine_fn bdrv_co_get_block_status(BlockDriverState *bs,
     }
 
     if (ret & BDRV_BLOCK_RAW) {
-        assert(ret & BDRV_BLOCK_OFFSET_VALID);
+        assert(ret & BDRV_BLOCK_OFFSET_VALID && *file);
         ret = bdrv_co_get_block_status(*file, ret >> BDRV_SECTOR_BITS,
                                        *pnum, pnum, file);
         goto out;
@@ -1799,10 +1812,13 @@ static int64_t coroutine_fn bdrv_co_get_block_status(BlockDriverState *bs,
             /* Ignore errors.  This is just providing extra information, it
              * is useful but not necessary.
              */
-            if (!file_pnum) {
-                /* !file_pnum indicates an offset at or beyond the EOF; it is
-                 * perfectly valid for the format block driver to point to such
-                 * offsets, so catch it and mark everything as zero */
+            if (ret2 & BDRV_BLOCK_EOF &&
+                (!file_pnum || ret2 & BDRV_BLOCK_ZERO)) {
+                /*
+                 * It is valid for the format block driver to read
+                 * beyond the end of the underlying file's current
+                 * size; such areas read as zero.
+                 */
                 ret |= BDRV_BLOCK_ZERO;
             } else {
                 /* Limit request to the range reported by the protocol driver */
@@ -1814,6 +1830,9 @@ static int64_t coroutine_fn bdrv_co_get_block_status(BlockDriverState *bs,
 
 out:
     bdrv_dec_in_flight(bs);
+    if (ret >= 0 && sector_num + *pnum == total_sectors) {
+        ret |= BDRV_BLOCK_EOF;
+    }
     return ret;
 }
 
@@ -1826,16 +1845,30 @@ static int64_t coroutine_fn bdrv_co_get_block_status_above(BlockDriverState *bs,
 {
     BlockDriverState *p;
     int64_t ret = 0;
+    bool first = true;
 
     assert(bs != base);
     for (p = bs; p != base; p = backing_bs(p)) {
         ret = bdrv_co_get_block_status(p, sector_num, nb_sectors, pnum, file);
-        if (ret < 0 || ret & BDRV_BLOCK_ALLOCATED) {
+        if (ret < 0) {
+            break;
+        }
+        if (ret & BDRV_BLOCK_ZERO && ret & BDRV_BLOCK_EOF && !first) {
+            /*
+             * Reading beyond the end of the file continues to read
+             * zeroes, but we can only widen the result to the
+             * unallocated length we learned from an earlier
+             * iteration.
+             */
+            *pnum = nb_sectors;
+        }
+        if (ret & (BDRV_BLOCK_ZERO | BDRV_BLOCK_DATA)) {
             break;
         }
         /* [sector_num, pnum] unallocated on this layer, which could be only
          * the first part of [sector_num, nb_sectors].  */
         nb_sectors = MIN(nb_sectors, *pnum);
+        first = false;
     }
     return ret;
 }
@@ -1896,14 +1929,24 @@ int64_t bdrv_get_block_status(BlockDriverState *bs,
                                        sector_num, nb_sectors, pnum, file);
 }
 
-int coroutine_fn bdrv_is_allocated(BlockDriverState *bs, int64_t sector_num,
-                                   int nb_sectors, int *pnum)
+int coroutine_fn bdrv_is_allocated(BlockDriverState *bs, int64_t offset,
+                                   int64_t bytes, int64_t *pnum)
 {
     BlockDriverState *file;
-    int64_t ret = bdrv_get_block_status(bs, sector_num, nb_sectors, pnum,
-                                        &file);
+    int64_t sector_num = offset >> BDRV_SECTOR_BITS;
+    int nb_sectors = bytes >> BDRV_SECTOR_BITS;
+    int64_t ret;
+    int psectors;
+
+    assert(QEMU_IS_ALIGNED(offset, BDRV_SECTOR_SIZE));
+    assert(QEMU_IS_ALIGNED(bytes, BDRV_SECTOR_SIZE) && bytes < INT_MAX);
+    ret = bdrv_get_block_status(bs, sector_num, nb_sectors, &psectors,
+                                &file);
     if (ret < 0) {
         return ret;
+    }
+    if (pnum) {
+        *pnum = psectors * BDRV_SECTOR_SIZE;
     }
     return !!(ret & BDRV_BLOCK_ALLOCATED);
 }
@@ -1911,44 +1954,47 @@ int coroutine_fn bdrv_is_allocated(BlockDriverState *bs, int64_t sector_num,
 /*
  * Given an image chain: ... -> [BASE] -> [INTER1] -> [INTER2] -> [TOP]
  *
- * Return true if the given sector is allocated in any image between
- * BASE and TOP (inclusive).  BASE can be NULL to check if the given
- * sector is allocated in any image of the chain.  Return false otherwise.
+ * Return true if (a prefix of) the given range is allocated in any image
+ * between BASE and TOP (inclusive).  BASE can be NULL to check if the given
+ * offset is allocated in any image of the chain.  Return false otherwise,
+ * or negative errno on failure.
  *
- * 'pnum' is set to the number of sectors (including and immediately following
- *  the specified sector) that are known to be in the same
- *  allocated/unallocated state.
+ * 'pnum' is set to the number of bytes (including and immediately
+ * following the specified offset) that are known to be in the same
+ * allocated/unallocated state.  Note that a subsequent call starting
+ * at 'offset + *pnum' may return the same allocation status (in other
+ * words, the result is not necessarily the maximum possible range);
+ * but 'pnum' will only be 0 when end of file is reached.
  *
  */
 int bdrv_is_allocated_above(BlockDriverState *top,
                             BlockDriverState *base,
-                            int64_t sector_num,
-                            int nb_sectors, int *pnum)
+                            int64_t offset, int64_t bytes, int64_t *pnum)
 {
     BlockDriverState *intermediate;
-    int ret, n = nb_sectors;
+    int ret;
+    int64_t n = bytes;
 
     intermediate = top;
     while (intermediate && intermediate != base) {
-        int pnum_inter;
-        ret = bdrv_is_allocated(intermediate, sector_num, nb_sectors,
-                                &pnum_inter);
+        int64_t pnum_inter;
+        int64_t size_inter;
+
+        ret = bdrv_is_allocated(intermediate, offset, bytes, &pnum_inter);
         if (ret < 0) {
             return ret;
-        } else if (ret) {
+        }
+        if (ret) {
             *pnum = pnum_inter;
             return 1;
         }
 
-        /*
-         * [sector_num, nb_sectors] is unallocated on top but intermediate
-         * might have
-         *
-         * [sector_num+x, nr_sectors] allocated.
-         */
+        size_inter = bdrv_getlength(intermediate);
+        if (size_inter < 0) {
+            return size_inter;
+        }
         if (n > pnum_inter &&
-            (intermediate == top ||
-             sector_num + pnum_inter < intermediate->total_sectors)) {
+            (intermediate == top || offset + pnum_inter < size_inter)) {
             n = pnum_inter;
         }
 
@@ -2269,6 +2315,10 @@ int coroutine_fn bdrv_co_pdiscard(BlockDriverState *bs, int64_t offset,
         return -ENOMEDIUM;
     }
 
+    if (bdrv_has_readonly_bitmaps(bs)) {
+        return -EPERM;
+    }
+
     ret = bdrv_check_byte_request(bs, offset, bytes);
     if (ret < 0) {
         return ret;
@@ -2309,7 +2359,6 @@ int coroutine_fn bdrv_co_pdiscard(BlockDriverState *bs, int64_t offset,
     assert(max_pdiscard >= bs->bl.request_alignment);
 
     while (bytes > 0) {
-        int ret;
         int num = bytes;
 
         if (head) {

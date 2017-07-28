@@ -558,8 +558,8 @@ static int64_t nfs_client_open(NFSClient *client, QDict *options,
         }
         client->readahead = qemu_opt_get_number(opts, "readahead-size", 0);
         if (client->readahead > QEMU_NFS_MAX_READAHEAD_SIZE) {
-            error_report("NFS Warning: Truncating NFS readahead "
-                         "size to %d", QEMU_NFS_MAX_READAHEAD_SIZE);
+            warn_report("Truncating NFS readahead size to %d",
+                        QEMU_NFS_MAX_READAHEAD_SIZE);
             client->readahead = QEMU_NFS_MAX_READAHEAD_SIZE;
         }
         nfs_set_readahead(client->context, client->readahead);
@@ -579,8 +579,8 @@ static int64_t nfs_client_open(NFSClient *client, QDict *options,
         }
         client->pagecache = qemu_opt_get_number(opts, "page-cache-size", 0);
         if (client->pagecache > QEMU_NFS_MAX_PAGECACHE_SIZE) {
-            error_report("NFS Warning: Truncating NFS pagecache "
-                         "size to %d pages", QEMU_NFS_MAX_PAGECACHE_SIZE);
+            warn_report("Truncating NFS pagecache size to %d pages",
+                        QEMU_NFS_MAX_PAGECACHE_SIZE);
             client->pagecache = QEMU_NFS_MAX_PAGECACHE_SIZE;
         }
         nfs_set_pagecache(client->context, client->pagecache);
@@ -595,8 +595,8 @@ static int64_t nfs_client_open(NFSClient *client, QDict *options,
         /* limit the maximum debug level to avoid potential flooding
          * of our log files. */
         if (client->debug > QEMU_NFS_MAX_DEBUG_LEVEL) {
-            error_report("NFS Warning: Limiting NFS debug level "
-                         "to %d", QEMU_NFS_MAX_DEBUG_LEVEL);
+            warn_report("Limiting NFS debug level to %d",
+                        QEMU_NFS_MAX_DEBUG_LEVEL);
             client->debug = QEMU_NFS_MAX_DEBUG_LEVEL;
         }
         nfs_set_debug(client->context, client->debug);
@@ -759,10 +759,17 @@ static int64_t nfs_get_allocated_file_size(BlockDriverState *bs)
     return (task.ret < 0 ? task.ret : st.st_blocks * 512);
 }
 
-static int nfs_file_truncate(BlockDriverState *bs, int64_t offset, Error **errp)
+static int nfs_file_truncate(BlockDriverState *bs, int64_t offset,
+                             PreallocMode prealloc, Error **errp)
 {
     NFSClient *client = bs->opaque;
     int ret;
+
+    if (prealloc != PREALLOC_MODE_OFF) {
+        error_setg(errp, "Unsupported preallocation mode '%s'",
+                   PreallocMode_lookup[prealloc]);
+        return -ENOTSUP;
+    }
 
     ret = nfs_ftruncate(client->context, client->fh, offset);
     if (ret < 0) {

@@ -344,10 +344,14 @@ static void icp_realize(DeviceState *dev, Error **errp)
     }
 
     qemu_register_reset(icp_reset, dev);
+    vmstate_register(NULL, icp->cs->cpu_index, &vmstate_icp_server, icp);
 }
 
 static void icp_unrealize(DeviceState *dev, Error **errp)
 {
+    ICPState *icp = ICP(dev);
+
+    vmstate_unregister(NULL, &vmstate_icp_server, icp);
     qemu_unregister_reset(icp_reset, dev);
 }
 
@@ -355,7 +359,6 @@ static void icp_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
-    dc->vmsd = &vmstate_icp_server;
     dc->realize = icp_realize;
     dc->unrealize = icp_unrealize;
 }
@@ -574,7 +577,7 @@ static const VMStateDescription vmstate_ics_simple = {
     .post_load = ics_simple_dispatch_post_load,
     .fields = (VMStateField[]) {
         /* Sanity check */
-        VMSTATE_UINT32_EQUAL(nr_irqs, ICSState),
+        VMSTATE_UINT32_EQUAL(nr_irqs, ICSState, NULL),
 
         VMSTATE_STRUCT_VARRAY_POINTER_UINT32(irqs, ICSState, nr_irqs,
                                              vmstate_ics_simple_irq,

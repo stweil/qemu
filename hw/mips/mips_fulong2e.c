@@ -296,7 +296,6 @@ static void mips_fulong2e_init(MachineState *machine)
     memory_region_allocate_system_memory(ram, NULL, "fulong2e.ram", ram_size);
     memory_region_init_ram(bios, NULL, "fulong2e.bios", bios_size,
                            &error_fatal);
-    vmstate_register_ram_global(bios);
     memory_region_set_readonly(bios, true);
 
     memory_region_add_subregion(address_space_mem, 0, ram);

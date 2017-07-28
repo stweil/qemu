@@ -85,6 +85,12 @@ Enables or disables NVDIMM support. The default is off.
 @item s390-squash-mcss=on|off
 Enables or disables squashing subchannels into the default css.
 The default is off.
+@item enforce-config-section=on|off
+If @option{enforce-config-section} is set to @var{on}, force migration
+code to send configuration section even if the machine-type sets the
+@option{migration.send-configuration} property to @var{off}.
+NOTE: this parameter is deprecated. Please use @option{-global}
+@option{migration.send-configuration}=@var{on|off} instead.
 @end table
 ETEXI
 
@@ -818,6 +824,8 @@ of available connectors of a given interface type.
 This option defines the type of the media: disk or cdrom.
 @item cyls=@var{c},heads=@var{h},secs=@var{s}[,trans=@var{t}]
 These options have the same definition as they have in @option{-hdachs}.
+These parameters are deprecated, use the corresponding parameters
+of @code{-device} instead.
 @item snapshot=@var{snapshot}
 @var{snapshot} is "on" or "off" and controls snapshot mode for the given drive
 (see @option{-snapshot}).
@@ -852,9 +860,12 @@ Specify which disk @var{format} will be used rather than detecting
 the format.  Can be used to specify format=raw to avoid interpreting
 an untrusted format header.
 @item serial=@var{serial}
-This option specifies the serial number to assign to the device.
+This option specifies the serial number to assign to the device. This
+parameter is deprecated, use the corresponding parameter of @code{-device}
+instead.
 @item addr=@var{addr}
-Specify the controller's PCI address (if=virtio only).
+Specify the controller's PCI address (if=virtio only). This parameter is
+deprecated, use the corresponding parameter of @code{-device} instead.
 @item werror=@var{action},rerror=@var{action}
 Specify which @var{action} to take on write and read errors. Valid actions are:
 "ignore" (ignore the error and try to continue), "stop" (pause QEMU),
@@ -1010,7 +1021,7 @@ ETEXI
 
 DEF("fsdev", HAS_ARG, QEMU_OPTION_fsdev,
     "-fsdev fsdriver,id=id[,path=path,][security_model={mapped-xattr|mapped-file|passthrough|none}]\n"
-    " [,writeout=immediate][,readonly][,socket=socket|sock_fd=sock_fd]\n"
+    " [,writeout=immediate][,readonly][,socket=socket|sock_fd=sock_fd][,fmode=fmode][,dmode=dmode]\n"
     " [[,throttling.bps-total=b]|[[,throttling.bps-read=r][,throttling.bps-write=w]]]\n"
     " [[,throttling.iops-total=i]|[[,throttling.iops-read=r][,throttling.iops-write=w]]]\n"
     " [[,throttling.bps-total-max=bm]|[[,throttling.bps-read-max=rm][,throttling.bps-write-max=wm]]]\n"
@@ -1020,7 +1031,7 @@ DEF("fsdev", HAS_ARG, QEMU_OPTION_fsdev,
 
 STEXI
 
-@item -fsdev @var{fsdriver},id=@var{id},path=@var{path},[security_model=@var{security_model}][,writeout=@var{writeout}][,readonly][,socket=@var{socket}|sock_fd=@var{sock_fd}]
+@item -fsdev @var{fsdriver},id=@var{id},path=@var{path},[security_model=@var{security_model}][,writeout=@var{writeout}][,readonly][,socket=@var{socket}|sock_fd=@var{sock_fd}][,fmode=@var{fmode}][,dmode=@var{dmode}]
 @findex -fsdev
 Define a new file system device. Valid options are:
 @table @option
@@ -1061,6 +1072,12 @@ with virtfs-proxy-helper
 Enables proxy filesystem driver to use passed socket descriptor for
 communicating with virtfs-proxy-helper. Usually a helper like libvirt
 will create socketpair and pass one of the fds as sock_fd
+@item fmode=@var{fmode}
+Specifies the default mode for newly created files on the host. Works only
+with security models "mapped-xattr" and "mapped-file".
+@item dmode=@var{dmode}
+Specifies the default mode for newly created directories on the host. Works
+only with security models "mapped-xattr" and "mapped-file".
 @end table
 
 -fsdev option is used along with -device driver "virtio-9p-pci".
@@ -1077,12 +1094,12 @@ ETEXI
 
 DEF("virtfs", HAS_ARG, QEMU_OPTION_virtfs,
     "-virtfs local,path=path,mount_tag=tag,security_model=[mapped-xattr|mapped-file|passthrough|none]\n"
-    "        [,id=id][,writeout=immediate][,readonly][,socket=socket|sock_fd=sock_fd]\n",
+    "        [,id=id][,writeout=immediate][,readonly][,socket=socket|sock_fd=sock_fd][,fmode=fmode][,dmode=dmode]\n",
     QEMU_ARCH_ALL)
 
 STEXI
 
-@item -virtfs @var{fsdriver}[,path=@var{path}],mount_tag=@var{mount_tag}[,security_model=@var{security_model}][,writeout=@var{writeout}][,readonly][,socket=@var{socket}|sock_fd=@var{sock_fd}]
+@item -virtfs @var{fsdriver}[,path=@var{path}],mount_tag=@var{mount_tag}[,security_model=@var{security_model}][,writeout=@var{writeout}][,readonly][,socket=@var{socket}|sock_fd=@var{sock_fd}][,fmode=@var{fmode}][,dmode=@var{dmode}]
 @findex -virtfs
 
 The general form of a Virtual File system pass-through options are:
@@ -1124,6 +1141,12 @@ will create socketpair and pass one of the fds as sock_fd
 @item sock_fd
 Enables proxy filesystem driver to use passed 'sock_fd' as the socket
 descriptor for interfacing with virtfs-proxy-helper
+@item fmode=@var{fmode}
+Specifies the default mode for newly created files on the host. Works only
+with security models "mapped-xattr" and "mapped-file".
+@item dmode=@var{dmode}
+Specifies the default mode for newly created directories on the host. Works
+only with security models "mapped-xattr" and "mapped-file".
 @end table
 ETEXI
 
@@ -1730,7 +1753,7 @@ spec but is traditional QEMU behavior.
 @item key-delay-ms
 
 Set keyboard delay, for key down and key up events, in milliseconds.
-Default is 1.  Keyboards are low-bandwidth devices, so this slowdown
+Default is 10.  Keyboards are low-bandwidth devices, so this slowdown
 can help the device and guest to keep up and not lose events in case
 events are arriving in bulk.  Possible causes for the latter are flaky
 network connections, or scripts for automated testing.
@@ -4238,26 +4261,25 @@ queue @var{all|rx|tx} is an option that can be applied to any netfilter.
 @option{tx}: the filter is attached to the transmit queue of the netdev,
              where it will receive packets sent by the netdev.
 
-@item -object filter-mirror,id=@var{id},netdev=@var{netdevid},outdev=@var{chardevid}[,queue=@var{all|rx|tx}]
+@item -object filter-mirror,id=@var{id},netdev=@var{netdevid},outdev=@var{chardevid},queue=@var{all|rx|tx}[,vnet_hdr_support]
 
-filter-mirror on netdev @var{netdevid},mirror net packet to chardev
-@var{chardevid}
+filter-mirror on netdev @var{netdevid},mirror net packet to chardev@var{chardevid}, if it has the vnet_hdr_support flag, filter-mirror will mirror packet with vnet_hdr_len.
 
-@item -object filter-redirector,id=@var{id},netdev=@var{netdevid},indev=@var{chardevid},
-outdev=@var{chardevid}[,queue=@var{all|rx|tx}]
+@item -object filter-redirector,id=@var{id},netdev=@var{netdevid},indev=@var{chardevid},outdev=@var{chardevid},queue=@var{all|rx|tx}[,vnet_hdr_support]
 
 filter-redirector on netdev @var{netdevid},redirect filter's net packet to chardev
-@var{chardevid},and redirect indev's packet to filter.
+@var{chardevid},and redirect indev's packet to filter.if it has the vnet_hdr_support flag,
+filter-redirector will redirect packet with vnet_hdr_len.
 Create a filter-redirector we need to differ outdev id from indev id, id can not
 be the same. we can just use indev or outdev, but at least one of indev or outdev
 need to be specified.
 
-@item -object filter-rewriter,id=@var{id},netdev=@var{netdevid}[,queue=@var{all|rx|tx}]
+@item -object filter-rewriter,id=@var{id},netdev=@var{netdevid},queue=@var{all|rx|tx},[vnet_hdr_support]
 
 Filter-rewriter is a part of COLO project.It will rewrite tcp packet to
 secondary from primary to keep secondary tcp connection,and rewrite
 tcp packet to primary from secondary make tcp packet can be handled by
-client.
+client.if it has the vnet_hdr_support flag, we can parse packet with vnet header.
 
 usage:
 colo secondary:
@@ -4272,13 +4294,13 @@ Dump the network traffic on netdev @var{dev} to the file specified by
 The file format is libpcap, so it can be analyzed with tools such as tcpdump
 or Wireshark.
 
-@item -object colo-compare,id=@var{id},primary_in=@var{chardevid},secondary_in=@var{chardevid},
-outdev=@var{chardevid}
+@item -object colo-compare,id=@var{id},primary_in=@var{chardevid},secondary_in=@var{chardevid},outdev=@var{chardevid}[,vnet_hdr_support]
 
 Colo-compare gets packet from primary_in@var{chardevid} and secondary_in@var{chardevid}, than compare primary packet with
 secondary packet. If the packets are same, we will output primary
 packet to outdev@var{chardevid}, else we will notify colo-frame
 do checkpoint and send primary packet to outdev@var{chardevid}.
+if it has the vnet_hdr_support flag, colo compare will send/recv packet with vnet_hdr_len.
 
 we must use it with the help of filter-mirror and filter-redirector.
 
@@ -4363,7 +4385,7 @@ The simplest (insecure) usage is to provide the secret inline
 
 The simplest secure usage is to provide the secret via a file
 
- # echo -n "letmein" > mypasswd.txt
+ # printf "letmein" > mypasswd.txt
  # $QEMU -object secret,id=sec0,file=mypasswd.txt,format=raw
 
 For greater security, AES-256-CBC should be used. To illustrate usage,
@@ -4391,7 +4413,7 @@ telling openssl to base64 encode the result, but it could be left
 as raw bytes if desired.
 
 @example
- # SECRET=$(echo -n "letmein" |
+ # SECRET=$(printf "letmein" |
             openssl enc -aes-256-cbc -a -K $KEY -iv $IV)
 @end example
 

@@ -29,7 +29,7 @@
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/dma.h"         /* QEMUSGList (in ide/internal.h) */
 #include "sysemu/sysemu.h"
-#include "sysemu/char.h"        /* qemu_chr_new */
+#include "chardev/char.h"        /* qemu_chr_new */
 #include "exec/address-spaces.h" /* get_system_memory */
 
 #define BIOS_FILENAME "able.bin"

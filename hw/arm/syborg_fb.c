@@ -25,6 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
+#include "migration/register.h"  /* register_savevm_live */
 #include "ui/console.h"
 #include "syborg.h"
 #include "framebuffer.h"
@@ -512,6 +513,11 @@ static int syborg_fb_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static SaveVMHandlers savevm_syborg_fb = {
+    .save_state = syborg_fb_save,
+    .load_state = syborg_fb_load
+};
+
 static int syborg_fb_init(SysBusDevice *sbd)
 {
     DeviceState *dev = DEVICE(sbd);
@@ -540,8 +546,8 @@ static int syborg_fb_init(SysBusDevice *sbd)
         s->rows = surface_height(surface);
     }
 
-    register_savevm(&dev->qdev, "syborg_framebuffer", -1, 1,
-                    syborg_fb_save, syborg_fb_load, s);
+    register_savevm_live(&dev->qdev, "syborg_framebuffer", -1, 1,
+                         &savevm_syborg_fb, s);
     return 0;
 }
 

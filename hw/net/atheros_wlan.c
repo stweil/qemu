@@ -35,6 +35,7 @@
 #else
 
 #include "hw.h"
+#include "migration/register.h"  /* register_savevm_live */
 #include "pci/pci.h"
 #include "pc.h"
 #include "net/net.h"
@@ -321,7 +322,9 @@ static int pci_Atheros_WLAN_init(PCIDevice *pci_dev)
 
     /* TODO: we don't support multiple instance yet!! */
     /* TODO: replace NULL by &dev->qdev. */
-    //~ register_savevm(NULL, "Atheros_WLAN", 0, 3, Atheros_WLAN_save, Atheros_WLAN_load, s);
+#if 0
+    register_savevm_live(NULL, "Atheros_WLAN", 0, 3, Atheros_WLAN_save, Atheros_WLAN_load, s);
+#endif
 
     Atheros_WLAN_reset(nd, s);
     return 0;

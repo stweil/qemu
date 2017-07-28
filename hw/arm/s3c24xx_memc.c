@@ -16,6 +16,7 @@
 #include "cpu.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "migration/register.h"  /* register_savevm_live */
 
 #include "s3c24xx.h"
 
@@ -79,6 +80,11 @@ static int s3c24xx_memc_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static SaveVMHandlers savevm_s3c24xx_memc = {
+    .save_state = s3c24xx_memc_save,
+    .load_state = s3c24xx_memc_load
+};
+
 struct s3c24xx_memc_state_s *
 s3c24xx_memc_init(hwaddr base_addr)
 {
@@ -93,7 +99,7 @@ s3c24xx_memc_init(hwaddr base_addr)
     memory_region_init_io(&s->mmio, OBJECT(s), &s3c24xx_memc_ops, s,
                           "s3c24xx.memc", 13 * 4);
     memory_region_add_subregion(get_system_memory(), base_addr, &s->mmio);
-    register_savevm(NULL, "s3c24xx_memc", 0, 0, s3c24xx_memc_save, s3c24xx_memc_load, s);
+    register_savevm_live(NULL, "s3c24xx_memc", 0, 0, &savevm_s3c24xx_memc, s);
 
     return s;
 }

@@ -129,11 +129,12 @@ typedef struct HDGeometry {
  * BDRV_BLOCK_OFFSET_VALID: an associated offset exists for accessing raw data
  * BDRV_BLOCK_ALLOCATED: the content of the block is determined by this
  *                       layer (short for DATA || ZERO), set by block layer
+ * BDRV_BLOCK_EOF: the returned pnum covers through end of file for this layer
  *
  * Internal flag:
- * BDRV_BLOCK_RAW: used internally to indicate that the request was
- *                 answered by a passthrough driver such as raw and that the
- *                 block layer should recompute the answer from bs->file.
+ * BDRV_BLOCK_RAW: for use by passthrough drivers, such as raw, to request
+ *                 that the block layer recompute the answer from the returned
+ *                 BDS; must be accompanied by just BDRV_BLOCK_OFFSET_VALID.
  *
  * If BDRV_BLOCK_OFFSET_VALID is set, bits 9-62 (BDRV_BLOCK_OFFSET_MASK)
  * represent the offset in the returned BDS that is allocated for the
@@ -157,6 +158,7 @@ typedef struct HDGeometry {
 #define BDRV_BLOCK_OFFSET_VALID 0x04
 #define BDRV_BLOCK_RAW          0x08
 #define BDRV_BLOCK_ALLOCATED    0x10
+#define BDRV_BLOCK_EOF          0x20
 #define BDRV_BLOCK_OFFSET_MASK  BDRV_SECTOR_MASK
 
 typedef QSIMPLEQ_HEAD(BlockReopenQueue, BlockReopenQueueEntry) BlockReopenQueue;
@@ -298,12 +300,14 @@ int coroutine_fn bdrv_co_pwrite_zeroes(BdrvChild *child, int64_t offset,
                                        int bytes, BdrvRequestFlags flags);
 BlockDriverState *bdrv_find_backing_image(BlockDriverState *bs,
     const char *backing_file);
-int bdrv_get_backing_file_depth(BlockDriverState *bs);
 void bdrv_refresh_filename(BlockDriverState *bs);
-int bdrv_truncate(BdrvChild *child, int64_t offset, Error **errp);
+int bdrv_truncate(BdrvChild *child, int64_t offset, PreallocMode prealloc,
+                  Error **errp);
 int64_t bdrv_nb_sectors(BlockDriverState *bs);
 int64_t bdrv_getlength(BlockDriverState *bs);
 int64_t bdrv_get_allocated_file_size(BlockDriverState *bs);
+BlockMeasureInfo *bdrv_measure(BlockDriver *drv, QemuOpts *opts,
+                               BlockDriverState *in_bs, Error **errp);
 void bdrv_get_geometry(BlockDriverState *bs, uint64_t *nb_sectors_ptr);
 void bdrv_refresh_limits(BlockDriverState *bs, Error **errp);
 int bdrv_commit(BlockDriverState *bs);
@@ -425,10 +429,10 @@ int64_t bdrv_get_block_status_above(BlockDriverState *bs,
                                     int64_t sector_num,
                                     int nb_sectors, int *pnum,
                                     BlockDriverState **file);
-int bdrv_is_allocated(BlockDriverState *bs, int64_t sector_num, int nb_sectors,
-                      int *pnum);
+int bdrv_is_allocated(BlockDriverState *bs, int64_t offset, int64_t bytes,
+                      int64_t *pnum);
 int bdrv_is_allocated_above(BlockDriverState *top, BlockDriverState *base,
-                            int64_t sector_num, int nb_sectors, int *pnum);
+                            int64_t offset, int64_t bytes, int64_t *pnum);
 
 bool bdrv_is_read_only(BlockDriverState *bs);
 bool bdrv_is_writable(BlockDriverState *bs);
@@ -462,9 +466,6 @@ BlockDriverState *bdrv_next(BdrvNextIterator *it);
 
 BlockDriverState *bdrv_next_monitor_owned(BlockDriverState *bs);
 bool bdrv_is_encrypted(BlockDriverState *bs);
-bool bdrv_key_required(BlockDriverState *bs);
-int bdrv_set_key(BlockDriverState *bs, const char *key);
-void bdrv_add_key(BlockDriverState *bs, const char *key, Error **errp);
 void bdrv_iterate_format(void (*it)(void *opaque, const char *name),
                          void *opaque);
 const char *bdrv_get_node_name(const BlockDriverState *bs);
@@ -473,10 +474,6 @@ const char *bdrv_get_device_or_node_name(const BlockDriverState *bs);
 int bdrv_get_flags(BlockDriverState *bs);
 int bdrv_get_info(BlockDriverState *bs, BlockDriverInfo *bdi);
 ImageInfoSpecific *bdrv_get_specific_info(BlockDriverState *bs);
-void bdrv_round_sectors_to_clusters(BlockDriverState *bs,
-                                    int64_t sector_num, int nb_sectors,
-                                    int64_t *cluster_sector_num,
-                                    int *cluster_nb_sectors);
 void bdrv_round_to_clusters(BlockDriverState *bs,
                             int64_t offset, unsigned int bytes,
                             int64_t *cluster_offset,
@@ -621,5 +618,8 @@ void bdrv_drained_end(BlockDriverState *bs);
 void bdrv_add_child(BlockDriverState *parent, BlockDriverState *child,
                     Error **errp);
 void bdrv_del_child(BlockDriverState *parent, BdrvChild *child, Error **errp);
+
+bool bdrv_can_store_new_dirty_bitmap(BlockDriverState *bs, const char *name,
+                                     uint32_t granularity, Error **errp);
 
 #endif

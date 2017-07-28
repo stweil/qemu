@@ -48,6 +48,7 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/dma.h"
 #include "qemu/bitops.h"
+#include "qapi/error.h"
 
 /* QEMU sends frames smaller than 60 bytes to ethernet nics.
  * This should be fixed in the networking code because normally
@@ -501,7 +502,7 @@ static void eepro100_fcp_interrupt(EEPRO100State * s)
 }
 #endif
 
-static void e100_pci_reset(EEPRO100State * s)
+static void e100_pci_reset(EEPRO100State *s, Error **errp)
 {
     E100PCIDeviceInfo *info = eepro100_get_class(s);
     uint32_t device = s->device;
@@ -577,8 +578,12 @@ static void e100_pci_reset(EEPRO100State * s)
         /* Power Management Capabilities */
         int cfg_offset = 0xdc;
         int r = pci_add_capability(&s->dev, PCI_CAP_ID_PM,
-                                   cfg_offset, PCI_PM_SIZEOF);
-        assert(r >= 0);
+                                   cfg_offset, PCI_PM_SIZEOF,
+                                   errp);
+        if (r < 0) {
+            return;
+        }
+
         pci_set_word(pci_conf + cfg_offset + PCI_PM_PMC, 0x7e21);
 #if 0 /* TODO: replace dummy code for power management emulation. */
         /* TODO: Power Management Control / Status. */
@@ -1943,12 +1948,17 @@ static void e100_nic_realize(PCIDevice *pci_dev, Error **errp)
 {
     EEPRO100State *s = DO_UPCAST(EEPRO100State, dev, pci_dev);
     E100PCIDeviceInfo *info = eepro100_get_class(s);
+    Error *local_err = NULL;
 
     TRACE(OTHER, logout("\n"));
 
     s->device = info->device;
 
-    e100_pci_reset(s);
+    e100_pci_reset(s, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return;
+    }
 
 #if EEPROM_SIZE > 0
     /* Add 64 * 2 EEPROM. i82557 and i82558 support a 64 word EEPROM,

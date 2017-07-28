@@ -206,7 +206,6 @@ static void ppc_core99_init(MachineState *machine)
     /* allocate and load BIOS */
     memory_region_init_ram(bios, NULL, "ppc_core99.bios", BIOS_SIZE,
                            &error_fatal);
-    vmstate_register_ram_global(bios);
 
     if (bios_name == NULL)
         bios_name = PROM_FILENAME;

@@ -556,9 +556,9 @@ static int qemu_rbd_open(BlockDriverState *bs, QDict *options, int flags,
      * filename encoded options */
     filename = qdict_get_try_str(options, "filename");
     if (filename) {
-        error_report("Warning: 'filename' option specified. "
-                      "This is an unsupported option, and may be deprecated "
-                      "in the future");
+        warn_report("'filename' option specified. "
+                    "This is an unsupported option, and may be deprecated "
+                    "in the future");
         qemu_rbd_parse_filename(filename, options, &local_err);
         if (local_err) {
             r = -EINVAL;
@@ -937,10 +937,17 @@ static int64_t qemu_rbd_getlength(BlockDriverState *bs)
     return info.size;
 }
 
-static int qemu_rbd_truncate(BlockDriverState *bs, int64_t offset, Error **errp)
+static int qemu_rbd_truncate(BlockDriverState *bs, int64_t offset,
+                             PreallocMode prealloc, Error **errp)
 {
     BDRVRBDState *s = bs->opaque;
     int r;
+
+    if (prealloc != PREALLOC_MODE_OFF) {
+        error_setg(errp, "Unsupported preallocation mode '%s'",
+                   PreallocMode_lookup[prealloc]);
+        return -ENOTSUP;
+    }
 
     r = rbd_resize(s->image, offset);
     if (r < 0) {

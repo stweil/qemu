@@ -15,6 +15,7 @@
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "hw/i2c/i2c.h"
+#include "migration/register.h"  /* register_savevm_live */
 
 #include "s3c24xx.h"
 
@@ -232,6 +233,10 @@ static int s3c24xx_i2c_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
+static SaveVMHandlers savevm_s3c24xx_i2c = {
+    .save_state = s3c24xx_i2c_save,
+    .load_state = s3c24xx_i2c_load
+};
 
 struct s3c24xx_i2c_state_s *s3c24xx_iic_init(qemu_irq irq,
                                              hwaddr base_addr)
@@ -248,7 +253,7 @@ struct s3c24xx_i2c_state_s *s3c24xx_iic_init(qemu_irq irq,
                           &s3c24xx_i2c_ops, s, "s3c24xx-i2c", 0x1000000);
     memory_region_add_subregion(system_memory, base_addr, &s->mmio);
 
-    register_savevm(NULL, "s3c24xx_i2c", 0, 0, s3c24xx_i2c_save, s3c24xx_i2c_load, s);
+    register_savevm_live(NULL, "s3c24xx_i2c", 0, 0, &savevm_s3c24xx_i2c, s);
 
     return s;
 }

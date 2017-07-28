@@ -962,7 +962,7 @@ static const VMStateDescription vmstate_virtio_gpu_scanouts = {
     .version_id = 1,
     .fields = (VMStateField[]) {
         VMSTATE_INT32(enable, struct VirtIOGPU),
-        VMSTATE_UINT32_EQUAL(conf.max_outputs, struct VirtIOGPU),
+        VMSTATE_UINT32_EQUAL(conf.max_outputs, struct VirtIOGPU, NULL),
         VMSTATE_STRUCT_VARRAY_UINT32(scanout, struct VirtIOGPU,
                                      conf.max_outputs, 1,
                                      vmstate_virtio_gpu_scanout,
@@ -1092,7 +1092,9 @@ static int virtio_gpu_load(QEMUFile *f, void *opaque, size_t size,
 
         dpy_gfx_replace_surface(scanout->con, scanout->ds);
         dpy_gfx_update(scanout->con, 0, 0, scanout->width, scanout->height);
-        update_cursor(g, &scanout->cursor);
+        if (scanout->cursor.resource_id) {
+            update_cursor(g, &scanout->cursor);
+        }
         res->scanout_bitmask |= (1 << i);
     }
 
