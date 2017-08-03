@@ -353,7 +353,7 @@ NETBSD
 L: qemu-devel@nongnu.org
 M: Kamil Rytarowski <kamil@netbsd.org>
 S: Maintained
-K: (?i)NetBSD
+K: ^Subject:.*(?i)NetBSD
 
 W32, W64
 L: qemu-devel@nongnu.org
@@ -1346,6 +1346,7 @@ F: monitor.c
 F: hmp.[ch]
 F: hmp-commands*.hx
 F: include/monitor/hmp-target.h
+F: tests/test-hmp.c
 
 Network device backends
 M: Jason Wang <jasowang@redhat.com>
