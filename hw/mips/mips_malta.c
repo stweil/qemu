@@ -637,7 +637,7 @@ static void write_bootloader(uint8_t *base, int64_t run_addr,
                              int64_t kernel_entry)
 {
     uint32_t *p;
-    bool bigendian = current_cpu->bigendian;
+    bool bigendian = first_cpu->bigendian;
 
     if (cpu_mips_phys_to_kseg0(NULL, kernel_entry) == cpu_mips_phys_to_kseg0(NULL, 0x1fc00000LL)) {
         return;
@@ -1083,13 +1083,10 @@ void mips_malta_init(MachineState *machine)
     generate_eeprom_spd(&smbus_eeprom_buf[0 * 256], ram_size);
     generate_eeprom_serial(&smbus_eeprom_buf[6 * 256]);
 
-    // TODO: Fixme.
-    //current_cpu = ENV_GET_CPU(env);
-
     /* FPGA */
     /* The CBUS UART is attached to the MIPS CPU INT2 pin, ie interrupt 4 */
     malta_fpga_init(system_memory, FPGA_ADDRESS, cbus_irq, serial_hds[2],
-                    current_cpu->bigendian);
+                    first_cpu->bigendian);
 
     /* Load firmware in flash / BIOS. */
     dinfo = drive_get(IF_PFLASH, 0, fl_idx);
@@ -1106,7 +1103,7 @@ void mips_malta_init(MachineState *machine)
                                dinfo ? blk_by_legacy_dinfo(dinfo) : NULL,
                                65536, fl_sectors,
                                4, 0x0000, 0x0000, 0x0000, 0x0000,
-                               current_cpu->bigendian);
+                               first_cpu->bigendian);
     bios = pflash_cfi01_get_memory(fl);
     fl_idx++;
     if (kernel_filename) {
@@ -1125,7 +1122,7 @@ void mips_malta_init(MachineState *machine)
         loaderparams.kernel_filename = kernel_filename;
         loaderparams.kernel_cmdline = kernel_cmdline;
         loaderparams.initrd_filename = initrd_filename;
-        kernel_entry = load_kernel(current_cpu->bigendian);
+        kernel_entry = load_kernel(first_cpu->bigendian);
 
         write_bootloader(memory_region_get_ram_ptr(bios),
                          bootloader_run_addr, kernel_entry);
