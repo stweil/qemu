@@ -1952,7 +1952,9 @@ static void QEMU_NORETURN help(int exitcode)
            "ctrl-alt-n      switch to virtual console 'n'\n"
            "ctrl-alt        toggle mouse and keyboard grab\n"
            "\n"
-           "When using -nographic, press 'ctrl-a h' to get some help.\n");
+           "When using -nographic, press 'ctrl-a h' to get some help.\n"
+           "\n"
+           QEMU_HELP_BOTTOM "\n");
 
     exit(exitcode);
 }
@@ -4170,6 +4172,7 @@ int main(int argc, char **argv)
     set_memory_options(&ram_slots, &maxram_size, machine_class);
 
     os_daemonize();
+    rcu_disable_atfork();
 
     if (pid_file && qemu_create_pidfile(pid_file) != 0) {
         error_report("could not acquire pid file: %s", strerror(errno));

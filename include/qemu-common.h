@@ -22,6 +22,11 @@
 #define QEMU_COPYRIGHT "Copyright (c) 2003-2017 " \
     "Fabrice Bellard and the QEMU Project developers"
 
+/* Bug reporting information for --help arguments, About dialogs, etc */
+#define QEMU_HELP_BOTTOM \
+    "See <http://qemu.org/contribute/report-a-bug> for how to report bugs.\n" \
+    "More information on the QEMU project at <http://qemu.org>."
+
 #define KiB     1024
 #define MiB     (KiB * KiB)
 
