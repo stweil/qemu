@@ -278,9 +278,7 @@ dummy := $(call unnest-vars,, \
                 common-obj-m \
                 trace-obj-y)
 
-ifneq ($(wildcard config-host.mak),)
 include $(SRC_PATH)/tests/Makefile.include
-endif
 
 all: recurse-all
 

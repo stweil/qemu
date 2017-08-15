@@ -63,10 +63,12 @@ static void mmio_interface_realize(DeviceState *dev, Error **errp)
 
     if (!s->host_ptr) {
         error_setg(errp, "host_ptr property must be set");
+        return;
     }
 
     if (!s->subregion) {
         error_setg(errp, "subregion property must be set");
+        return;
     }
 
     memory_region_init_ram_ptr(&s->ram_mem, OBJECT(s), "ram",
@@ -109,6 +111,11 @@ static void mmio_interface_class_init(ObjectClass *oc, void *data)
     dc->realize = mmio_interface_realize;
     dc->unrealize = mmio_interface_unrealize;
     dc->props = mmio_interface_properties;
+    /* Reason: pointer property "host_ptr", and this device
+     * is an implementation detail of the memory subsystem,
+     * not intended to be created directly by the user.
+     */
+    dc->user_creatable = false;
 }
 
 static const TypeInfo mmio_interface_info = {

@@ -3240,7 +3240,7 @@ the ``-netdev user,guestfwd=ARGS'' argument instead.
 
 @subsection -net vlan (since 2.9.0)
 
-The ``-net van=NN'' argument is partially replaced with the
+The ``-net vlan=NN'' argument is partially replaced with the
 new ``-netdev'' argument. The remaining use cases will no
 longer be directly supported in QEMU.
 
@@ -3279,6 +3279,14 @@ The ``convert -s snapshot_id_or_name'' argument is obsoleted
 by the ``convert -l snapshot_param'' argument instead.
 
 @section System emulator human monitor commands
+
+@subsection host_net_add (since 2.10.0)
+
+The ``host_net_add'' command is replaced by the ``netdev_add'' command.
+
+@subsection host_net_remove (since 2.10.0)
+
+The ``host_net_remove'' command is replaced by the ``netdev_del'' command.
 
 @subsection usb_add (since 2.10.0)
 
