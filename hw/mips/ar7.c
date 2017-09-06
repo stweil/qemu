@@ -427,8 +427,8 @@ static const char *mips_backtrace(void)
 {
     static char buffer[256];
     char *p = buffer;
-    if (current_cpu != 0) {
-      CPUArchState *env = current_cpu->env_ptr;
+    if (first_cpu != 0) {
+      CPUArchState *env = first_cpu->env_ptr;
       p += sprintf(p, "[%s]", lookup_symbol(env->active_tc.PC));
       p += sprintf(p, "[%s]", lookup_symbol(env->active_tc.gpr[31]));
     } else {
@@ -653,7 +653,7 @@ static void ar7_update_interrupt(void)
 {
     static int intset;
 
-    CPUMIPSState *env = current_cpu->env_ptr;
+    CPUMIPSState *env = first_cpu->env_ptr;
     uint32_t masked_int1;
     uint32_t masked_int2;
 
@@ -2921,7 +2921,7 @@ static void watchdog_cb(void *opaque)
     CPUMIPSState *env = opaque;
 
     logout("watchdog expired\n");
-    current_cpu->exception_index = EXCP_NMI;
+    first_cpu->exception_index = EXCP_NMI;
     env->error_code = 0;
     mips_cpu_do_interrupt(ENV_GET_CPU(env));
 }
@@ -3683,7 +3683,7 @@ static void ar7_init(AR7State *s, CPUMIPSState *env)
 
     //~ .dcl = 0x025d4297
     reg_write(av.dcl, DCL_BOOT_CONFIG, 0x025d4291);
-    if (current_cpu->bigendian) {
+    if (first_cpu->bigendian) {
         reg_set(av.dcl, DCL_BOOT_CONFIG, CONFIG_ENDIAN);
     }
     ar7->vlynq[0] = av.vlynq0;
@@ -3715,7 +3715,7 @@ static void kernel_load(CPUMIPSState *env)
     kernel_size = load_elf(loaderparams.kernel_filename,
                            cpu_mips_kseg0_to_phys, NULL,
                            &kernel_addr, &kernel_low, &kernel_high,
-                           current_cpu->bigendian, EM_MIPS, 1, 0);
+                           first_cpu->bigendian, EM_MIPS, 1, 0);
     if (kernel_size < 0) {
         kernel_size = load_image_targphys(loaderparams.kernel_filename,
                                           KERNEL_LOAD_ADDR,
@@ -3830,7 +3830,7 @@ static void ar7_mips_init(CPUMIPSState *env)
     if (env->CP0_Config1 != 0x9e9b4d8a) printf("CP0_Config1 = 0x%08x\n", env->CP0_Config1);
     if (env->CP0_Config2 != 0x80000000) printf("CP0_Config2 = 0x%08x\n", env->CP0_Config2);
 #if !defined(UR8)
-    if (current_cpu->bigendian) {
+    if (first_cpu->bigendian) {
         assert(env->CP0_Config0 == 0x80240082 + (1 << CP0C0_BE));
     } else {
         assert(env->CP0_Config0 == 0x80240082);
@@ -3944,7 +3944,7 @@ static void ar7_common_init(MachineState *machine,
     pflash_device_register(FLASH_ADDR, NULL, "ar7.flash",
                           flash_size, flash_driver, 2,
                           flash_manufacturer, flash_type,
-                          current_cpu->bigendian);
+                          first_cpu->bigendian);
     if (!dinfo) {
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, "flashimage.bin");
         if (filename) {
