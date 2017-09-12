@@ -39,6 +39,7 @@ static void check_guest_memory(QTestState *qts)
         g_usleep(10000);
     }
 
+printf(" i=%d ", i);
     g_assert_cmphex(signature, ==, MAGIC);
 }
 
