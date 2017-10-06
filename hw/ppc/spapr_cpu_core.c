@@ -18,6 +18,7 @@
 #include "hw/ppc/ppc.h"
 #include "target/ppc/mmu-hash64.h"
 #include "sysemu/numa.h"
+#include "sysemu/hw_accel.h"
 #include "qemu/error-report.h"
 
 void spapr_cpu_parse_features(sPAPRMachineState *spapr)
@@ -73,7 +74,6 @@ void spapr_cpu_parse_features(sPAPRMachineState *spapr)
 
 static void spapr_cpu_reset(void *opaque)
 {
-    sPAPRMachineState *spapr = SPAPR_MACHINE(qdev_get_machine());
     PowerPCCPU *cpu = opaque;
     CPUState *cs = CPU(cpu);
     CPUPPCState *env = &cpu->env;
@@ -86,20 +86,6 @@ static void spapr_cpu_reset(void *opaque)
     cs->halted = 1;
 
     env->spr[SPR_HIOR] = 0;
-
-    /*
-     * This is a hack for the benefit of KVM PR - it abuses the SDR1
-     * slot in kvm_sregs to communicate the userspace address of the
-     * HPT
-     */
-    if (kvm_enabled()) {
-        env->spr[SPR_SDR1] = (target_ulong)(uintptr_t)spapr->htab
-            | (spapr->htab_shift - 18);
-        if (kvmppc_put_books_sregs(cpu) < 0) {
-            error_report("Unable to update SDR1 in KVM");
-            exit(1);
-        }
-    }
 }
 
 static void spapr_cpu_destroy(PowerPCCPU *cpu)
@@ -130,8 +116,10 @@ char *spapr_get_cpu_core_type(const char *model)
 {
     char *core_type;
     gchar **model_pieces = g_strsplit(model, ",", 2);
+    gchar *cpu_model = g_ascii_strdown(model_pieces[0], -1);
+    g_strfreev(model_pieces);
 
-    core_type = g_strdup_printf("%s-%s", model_pieces[0], TYPE_SPAPR_CPU_CORE);
+    core_type = g_strdup_printf("%s-" TYPE_SPAPR_CPU_CORE, cpu_model);
 
     /* Check whether it exists or whether we have to look up an alias name */
     if (!object_class_by_name(core_type)) {
@@ -139,13 +127,13 @@ char *spapr_get_cpu_core_type(const char *model)
 
         g_free(core_type);
         core_type = NULL;
-        realmodel = ppc_cpu_lookup_alias(model_pieces[0]);
+        realmodel = ppc_cpu_lookup_alias(cpu_model);
         if (realmodel) {
             core_type = spapr_get_cpu_core_type(realmodel);
         }
     }
+    g_free(cpu_model);
 
-    g_strfreev(model_pieces);
     return core_type;
 }
 
@@ -172,10 +160,10 @@ static void spapr_cpu_core_unrealizefn(DeviceState *dev, Error **errp)
     g_free(sc->threads);
 }
 
-static void spapr_cpu_core_realize_child(Object *child, Error **errp)
+static void spapr_cpu_core_realize_child(Object *child,
+                                         sPAPRMachineState *spapr, Error **errp)
 {
     Error *local_err = NULL;
-    sPAPRMachineState *spapr = SPAPR_MACHINE(qdev_get_machine());
     CPUState *cs = CPU(child);
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     Object *obj;
@@ -211,6 +199,7 @@ error:
 
 static void spapr_cpu_core_realize(DeviceState *dev, Error **errp)
 {
+    sPAPRMachineState *spapr;
     sPAPRCPUCore *sc = SPAPR_CPU_CORE(OBJECT(dev));
     sPAPRCPUCoreClass *scc = SPAPR_CPU_CORE_GET_CLASS(OBJECT(dev));
     CPUCore *cc = CPU_CORE(OBJECT(dev));
@@ -219,6 +208,12 @@ static void spapr_cpu_core_realize(DeviceState *dev, Error **errp)
     Error *local_err = NULL;
     void *obj;
     int i, j;
+
+    spapr = (sPAPRMachineState *) qdev_get_machine();
+    if (!object_dynamic_cast((Object *) spapr, TYPE_SPAPR_MACHINE)) {
+        error_setg(errp, "spapr-cpu-core needs a pseries machine");
+        return;
+    }
 
     sc->threads = g_malloc0(size * cc->nr_threads);
     for (i = 0; i < cc->nr_threads; i++) {
@@ -232,6 +227,16 @@ static void spapr_cpu_core_realize(DeviceState *dev, Error **errp)
         cs = CPU(obj);
         cpu = POWERPC_CPU(cs);
         cs->cpu_index = cc->core_id + i;
+        cpu->vcpu_id = (cc->core_id * spapr->vsmt / smp_threads) + i;
+        if (kvm_enabled() && !kvm_vcpu_id_is_valid(cpu->vcpu_id)) {
+            error_setg(&local_err, "Can't create CPU with id %d in KVM",
+                       cpu->vcpu_id);
+            error_append_hint(&local_err, "Adjust the number of cpus to %d "
+                              "or try to raise the number of threads per core\n",
+                              cpu->vcpu_id * smp_threads / spapr->vsmt);
+            goto err;
+        }
+
 
         /* Set NUMA node for the threads belonged to core  */
         cpu->node_id = sc->node_id;
@@ -247,7 +252,7 @@ static void spapr_cpu_core_realize(DeviceState *dev, Error **errp)
     for (j = 0; j < cc->nr_threads; j++) {
         obj = sc->threads + j * size;
 
-        spapr_cpu_core_realize_child(obj, &local_err);
+        spapr_cpu_core_realize_child(obj, spapr, &local_err);
         if (local_err) {
             goto err;
         }
@@ -268,31 +273,29 @@ static const char *spapr_core_models[] = {
     "970_v2.2",
 
     /* 970MP variants */
-    "970MP_v1.0",
     "970mp_v1.0",
-    "970MP_v1.1",
     "970mp_v1.1",
 
     /* POWER5+ */
-    "POWER5+_v2.1",
+    "power5+_v2.1",
 
     /* POWER7 */
-    "POWER7_v2.3",
+    "power7_v2.3",
 
     /* POWER7+ */
-    "POWER7+_v2.1",
+    "power7+_v2.1",
 
     /* POWER8 */
-    "POWER8_v2.0",
+    "power8_v2.0",
 
     /* POWER8E */
-    "POWER8E_v2.1",
+    "power8e_v2.1",
 
     /* POWER8NVL */
-    "POWER8NVL_v1.0",
+    "power8nvl_v1.0",
 
     /* POWER9 */
-    "POWER9_v1.0",
+    "power9_v1.0",
 };
 
 static Property spapr_cpu_core_properties[] = {

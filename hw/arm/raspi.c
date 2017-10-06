@@ -198,5 +198,6 @@ static void raspi2_machine_init(MachineClass *mc)
     mc->init = raspi2_init;
     mc->max_cpus = BCM2836_NCPUS;
     mc->default_ram_size = 1024 * 1024 * 1024;
+    mc->ignore_memory_transaction_failures = true;
 };
 DEFINE_MACHINE("raspi2", raspi2_machine_init)

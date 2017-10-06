@@ -241,7 +241,7 @@ static void icp_irq(ICSState *ics, int server, int nr, uint8_t priority)
     }
 }
 
-static void icp_dispatch_pre_save(void *opaque)
+static int icp_dispatch_pre_save(void *opaque)
 {
     ICPState *icp = opaque;
     ICPStateClass *info = ICP_GET_CLASS(icp);
@@ -249,6 +249,8 @@ static void icp_dispatch_pre_save(void *opaque)
     if (info->pre_save) {
         info->pre_save(icp);
     }
+
+    return 0;
 }
 
 static int icp_dispatch_post_load(void *opaque, int version_id)
@@ -306,8 +308,8 @@ static void icp_realize(DeviceState *dev, Error **errp)
 
     obj = object_property_get_link(OBJECT(dev), ICP_PROP_XICS, &err);
     if (!obj) {
-        error_setg(errp, "%s: required link '" ICP_PROP_XICS "' not found: %s",
-                   __func__, error_get_pretty(err));
+        error_propagate(errp, err);
+        error_prepend(errp, "required link '" ICP_PROP_XICS "' not found: ");
         return;
     }
 
@@ -315,8 +317,8 @@ static void icp_realize(DeviceState *dev, Error **errp)
 
     obj = object_property_get_link(OBJECT(dev), ICP_PROP_CPU, &err);
     if (!obj) {
-        error_setg(errp, "%s: required link '" ICP_PROP_CPU "' not found: %s",
-                   __func__, error_get_pretty(err));
+        error_propagate(errp, err);
+        error_prepend(errp, "required link '" ICP_PROP_CPU "' not found: ");
         return;
     }
 
@@ -533,7 +535,7 @@ static void ics_simple_reset(void *dev)
     }
 }
 
-static void ics_simple_dispatch_pre_save(void *opaque)
+static int ics_simple_dispatch_pre_save(void *opaque)
 {
     ICSState *ics = opaque;
     ICSStateClass *info = ICS_BASE_GET_CLASS(ics);
@@ -541,6 +543,8 @@ static void ics_simple_dispatch_pre_save(void *opaque)
     if (info->pre_save) {
         info->pre_save(ics);
     }
+
+    return 0;
 }
 
 static int ics_simple_dispatch_post_load(void *opaque, int version_id)
@@ -641,8 +645,8 @@ static void ics_base_realize(DeviceState *dev, Error **errp)
 
     obj = object_property_get_link(OBJECT(dev), ICS_PROP_XICS, &err);
     if (!obj) {
-        error_setg(errp, "%s: required link '" ICS_PROP_XICS "' not found: %s",
-                   __func__, error_get_pretty(err));
+        error_propagate(errp, err);
+        error_prepend(errp, "required link '" ICS_PROP_XICS "' not found: ");
         return;
     }
     ics->xics = XICS_FABRIC(obj);

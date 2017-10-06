@@ -32,6 +32,56 @@
 #include "qemu/bswap.h"
 #include "trace.h"
 
+int qcow2_shrink_l1_table(BlockDriverState *bs, uint64_t exact_size)
+{
+    BDRVQcow2State *s = bs->opaque;
+    int new_l1_size, i, ret;
+
+    if (exact_size >= s->l1_size) {
+        return 0;
+    }
+
+    new_l1_size = exact_size;
+
+#ifdef DEBUG_ALLOC2
+    fprintf(stderr, "shrink l1_table from %d to %d\n", s->l1_size, new_l1_size);
+#endif
+
+    BLKDBG_EVENT(bs->file, BLKDBG_L1_SHRINK_WRITE_TABLE);
+    ret = bdrv_pwrite_zeroes(bs->file, s->l1_table_offset +
+                                       new_l1_size * sizeof(uint64_t),
+                             (s->l1_size - new_l1_size) * sizeof(uint64_t), 0);
+    if (ret < 0) {
+        goto fail;
+    }
+
+    ret = bdrv_flush(bs->file->bs);
+    if (ret < 0) {
+        goto fail;
+    }
+
+    BLKDBG_EVENT(bs->file, BLKDBG_L1_SHRINK_FREE_L2_CLUSTERS);
+    for (i = s->l1_size - 1; i > new_l1_size - 1; i--) {
+        if ((s->l1_table[i] & L1E_OFFSET_MASK) == 0) {
+            continue;
+        }
+        qcow2_free_clusters(bs, s->l1_table[i] & L1E_OFFSET_MASK,
+                            s->cluster_size, QCOW2_DISCARD_ALWAYS);
+        s->l1_table[i] = 0;
+    }
+    return 0;
+
+fail:
+    /*
+     * If the write in the l1_table failed the image may contain a partially
+     * overwritten l1_table. In this case it would be better to clear the
+     * l1_table in memory to avoid possible image corruption.
+     */
+    memset(s->l1_table + new_l1_size, 0,
+           (s->l1_size - new_l1_size) * sizeof(uint64_t));
+    return ret;
+}
+
 int qcow2_grow_l1_table(BlockDriverState *bs, uint64_t min_size,
                         bool exact_size)
 {
@@ -61,7 +111,7 @@ int qcow2_grow_l1_table(BlockDriverState *bs, uint64_t min_size,
             new_l1_size = 1;
         }
         while (min_size > new_l1_size) {
-            new_l1_size = (new_l1_size * 3 + 1) / 2;
+            new_l1_size = DIV_ROUND_UP(new_l1_size * 3, 2);
         }
     }
 
@@ -1516,6 +1566,23 @@ int qcow2_decompress_cluster(BlockDriverState *bs, uint64_t cluster_offset)
         nb_csectors = ((cluster_offset >> s->csize_shift) & s->csize_mask) + 1;
         sector_offset = coffset & 511;
         csize = nb_csectors * 512 - sector_offset;
+
+        /* Allocate buffers on first decompress operation, most images are
+         * uncompressed and the memory overhead can be avoided.  The buffers
+         * are freed in .bdrv_close().
+         */
+        if (!s->cluster_data) {
+            /* one more sector for decompressed data alignment */
+            s->cluster_data = qemu_try_blockalign(bs->file->bs,
+                    QCOW_MAX_CRYPT_CLUSTERS * s->cluster_size + 512);
+            if (!s->cluster_data) {
+                return -ENOMEM;
+            }
+        }
+        if (!s->cluster_cache) {
+            s->cluster_cache = g_malloc(s->cluster_size);
+        }
+
         BLKDBG_EVENT(bs->file, BLKDBG_READ_COMPRESSED);
         ret = bdrv_read(bs->file, coffset >> 9, s->cluster_data,
                         nb_csectors);
