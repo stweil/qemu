@@ -301,11 +301,7 @@ static void sigbus_handler(int signal)
 static void *do_touch_pages(void *arg)
 {
     MemsetThread *memset_args = (MemsetThread *)arg;
-    char *addr = memset_args->addr;
-    uint64_t numpages = memset_args->numpages;
-    uint64_t hpagesize = memset_args->hpagesize;
     sigset_t set, oldset;
-    int i = 0;
 
     /* unblock SIGBUS */
     sigemptyset(&set);
@@ -315,6 +311,10 @@ static void *do_touch_pages(void *arg)
     if (sigsetjmp(memset_args->env, 1)) {
         memset_thread_failed = true;
     } else {
+        char *addr = memset_args->addr;
+        uint64_t numpages = memset_args->numpages;
+        uint64_t hpagesize = memset_args->hpagesize;
+        unsigned i;
         for (i = 0; i < numpages; i++) {
             /*
              * Read & write back the same value, so we don't
