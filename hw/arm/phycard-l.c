@@ -29,11 +29,7 @@ static void phycard_init(MachineState *machine)
     if (!machine->cpu_model) {
         machine->cpu_model = "cortex-a8";
     }
-    cpu = cpu_arm_init(machine->cpu_model);
-    if (!cpu) {
-        fprintf(stderr, "Unable to find CPU definition\n");
-        exit(1);
-    }
+    cpu = ARM_CPU(cpu_generic_init(TYPE_ARM_CPU, machine->cpu_model));
 
     /* RAM at address zero. */
     memory_region_allocate_system_memory(ram, NULL, "phycard.ram", ram_size);

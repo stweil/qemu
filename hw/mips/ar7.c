@@ -3889,12 +3889,7 @@ static void ar7_common_init(MachineState *machine,
 #endif
         machine->cpu_model = "4KEcR1";
     }
-    cpu = cpu_mips_init(machine->cpu_model);
-    if (!cpu) {
-        fprintf(stderr,
-                "Unable to find CPU definition %s\n", machine->cpu_model);
-        exit(1);
-    }
+    cpu = MIPS_CPU(cpu_generic_init(TYPE_MIPS_CPU, machine->cpu_model));
     env = &cpu->env;
 
     qemu_register_reset(main_cpu_reset, env);
