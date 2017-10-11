@@ -82,7 +82,7 @@
 #include "hw/vlynq.h"           /* vlynq_create_bus */
 
 #include "qapi/error.h"          /* error_abort */
-#include "target/mips/cpu-qom.h" /* mips_cpu_do_interrupt */
+#include "target/mips/internal.h" /* mips_cpu_do_interrupt */
 
 #if 0 /* Support Titan SoC. */
 #define CONFIG_TITAN
@@ -148,8 +148,8 @@ static struct {
 
 #define TRACE(flag, command) ((flag) ? (command) : (void)0)
 
-#define logout(fmt, ...) fprintf(stderr, "AR7\t%-24s" fmt, __func__, ##__VA_ARGS__)
-//~ #define logout(fmt, ...) fprintf(stderr, "AR7\t%-24s%-40.40s " fmt, __func__, backtrace(), ##__VA_ARGS__)
+#define logout(fmt, ...) warn_report("AR7\t%-24s" fmt, __func__, ##__VA_ARGS__)
+//~ #define logout(fmt, ...) warn_report("AR7\t%-24s%-40.40s " fmt, __func__, backtrace(), ##__VA_ARGS__)
 
 #else /* DEBUG_AR7 */
 
@@ -158,8 +158,8 @@ static struct {
 
 #endif /* DEBUG_AR7 */
 
-#define MISSING() logout("%s:%u missing, %s!!!\n", __FILE__, __LINE__, backtrace())
-#define UNEXPECTED() logout("%s:%u unexpected, %s!!!\n", __FILE__, __LINE__, backtrace())
+#define MISSING() logout("%s:%u missing, %s!!!", __FILE__, __LINE__, backtrace())
+#define UNEXPECTED() logout("%s:%u unexpected, %s!!!", __FILE__, __LINE__, backtrace())
 #define backtrace() mips_backtrace()
 
 #if !defined(BIT)
@@ -484,7 +484,7 @@ static const char *offset2name(const offset_name_t *o2n, unsigned offset)
         if (substring) { \
             name = ((substring > env && substring[-1] == '-') ? 0 : 1); \
         } \
-        TRACE(name, logout("Logging enabled for " #name "\n")); \
+        TRACE(name, logout("Logging enabled for " #name)); \
     } while(0)
 
 static void set_traceflags(void)
@@ -515,7 +515,7 @@ static void set_traceflags(void)
 static uint32_t reg_read(const uint8_t * reg, uint32_t addr)
 {
     if (addr & 3) {
-        logout("0x%08x\n", addr);
+        logout("0x%08x", addr);
         UNEXPECTED();
     }
     return le32_to_cpu(*(uint32_t *) (&reg[addr]));
@@ -668,11 +668,11 @@ static void ar7_update_interrupt(void)
             //~ /* use hardware interrupt 0 */
             //~ env->CP0_Cause |= 0x00000400;
             //~ cpu_interrupt(env, CPU_INTERRUPT_HARD);
-            TRACE(INTC, logout("raise hardware interrupt, mask 0x%08x%08x\n",
+            TRACE(INTC, logout("raise hardware interrupt, mask 0x%08x%08x",
                 masked_int2, masked_int1));
         } else {
             int channel;
-            TRACE(INTC, logout("interrupt still set\n"));
+            TRACE(INTC, logout("interrupt still set"));
             for (channel = 0; channel < 40; channel++) {
                 unsigned cindex = channel / 32;
                 unsigned offset = channel % 32;
@@ -692,9 +692,9 @@ static void ar7_update_interrupt(void)
             qemu_irq_lower(env->irq[2]);
             //~ env->CP0_Cause &= ~0x00000400;
             //~ cpu_reset_interrupt(env, CPU_INTERRUPT_HARD);
-            TRACE(INTC, logout("clear hardware interrupt\n"));
+            TRACE(INTC, logout("clear hardware interrupt"));
         } else {
-            TRACE(INTC, logout("interrupt still cleared\n"));
+            TRACE(INTC, logout("interrupt still cleared"));
         }
     }
 }
@@ -707,13 +707,13 @@ static void ar7_primary_irq(void *opaque, int channel, int level)
     unsigned cindex = channel / 32;
     unsigned offset = channel % 32;
     TRACE(INTC && (irq_num != INTERRUPT_SERIAL0 || UART),
-          logout("(%p,%d,%d)\n", opaque, irq_num, level));
+          logout("(%p,%d,%d)", opaque, irq_num, level));
     if (level) {
         assert(env == first_cpu->env_ptr);
         uint32_t intmask = reg_read(av.intc, INTC_ESR1 + 4 * cindex);
         if (intmask & BIT(offset)) {
             TRACE(INTC && (irq_num != 15 || UART),
-                  logout("(%p,%d,%d)\n", opaque, irq_num, level));
+                  logout("(%p,%d,%d)", opaque, irq_num, level));
             reg_write(av.intc, INTC_PIIR, (channel << 16) | channel);
             /* use hardware interrupt 0 */
             qemu_irq_raise(env->irq[2]);
@@ -721,7 +721,7 @@ static void ar7_primary_irq(void *opaque, int channel, int level)
             //~ cpu_interrupt(env, CPU_INTERRUPT_HARD);
         } else {
             TRACE(INTC && (irq_num != 15 || UART),
-                  logout("(%p,%d,%d) is disabled\n", opaque, irq_num, level));
+                  logout("(%p,%d,%d) is disabled", opaque, irq_num, level));
         }
         reg_set(av.intc, INTC_SR1 + 4 * cindex, BIT(offset));
         reg_set(av.intc, INTC_CR1 + 4 * cindex, BIT(offset));
@@ -738,7 +738,7 @@ static void ar7_secondary_irq(void *opaque, int channel, int level)
 {
     /* AR7 secondary interrupt. */
     unsigned irq_num = channel + MIPS_EXCEPTION_OFFSET + NUM_PRIMARY_IRQS;
-    TRACE(INTC, logout("(%p,%d,%d)\n", opaque, irq_num, level));
+    TRACE(INTC, logout("(%p,%d,%d)", opaque, irq_num, level));
     reg_set(av.intc, INTC_EXSR, BIT(channel));
     reg_set(av.intc, INTC_EXCR, BIT(channel));
     MISSING();
@@ -812,10 +812,10 @@ static uint32_t ar7_intc_read(unsigned offset)
     uint32_t val = reg_read(av.intc, offset);
     if (0) {
     } else if (offset == INTC_ECR1 || offset == INTC_ECR2) {
-        TRACE(INTC, logout("intc[%s] = 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] = 0x%08x", i2intc(name_index), val));
         MISSING();
     } else {
-        TRACE(INTC, logout("intc[%s] = 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] = 0x%08x", i2intc(name_index), val));
     }
     return val;
 }
@@ -827,56 +827,56 @@ static void ar7_intc_write(unsigned offset, uint32_t val)
         //~ } else if (name_index == 4) {
     } else if (offset == INTC_SR1 || offset == INTC_SR2) {
         /* Interrupt set. */
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         reg_set(av.intc, offset, val);
         MISSING();
         ar7_update_interrupt();
     } else if (offset == INTC_CR1 || offset == INTC_CR2) {
         /* Interrupt clear. */
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         offset -= INTC_CR1;
         reg_clear(av.intc, INTC_SR1 + offset, val);
         reg_clear(av.intc, INTC_CR1 + offset, val);
         /* TODO: check old value? */
         //~ reg_write(av.intc, INTC_PIIR, 0);
-        //~ logout("??? clear interrupt\a\n");
+        //~ logout("??? clear interrupt\a");
         ar7_update_interrupt();
     } else if (offset == INTC_ESR1 || offset == INTC_ESR2) {
         /* Interrupt enable. */
         reg_set(av.intc, offset, val);
-        TRACE(INTC, logout("intc[%s] val 0x%08x, mask 0x%08x\n",
+        TRACE(INTC, logout("intc[%s] val 0x%08x, mask 0x%08x",
                            i2intc(name_index), val, reg_read(av.intc, offset)));
-        //~ logout("??? check interrupt\a\n");
+        //~ logout("??? check interrupt\a");
         ar7_update_interrupt();
     } else if (offset == INTC_ECR1 || offset == INTC_ECR2) {
         offset += INTC_ESR1 - INTC_ECR1;
         reg_clear(av.intc, offset, val);
-        TRACE(INTC, logout("intc[%s] val 0x%08x, mask 0x%08x\n",
+        TRACE(INTC, logout("intc[%s] val 0x%08x, mask 0x%08x",
                            i2intc(name_index), val, reg_read(av.intc, offset)));
-        //~ logout("??? check interrupt\a\n");
+        //~ logout("??? check interrupt\a");
         ar7_update_interrupt();
     } else if (offset == INTC_EXSR) {
         /* Exceptions Status/Set. */
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         reg_set(av.intc, INTC_EXSR, val);
         MISSING();
     } else if (offset == INTC_EXCR) {
         /* Exceptions Clear. */
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         reg_clear(av.intc, INTC_EXSR, val);
         ar7_update_interrupt();
     } else if (offset == INTC_EXIESR) {
         /* Exceptions Interrupt Enable Status/Set. */
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         reg_set(av.intc, INTC_EXIESR, val);
         ar7_update_interrupt();
     } else if (offset == INTC_EXIECR) {
         /* Exceptions Interrupt Enable Clear. */
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         reg_clear(av.intc, INTC_EXIESR, val);
         ar7_update_interrupt();
     } else {
-        TRACE(INTC, logout("intc[%s] val 0x%08x\n", i2intc(name_index), val));
+        TRACE(INTC, logout("intc[%s] val 0x%08x", i2intc(name_index), val));
         reg_write(av.intc, offset, val);
     }
 }
@@ -996,14 +996,14 @@ static void power_write(uint32_t val)
         for (i = 0; i < 32; i++) {
             if (changed & BIT(i)) {
                 TRACE(CLOCK,
-                      logout("power %sabled %s (0x%08x)\n",
+                      logout("power %sabled %s (0x%08x)",
                              (enabled & BIT(i)) ? "en" : "dis",
                              powerbits[i], val));
             }
         }
 #endif
         oldpowerstate >>= 30;
-        TRACE(CLOCK, logout("change power state from %u to %u\n",
+        TRACE(CLOCK, logout("change power state from %u to %u",
                             oldpowerstate, newpowerstate));
     }
 }
@@ -1033,18 +1033,18 @@ static uint32_t clock_read(unsigned offset)
           reg_write(av.clock_control, offset, val);
         }
     }
-    TRACE(CLOCK, logout("clock[%s] = 0x%08x %s\n", clock_regname(offset), val, backtrace()));
+    TRACE(CLOCK, logout("clock[%s] = 0x%08x %s", clock_regname(offset), val, backtrace()));
     return val;
 }
 
 static void clock_write(unsigned offset, uint32_t val)
 {
-    TRACE(CLOCK, logout("clock[%s] = 0x%08x %s\n", clock_regname(offset), val, backtrace()));
+    TRACE(CLOCK, logout("clock[%s] = 0x%08x %s", clock_regname(offset), val, backtrace()));
     if (offset == CLOCK_PDC) {
         power_write(val);
     } else if (offset / 4 == 0x0c) {
         uint32_t oldval = reg_read(av.clock_control, offset);
-        TRACE(CLOCK, logout("clock[%s] was 0x%08x %s\n", clock_regname(offset), oldval, backtrace()));
+        TRACE(CLOCK, logout("clock[%s] was 0x%08x %s", clock_regname(offset), oldval, backtrace()));
         if ((oldval & ~1) == val) {
             val = oldval;
         }
@@ -1118,7 +1118,7 @@ static uint32_t ar7_dcl_read(unsigned offset)
     } else if (offset == DCL_BOOT_CONFIG) {
     } else {
     }
-    TRACE(logflag, logout("dcl[%s] (0x%08x) = 0x%08x %s\n",
+    TRACE(logflag, logout("dcl[%s] (0x%08x) = 0x%08x %s",
                         text, (AVALANCHE_DCL_BASE + offset),
                         val, backtrace()));
     return val;
@@ -1134,7 +1134,7 @@ static uint32_t ar7_dcl_write(unsigned offset, uint32_t val)
       assert(0);
     } else {
     }
-    TRACE(logflag, logout("dcl[%s] (0x%08x) = 0x%08x %s\n",
+    TRACE(logflag, logout("dcl[%s] (0x%08x) = 0x%08x %s",
                         text, (AVALANCHE_DCL_BASE + offset),
                         val, backtrace()));
     return val;
@@ -1579,7 +1579,7 @@ static void cpmac_reset(DeviceState *d)
 {
     CpmacState *cpmac = CPMAC_STATE(d);
     uint8_t *address = cpmac->addr;
-    logout("%s:%u\n", __FILE__, __LINE__);
+    logout("%s:%u", __FILE__, __LINE__);
     memset(address, 0, sizeof(av.cpmac0));
     reg_write(address, CPMAC_TXIDVER, 0x000c0a07);
     reg_write(address, CPMAC_RXIDVER, 0x000c0a07);
@@ -1611,7 +1611,7 @@ static uint32_t ar7_cpmac_read(CpmacState *s, unsigned offset)
         }
     } else {
     }
-    TRACE(logflag, logout("cpmac%u[%s] (0x%08x) = 0x%08x %s\n",
+    TRACE(logflag, logout("cpmac%u[%s] (0x%08x) = 0x%08x %s",
                         s->index, text,
                         AVALANCHE_CPMAC0_BASE + (AVALANCHE_CPMAC1_BASE -
                                                  AVALANCHE_CPMAC0_BASE) *
@@ -1690,10 +1690,10 @@ static void emac_transmit(CpmacState *s, unsigned offset, uint32_t address)
     reg_write(cpmac, offset, address);
     if (address == 0) {
     } else if (!(reg_read(cpmac, CPMAC_MACCONTROL) & MACCONTROL_GMIIEN)) {
-        TRACE(CPMAC, logout("cpmac%u MII is disabled, frame ignored\n",
+        TRACE(CPMAC, logout("cpmac%u MII is disabled, frame ignored",
           s->index));
     } else if (!(reg_read(cpmac, CPMAC_TXCONTROL) & TXCONTROL_TXEN)) {
-        TRACE(CPMAC, logout("cpmac%u transmitter is disabled, frame ignored\n",
+        TRACE(CPMAC, logout("cpmac%u transmitter is disabled, frame ignored",
           s->index));
     } else {
         uint32_t length = 0;
@@ -1715,7 +1715,7 @@ static void emac_transmit(CpmacState *s, unsigned offset, uint32_t address)
 
         TRACE(RXTX,
               logout
-              ("buffer 0x%08x, next 0x%08x, buff 0x%08x, flags 0x%08x, len 0x%08x, total 0x%08x\n",
+              ("buffer 0x%08x, next 0x%08x, buff 0x%08x, flags 0x%08x, len 0x%08x, total 0x%08x",
                address, next, addr, flags, bufferlength, packetlength));
         assert(length + packetlength <= MAX_ETH_FRAME_SIZE);
         cpu_physical_memory_read(addr, buffer + length, bufferlength);
@@ -1726,7 +1726,7 @@ static void emac_transmit(CpmacState *s, unsigned offset, uint32_t address)
         assert(flags & TCB_EOP);
         //~ assert(flags & TCB_OWNER); // !!!
         if (!(flags & TCB_OWNER)) {
-            logout("%s: OWNER flag is not set\n", __func__);
+            logout("%s: OWNER flag is not set", __func__);
             UNEXPECTED();
         }
         assert(!(flags & TCB_PASSCRC));
@@ -1741,14 +1741,14 @@ static void emac_transmit(CpmacState *s, unsigned offset, uint32_t address)
 #if 0
             uint32_t crc = fcs(buffer, length);
             TRACE(CPMAC,
-                  logout("FCS 0x%04x 0x%04x\n",
+                  logout("FCS 0x%04x 0x%04x",
                          (uint32_t) crc32(~0, buffer, length - 4), crc));
             crc = htonl(crc);
             memcpy(&buffer[length], &crc, 4);
             length += 4;
 #endif
             TRACE(RXTX,
-                  logout("cpmac%u sent %u byte: %s\n", s->index, length,
+                  logout("cpmac%u sent %u byte: %s", s->index, length,
                          dump(buffer, length)));
             qemu_send_packet(qemu_get_queue(s->nic), buffer, length);
         }
@@ -1765,7 +1765,7 @@ static void emac_transmit(CpmacState *s, unsigned offset, uint32_t address)
         //~ statusreg_inc(s, CPMAC_TXMULTICASTFRAMES);
 
         if (next != 0) {
-            TRACE(RXTX, logout("more data to send...\n"));
+            TRACE(RXTX, logout("more data to send..."));
             address = next;
             goto loop;
         }
@@ -1780,7 +1780,7 @@ static void ar7_cpmac_write(CpmacState *s, unsigned offset, uint32_t val)
     }
     cpmac = s->addr;
     assert((offset & 3) == 0);
-    TRACE(CPMAC, logout("cpmac%u[%s] (0x%08x) = 0x%08lx\n",
+    TRACE(CPMAC, logout("cpmac%u[%s] (0x%08x) = 0x%08lx",
                         s->index, cpmac_regname(offset),
                         (AVALANCHE_CPMAC0_BASE +
                                         (AVALANCHE_CPMAC1_BASE -
@@ -1831,7 +1831,7 @@ static void ar7_cpmac_write(CpmacState *s, unsigned offset, uint32_t val)
         val = (reg_read(cpmac, CPMAC_RXUNICASTSET) & ~val);
         reg_write(cpmac, CPMAC_RXUNICASTSET, val);
     } else if (offset == CPMAC_RXMAXLEN) {
-        TRACE(CPMAC, logout("setting max packet length %u\n", val));
+        TRACE(CPMAC, logout("setting max packet length %u", val));
         val &= 0xffff;
         reg_write(cpmac, offset, val);
     } else if (offset == CPMAC_TXINTMASKSET) {
@@ -1874,7 +1874,7 @@ static void ar7_cpmac_write(CpmacState *s, unsigned offset, uint32_t val)
         // TODO: set address for qemu?
         if (s->nic) {
             qemu_format_nic_info_str(qemu_get_queue(s->nic), phys);
-            TRACE(CPMAC, logout("setting mac address %s\n",
+            TRACE(CPMAC, logout("setting mac address %s",
                                 qemu_get_queue(s->nic)->info_str));
         }
     } else if (offset >= CPMAC_RXGOODFRAMES && offset <= CPMAC_RXDMAOVERRUNS) {
@@ -1912,7 +1912,7 @@ static void ar7_cpmac_write(CpmacState *s, unsigned offset, uint32_t val)
             emac_update_interrupt(s);
         }
     } else {
-        //~ logout("???\n");
+        //~ logout("???");
         reg_write(cpmac, offset, val);
     }
 }
@@ -1937,13 +1937,13 @@ typedef enum {
 static uint32_t ar7_emif_read(unsigned offset)
 {
     uint32_t value = reg_read(av.emif, offset);
-    TRACE(EMIF, logout("emif[0x%02x] = 0x%08x\n", offset, value));
+    TRACE(EMIF, logout("emif[0x%02x] = 0x%08x", offset, value));
     return value;
 }
 
 static void ar7_emif_write(unsigned offset, uint32_t value)
 {
-    TRACE(EMIF, logout("emif[0x%02x] = 0x%08x\n", offset, value));
+    TRACE(EMIF, logout("emif[0x%02x] = 0x%08x", offset, value));
     if (offset == EMIF_REV) {
         /* Revision is readonly. */
         UNEXPECTED();
@@ -2046,16 +2046,16 @@ static uint32_t ar7_gpio_read(unsigned offset)
     uint32_t value = reg_read(av.gpio, offset);
     if (offset == GPIO_IN && value == 0x00000800) {
         /* Do not log polling of reset button. */
-        TRACE(GPIO, logout("gpio[%s] = 0x%08x\n", gpio_regname(offset), value));
+        TRACE(GPIO, logout("gpio[%s] = 0x%08x", gpio_regname(offset), value));
     } else {
-        TRACE(GPIO, logout("gpio[%s] = 0x%08x\n", gpio_regname(offset), value));
+        TRACE(GPIO, logout("gpio[%s] = 0x%08x", gpio_regname(offset), value));
     }
     return value;
 }
 
 static void ar7_gpio_write(unsigned offset, uint32_t value)
 {
-    TRACE(GPIO, logout("gpio[%s] = 0x%08x\n", gpio_regname(offset), value));
+    TRACE(GPIO, logout("gpio[%s] = 0x%08x", gpio_regname(offset), value));
     reg_write(av.gpio, offset, value);
     if (offset <= GPIO_DIR) {
         ar7_gpio_display();
@@ -2122,7 +2122,7 @@ typedef enum {
 static uint32_t mdio_phy_read(unsigned phy_index)
 {
     uint32_t val = reg_read(av.mdio, (phy_index == 0) ? MDIO_USERACCESS0 : MDIO_USERACCESS1);
-    TRACE(MDIO, logout("mdio[USERACCESS%u] = 0x%08x\n", phy_index, val));
+    TRACE(MDIO, logout("mdio[USERACCESS%u] = 0x%08x", phy_index, val));
     return val;
 }
 
@@ -2136,7 +2136,7 @@ static void mdio_phy_write(unsigned phy_index, uint32_t val)
     assert(phyaddr < 32);
     TRACE(MDIO,
           logout
-          ("mdio[USERACCESS%u] = 0x%08x, writeflag = %u, reg = %u, phy = %u\n",
+          ("mdio[USERACCESS%u] = 0x%08x, writeflag = %u, reg = %u, phy = %u",
            phy_index, val, writeflag, regaddr, phyaddr));
     if (val & MDIO_USERACCESS_GO) {
         val &= (MDIO_USERACCESS_WRITE | MDIO_USERACCESS_REGADR |
@@ -2187,10 +2187,10 @@ static uint32_t ar7_mdio_read(uint8_t *mdio, unsigned offset)
     } else if (offset == MDIO_USERACCESS1) {
         val = mdio_phy_read(1);
     } else {
-        TRACE(MDIO, logout("mdio[0x%02x] = 0x%08x\n", offset, val));
+        TRACE(MDIO, logout("mdio[0x%02x] = 0x%08x", offset, val));
     }
     if (text) {
-        TRACE(MDIO, logout("mdio[%s] = 0x%08x\n", text, val));
+        TRACE(MDIO, logout("mdio[%s] = 0x%08x", text, val));
     }
     return val;
 }
@@ -2206,11 +2206,11 @@ static void ar7_mdio_write(uint8_t *mdio, unsigned offset, uint32_t val)
         text = "CONTROL";
         if ((val ^ oldval) & MDIO_CONTROL_ENABLE) {
             if (val & MDIO_CONTROL_ENABLE) {
-              TRACE(MDIO, logout("enable MDIO state machine\n"));
+              TRACE(MDIO, logout("enable MDIO state machine"));
               phy_enable();
               reg_write(av.mdio, MDIO_ALIVE, BIT(ar7->phyaddr));
             } else {
-              TRACE(MDIO, logout("disable MDIO state machine\n"));
+              TRACE(MDIO, logout("disable MDIO state machine"));
               phy_disable();
             }
         }
@@ -2220,11 +2220,11 @@ static void ar7_mdio_write(uint8_t *mdio, unsigned offset, uint32_t val)
     } else if (offset == MDIO_USERACCESS1) {
         mdio_phy_write(1, val);
     } else {
-        TRACE(MDIO, logout("mdio[0x%02x] = 0x%08x\n", offset, val));
+        TRACE(MDIO, logout("mdio[0x%02x] = 0x%08x", offset, val));
         reg_write(mdio, offset, val);
     }
     if (text) {
-        TRACE(MDIO, logout("mdio[%s] = 0x%08x\n", text, val));
+        TRACE(MDIO, logout("mdio[%s] = 0x%08x", text, val));
     }
 }
 
@@ -2258,19 +2258,19 @@ static void ar7_reset_write(uint32_t offset, uint32_t val)
         for (i = 0; i < 32; i++) {
             if (changed & BIT(i)) {
                 TRACE(RESET,
-                      logout("reset %sabled %s (0x%08x)\n",
+                      logout("reset %sabled %s (0x%08x)",
                              (enabled & BIT(i)) ? "en" : "dis",
                              resetdevice[i], val));
             }
         }
 #endif
     } else if (offset == 4) {
-        TRACE(RESET, logout("reset\n"));
+        TRACE(RESET, logout("reset"));
         qemu_system_reset_request(SHUTDOWN_CAUSE_GUEST_RESET);
         //~ CPUMIPSState *env = first_cpu;
         //~ env->active_tc.PC = 0xbfc00000;
     } else {
-        TRACE(RESET, logout("reset[%u]=0x%08x\n", offset, val));
+        TRACE(RESET, logout("reset[%u]=0x%08x", offset, val));
     }
 }
 
@@ -2302,7 +2302,7 @@ static void timer_cb(void *opaque)
 {
     ar7_timer_t *timer = (ar7_timer_t *)opaque;
 
-    TRACE(TIMER, logout("timer%d expired\n", timer == &ar7->timer[1]));
+    TRACE(TIMER, logout("timer%d expired", timer == &ar7->timer[1]));
     qemu_irq_raise(timer->interrupt);
     if (timer->cyclic) {
         int64_t t = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
@@ -2315,20 +2315,20 @@ static uint32_t ar7_timer_read(unsigned timer_index, uint32_t addr)
     ar7_timer_t *timer = &ar7->timer[timer_index];
     uint32_t val;
     val = reg_read(timer->base, addr);
-    TRACE(TIMER, logout("timer%u[%d]=0x%08x\n", timer_index, addr, val));
+    TRACE(TIMER, logout("timer%u[%d]=0x%08x", timer_index, addr, val));
     return val;
 }
 
 static void ar7_timer_write(unsigned timer_index, uint32_t addr, uint32_t val)
 {
     ar7_timer_t *timer = &ar7->timer[timer_index];
-    TRACE(TIMER, logout("timer%u[%d]=0x%08x\n", timer_index, addr, val));
+    TRACE(TIMER, logout("timer%u[%d]=0x%08x", timer_index, addr, val));
     reg_write(timer->base, addr, val);
     if (addr == TIMER_CONTROL) {
         timer->cyclic = ((val & TIMER_CONTROL_MODE) != 0);
         if (val & TIMER_CONTROL_PRESCALE_ENABLE) {
             timer->prescale = ((val & TIMER_CONTROL_PRESCALE) >> 2);
-            logout("prescale %u\n", timer->prescale);
+            logout("prescale %u", timer->prescale);
         } else {
             timer->prescale = 1;
         }
@@ -2407,7 +2407,7 @@ static uint32_t uart_read(unsigned uart_index, uint32_t addr)
     assert(reg < 8);
     val = serial_mm_read(ar7->serial[uart_index], addr, 1);
     //~ if (reg != 5) {
-        TRACE(UART, logout("uart%u[%s]=0x%08x\n", uart_index,
+        TRACE(UART, logout("uart%u[%s]=0x%08x", uart_index,
             uart_read_names[uart_name_index(uart_index, reg)], val));
     //~ }
     return val;
@@ -2422,7 +2422,7 @@ static void uart_write(unsigned uart_index, uint32_t addr, uint32_t val)
     }
     assert(reg < 8);
     //~ if (reg != 0 || dlab[uart_index]) {
-        TRACE(UART, logout("uart%u[%s]=0x%08x\n", uart_index,
+        TRACE(UART, logout("uart%u[%s]=0x%08x", uart_index,
             uart_write_names[uart_name_index(uart_index, reg)], val));
     //~ }
     if (reg == 3) {
@@ -2713,7 +2713,7 @@ static uint32_t ar7_vlynq_read(unsigned vlynq_index, unsigned offset)
 {
     uint8_t *vlynq = ar7->vlynq[vlynq_index];
     uint32_t val = reg_read(vlynq, offset);
-    TRACE(VLYNQ, logout("vlynq%u[0x%02x (%s)] = 0x%08lx\n",
+    TRACE(VLYNQ, logout("vlynq%u[0x%02x (%s)] = 0x%08lx",
                         vlynq_index, offset,
                         vlynq_names[offset / 4],
                         (unsigned long)val));
@@ -2732,7 +2732,7 @@ static uint32_t ar7_vlynq_read(unsigned vlynq_index, unsigned offset)
 static void ar7_vlynq_write(unsigned vlynq_index, unsigned offset, uint32_t val)
 {
     uint8_t *vlynq = ar7->vlynq[vlynq_index];
-    TRACE(VLYNQ, logout("vlynq%u[0x%02x (%s)] = 0x%08lx\n",
+    TRACE(VLYNQ, logout("vlynq%u[0x%02x (%s)] = 0x%08lx",
                         vlynq_index, offset,
                         vlynq_names[offset / 4],
                         (unsigned long)val));
@@ -2800,16 +2800,16 @@ static void watchdog_trigger(void)
 {
     wdtimer_t *wdt = (wdtimer_t *) & av.watchdog;
     if (wdt->disable == 0) {
-        TRACE(WDOG, logout("disabled watchdog\n"));
+        TRACE(WDOG, logout("disabled watchdog"));
         timer_del(ar7->wd_timer);
     } else {
         int64_t t = ((uint64_t)wdt->change * (uint64_t)wdt->prescale) *
                     (NANOSECONDS_PER_SECOND / io_frequency);
-        //~ logout("change   = 0x%x\n", wdt->change);
-        //~ logout("prescale = 0x%x\n", wdt->prescale);
-        TRACE(WDOG, logout("trigger value = %u ms\n",
+        //~ logout("change   = 0x%x", wdt->change);
+        //~ logout("prescale = 0x%x", wdt->prescale);
+        TRACE(WDOG, logout("trigger value = %u ms",
               (unsigned)(t * 1000 / NANOSECONDS_PER_SECOND)));
-        //~ logout("trigger value = %u\n", (unsigned)(NANOSECONDS_PER_SECOND / 1000000));
+        //~ logout("trigger value = %u", (unsigned)(NANOSECONDS_PER_SECOND / 1000000));
         timer_mod(ar7->wd_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + t);
     }
 }
@@ -2824,94 +2824,94 @@ static void ar7_wdt_write(unsigned offset, uint32_t val)
     wdtimer_t *wdt = (wdtimer_t *) & av.watchdog;
     if (offset == offsetof(wdtimer_t, kick_lock)) {
         if (val == KICK_LOCK_1ST_STAGE) {
-            TRACE(WDOG, logout("kick lock 1st stage\n"));
+            TRACE(WDOG, logout("kick lock 1st stage"));
             wdt->kick_lock = wd_val(val, 1);
         } else if (val == KICK_LOCK_2ND_STAGE) {
-            TRACE(WDOG, logout("kick lock 2nd stage\n"));
+            TRACE(WDOG, logout("kick lock 2nd stage"));
             wdt->kick_lock = wd_val(val, 3);
         } else {
             TRACE(WDOG,
-                  logout("kick lock unexpected value 0x%08x, %s\n", val,
+                  logout("kick lock unexpected value 0x%08x, %s", val,
                          backtrace()));
         }
     } else if (offset == offsetof(wdtimer_t, kick)) {
         if (wdt->kick_lock != wd_val(KICK_LOCK_2ND_STAGE, 3)) {
-            TRACE(WDOG, logout("kick still locked!\n"));
+            TRACE(WDOG, logout("kick still locked!"));
             UNEXPECTED();
         } else if (val == KICK_VALUE) {
-            TRACE(WDOG, logout("kick (restart) watchdog\n"));
+            TRACE(WDOG, logout("kick (restart) watchdog"));
             watchdog_trigger();
         } else {
             UNEXPECTED();
         }
     } else if (offset == offsetof(wdtimer_t, change_lock)) {
         if (val == CHANGE_LOCK_1ST_STAGE) {
-            TRACE(WDOG, logout("change lock 1st stage\n"));
+            TRACE(WDOG, logout("change lock 1st stage"));
             wdt->change_lock = wd_val(val, 1);
         } else if (val == CHANGE_LOCK_2ND_STAGE) {
-            TRACE(WDOG, logout("change lock 2nd stage\n"));
+            TRACE(WDOG, logout("change lock 2nd stage"));
             wdt->change_lock = wd_val(val, 3);
         } else {
             TRACE(WDOG,
-                  logout("change lock unexpected value 0x%08x, %s\n", val,
+                  logout("change lock unexpected value 0x%08x, %s", val,
                          backtrace()));
         }
     } else if (offset == offsetof(wdtimer_t, change)) {
         if (wdt->change_lock != wd_val(CHANGE_LOCK_2ND_STAGE, 3)) {
-            TRACE(WDOG, logout("change still locked!\n"));
+            TRACE(WDOG, logout("change still locked!"));
             UNEXPECTED();
         } else {
-            TRACE(WDOG, logout("change watchdog, val=0x%08x\n", val));
+            TRACE(WDOG, logout("change watchdog, val=0x%08x", val));
             wdt->change = val;
         }
     } else if (offset == offsetof(wdtimer_t, disable_lock)) {
         if (val == DISABLE_LOCK_1ST_STAGE) {
-            TRACE(WDOG, logout("disable lock 1st stage\n"));
+            TRACE(WDOG, logout("disable lock 1st stage"));
             wdt->disable_lock = wd_val(val, 1);
         } else if (val == DISABLE_LOCK_2ND_STAGE) {
-            TRACE(WDOG, logout("disable lock 2nd stage\n"));
+            TRACE(WDOG, logout("disable lock 2nd stage"));
             wdt->disable_lock = wd_val(val, 2);
         } else if (val == DISABLE_LOCK_3RD_STAGE) {
-            TRACE(WDOG, logout("disable lock 3rd stage\n"));
+            TRACE(WDOG, logout("disable lock 3rd stage"));
             wdt->disable_lock = wd_val(val, 3);
         } else {
             TRACE(WDOG,
-                  logout("disable lock unexpected value 0x%08x, %s\n", val,
+                  logout("disable lock unexpected value 0x%08x, %s", val,
                          backtrace()));
         }
     } else if (offset == offsetof(wdtimer_t, disable)) {
         if (wdt->disable_lock != wd_val(DISABLE_LOCK_3RD_STAGE, 3)) {
-            TRACE(WDOG, logout("disable still locked, val=0x%08x!\n", val));
+            TRACE(WDOG, logout("disable still locked, val=0x%08x!", val));
             UNEXPECTED();
         } else {
             TRACE(WDOG,
-                  logout("%sable watchdog, val=0x%08x\n", val ? "en" : "dis", val));
+                  logout("%sable watchdog, val=0x%08x", val ? "en" : "dis", val));
             wdt->disable = val;
             watchdog_trigger();
         }
     } else if (offset == offsetof(wdtimer_t, prescale_lock)) {
         if (val == PRESCALE_LOCK_1ST_STAGE) {
-            TRACE(WDOG, logout("prescale lock 1st stage\n"));
+            TRACE(WDOG, logout("prescale lock 1st stage"));
             wdt->prescale_lock = wd_val(val, 1);
         } else if (val == PRESCALE_LOCK_2ND_STAGE) {
-            TRACE(WDOG, logout("prescale lock 2nd stage\n"));
+            TRACE(WDOG, logout("prescale lock 2nd stage"));
             wdt->prescale_lock = wd_val(val, 3);
         } else {
             TRACE(WDOG,
-                  logout("prescale lock unexpected value 0x%08x, %s\n", val,
+                  logout("prescale lock unexpected value 0x%08x, %s", val,
                          backtrace()));
         }
     } else if (offset == offsetof(wdtimer_t, prescale)) {
         if (wdt->prescale_lock != wd_val(PRESCALE_LOCK_2ND_STAGE, 3)) {
-            TRACE(WDOG, logout("prescale still locked, val=0x%08x!\n", val));
+            TRACE(WDOG, logout("prescale still locked, val=0x%08x!", val));
             UNEXPECTED();
         } else {
-            TRACE(WDOG, logout("set watchdog prescale, val=0x%08x\n", val));    // val = 0xffff
+            TRACE(WDOG, logout("set watchdog prescale, val=0x%08x", val));    // val = 0xffff
             wdt->prescale = val;
         }
     } else {
         TRACE(WDOG,
-              logout("??? offset 0x%02x = 0x%08x, %s\n", offset, val,
+              logout("??? offset 0x%02x = 0x%08x, %s", offset, val,
                      backtrace()));
     }
 }
@@ -2920,7 +2920,7 @@ static void watchdog_cb(void *opaque)
 {
     CPUMIPSState *env = opaque;
 
-    logout("watchdog expired\n");
+    logout("watchdog expired");
     first_cpu->exception_index = EXCP_NMI;
     env->error_code = 0;
     mips_cpu_do_interrupt(ENV_GET_CPU(env));
@@ -3029,12 +3029,12 @@ static uint32_t ar7_io_memread(void *opaque, uint32_t addr)
         //~ name = "???";
         logflag = 0;
         {
-            logout("addr 0x%08x (???" ") = 0x%08x\n", addr, val);
+            logout("addr 0x%08x (???" ") = 0x%08x", addr, val);
             MISSING();
         }
     }
     if (name != 0) {
-        TRACE(logflag, logout("addr 0x%08lx (%s) = 0x%08x\n",
+        TRACE(logflag, logout("addr 0x%08lx (%s) = 0x%08x",
                               (unsigned long)addr, name, val));
     }
     return val;
@@ -3046,7 +3046,7 @@ static void ar7_io_memwrite(void *opaque, uint32_t addr, uint32_t val)
     int logflag = OTHER;
 
     if (addr & 3) {
-        logout("??? addr 0x%08x\n", addr);
+        logout("??? addr 0x%08x", addr);
         assert(!(addr & 3));
     }
 
@@ -3157,12 +3157,12 @@ static void ar7_io_memwrite(void *opaque, uint32_t addr, uint32_t val)
         //~ name = "???";
         logflag = 0;
         {
-            logout("addr 0x%08x (???" ") = 0x%08x\n", addr, val);
+            logout("addr 0x%08x (???" ") = 0x%08x", addr, val);
             MISSING();
         }
     }
     if (name != 0) {
-        TRACE(logflag, logout("addr 0x%08lx (%s) = 0x%08x\n",
+        TRACE(logflag, logout("addr 0x%08lx (%s) = 0x%08x",
                               (unsigned long)addr, name, val));
     }
 }
@@ -3174,13 +3174,13 @@ static void io_writeb(void *opaque, hwaddr addr, uint32_t value)
     } else if (INRANGE(AVALANCHE_VLYNQ0_BASE + VLYNQ_CTRL, 4) ||
                INRANGE(AVALANCHE_GPIO_BASE, av.gpio)) {
         uint32_t oldvalue = ar7_io_memread(opaque, addr & ~3);
-        //~ logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value);
+        //~ logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value);
         oldvalue &= ~(0xff << (8 * (addr & 3)));
         value = oldvalue + ((value & 0xff) << (8 * (addr & 3)));
         ar7_io_memwrite(opaque, addr & ~3, value);
     } else if (addr & 3) {
         ar7_io_memwrite(opaque, addr & ~3, value);
-        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value);
+        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value);
         UNEXPECTED();
     } else if (INRANGE(AVALANCHE_UART0_BASE, av.uart0)) {
         ar7_io_memwrite(opaque, addr, value);
@@ -3188,13 +3188,13 @@ static void io_writeb(void *opaque, hwaddr addr, uint32_t value)
         ar7_io_memwrite(opaque, addr, value);
     } else {
         ar7_io_memwrite(opaque, addr, value);
-        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value);
+        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value);
         //~ UNEXPECTED();
     }
 #else
     } else {
         ar7_io_memwrite(opaque, addr, value);
-        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value);
+        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value);
         MISSING();
     }
 #endif
@@ -3209,28 +3209,28 @@ static uint32_t io_readb(void *opaque, hwaddr addr)
     } else if (INRANGE(AVALANCHE_BBIF_BASE, av.bbif)) {
         value >>= (addr & 3) * 8;
         value &= 0xff;
-        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value);
+        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value);
     } else if (INRANGE(AVALANCHE_GPIO_BASE, av.gpio)) {
         value >>= ((addr & 3) * 8);
         value &= 0xff;
-        //~ logout("??? addr=0x%08x, val=0x%02x\n", addr, value);
+        //~ logout("??? addr=0x%08x, val=0x%02x", addr, value);
     } else if (INRANGE(AVALANCHE_CLOCK_BASE, av.clock_control)) {
         value = clock_read((addr & ~3) - AVALANCHE_CLOCK_BASE);
         value >>= ((addr & 3) * 8);
         value &= 0xff;
     } else if (addr & 3) {
-        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value);
+        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value);
         UNEXPECTED();
     } else if (INRANGE(AVALANCHE_UART0_BASE, av.uart0)) {
     } else if (INRANGE(AVALANCHE_UART1_BASE, av.uart1)) {
     } else if (INRANGE(AVALANCHE_UART1_BASE, av.uart1)) {
     } else {
-        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value & 0xff);
+        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value & 0xff);
         UNEXPECTED();
     }
 #else
     } else {
-        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x\n", addr, value & 0xff);
+        logout("addr=0x" TARGET_FMT_plx ", val=0x%02x", addr, value & 0xff);
         MISSING();
     }
 #endif
@@ -3242,7 +3242,7 @@ static void io_writew(void *opaque, hwaddr addr, uint32_t value)
 {
     if (0) {
     } else {
-        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%04x\n", addr, value);
+        logout("??? addr=0x" TARGET_FMT_plx ", val=0x%04x", addr, value);
         switch (addr & 3) {
 #if !defined(TARGET_WORDS_BIGENDIAN)
         case 0:
@@ -3285,7 +3285,7 @@ static uint32_t io_readw(void *opaque, hwaddr addr)
       default:
           assert(0);
       }
-      TRACE(OTHER, logout("addr=0x" TARGET_FMT_plx ", val=0x%04x\n", addr, value));
+      TRACE(OTHER, logout("addr=0x" TARGET_FMT_plx ", val=0x%04x", addr, value));
     }
     return value;
 }
@@ -3368,7 +3368,7 @@ static int ar7_nic_can_receive(NetClientState *ncs)
     CpmacState *s = qemu_get_nic_opaque(ncs);
     int enabled = (reg_read(s->addr, CPMAC_RXCONTROL) & RXCONTROL_RXEN) != 0;
 
-    TRACE(CPMAC, logout("cpmac%u, enabled %d\n", s->index, enabled));
+    TRACE(CPMAC, logout("cpmac%u, enabled %d", s->index, enabled));
 
     return enabled;
 }
@@ -3384,17 +3384,17 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
     uint32_t flags = 0;
 
     if (!(reg_read(cpmac, CPMAC_MACCONTROL) & MACCONTROL_GMIIEN)) {
-        TRACE(CPMAC, logout("cpmac%u MII is disabled, frame ignored\n",
+        TRACE(CPMAC, logout("cpmac%u MII is disabled, frame ignored",
               s->index));
         return -1;
     } else if (!(reg_read(cpmac, CPMAC_RXCONTROL) & RXCONTROL_RXEN)) {
-        TRACE(CPMAC, logout("cpmac%u receiver is disabled, frame ignored\n",
+        TRACE(CPMAC, logout("cpmac%u receiver is disabled, frame ignored",
           s->index));
         return -1;
     }
 
     TRACE(RXTX,
-          logout("cpmac%u received %u byte: %s\n", s->index, (unsigned)size,
+          logout("cpmac%u received %u byte: %s", s->index, (unsigned)size,
                  dump(buf, size)));
 
     assert(!(rxmbpenable & RXMBPENABLE_RXPASSCRC));
@@ -3411,28 +3411,28 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
     if ((rxmbpenable & RXMBPENABLE_RXBROADEN) && !memcmp(buf, broadcast_macaddr, 6)) {
         channel = ((rxmbpenable & RXMBPENABLE_RXBROADCH) >> 8);
         statusreg_inc(s, CPMAC_RXBROADCASTFRAMES);
-        TRACE(CPMAC, logout("broadcast to channel %d\n", channel));
+        TRACE(CPMAC, logout("broadcast to channel %d", channel));
     } else if ((rxmbpenable & RXMBPENABLE_RXMULTEN) && (buf[0] & 0x01)) {
         // !!! must check MACHASH1, MACHASH2
         channel = ((rxmbpenable & RXMBPENABLE_RXMULTCH) >> 0);
         statusreg_inc(s, CPMAC_RXMULTICASTFRAMES);
-        TRACE(CPMAC, logout("multicast to channel %d\n", channel));
+        TRACE(CPMAC, logout("multicast to channel %d", channel));
     } else if (!memcmp(buf, s->conf.macaddr.a, 6)) {
         channel = 0;
-        TRACE(CPMAC, logout("my address to channel %d\n", channel));
+        TRACE(CPMAC, logout("my address to channel %d", channel));
     } else if (rxmbpenable & RXMBPENABLE_RXCAFEN) {
         channel = ((rxmbpenable & RXMBPENABLE_RXPROMCH) >> 16);
         //~ statusreg_inc(s, CPMAC_RXMULTICASTFRAMES);
-        TRACE(CPMAC, logout("promiscuous to channel %d\n", channel));
+        TRACE(CPMAC, logout("promiscuous to channel %d", channel));
         flags |= RCB_NOMATCH;
     } else {
-        TRACE(CPMAC, logout("unknown address, frame ignored\n"));
+        TRACE(CPMAC, logout("unknown address, frame ignored"));
         return -1;
     }
 
     /* !!! check handling of short and long frames */
     if (size < 64) {
-        TRACE(CPMAC, logout("short frame, flag = 0x%x\n",
+        TRACE(CPMAC, logout("short frame, flag = 0x%x",
           rxmbpenable & RXMBPENABLE_RXCSFEN));
         statusreg_inc(s, CPMAC_RXUNDERSIZEDFRAMES);
         flags |= RCB_UNDERSIZED;
@@ -3448,7 +3448,7 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
     /* Get descriptor pointer and process the received frame. */
     uint32_t dp = reg_read(cpmac, CPMAC_RX0HDP + 4 * channel);
     if (dp == 0) {
-        TRACE(RXTX, logout("no buffer available, frame ignored\n"));
+        TRACE(RXTX, logout("no buffer available, frame ignored"));
     } else {
         cpphy_rcb_t rcb;
         cpu_physical_memory_read(dp, (uint8_t *) & rcb, sizeof(rcb));
@@ -3457,7 +3457,7 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
         uint32_t mode = le32_to_cpu(rcb.mode);
         TRACE(CPMAC,
               logout
-              ("buffer 0x%08x, next 0x%08x, buff 0x%08x, params 0x%08x, len 0x%08x\n",
+              ("buffer 0x%08x, next 0x%08x, buff 0x%08x, params 0x%08x, len 0x%08x",
                dp, (unsigned)rcb.next, addr, mode, length));
         if (mode & RCB_OWNER) {
             assert(length >= size);
@@ -3466,7 +3466,7 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
             mode |= (size & BITS(15, 0));
             mode |= RCB_SOP | RCB_EOP;
             if (rcb.next == 0) {
-                TRACE(CPMAC, logout("last buffer\n"));
+                TRACE(CPMAC, logout("last buffer"));
                 mode |= RCB_EOQ;
             }
             mode |= RCB_PASSCRC;
@@ -3483,7 +3483,7 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
 #endif
             emac_update_interrupt(s);
         } else {
-            logout("buffer not free, frame ignored\n");
+            logout("buffer not free, frame ignored");
         }
     }
     return size;
@@ -3492,7 +3492,7 @@ static ssize_t ar7_nic_receive(NetClientState *ncs,
 static void ar7_nic_set_link_status(NetClientState *ncs)
 {
     //~ CpmacState *s = qemu_get_nic_opaque(ncs);
-    logout("%s:%u\n", __FILE__, __LINE__);
+    logout("%s:%u", __FILE__, __LINE__);
     MISSING();
 
 #if 0
@@ -3535,11 +3535,11 @@ static void ar7_nic_init(void)
 {
     unsigned i;
     unsigned n = 0;
-    TRACE(CPMAC, logout("\n"));
+    TRACE(CPMAC, logout(""));
     for (i = 0; i < nb_nics; i++) {
         NICInfo *nd = &nd_table[i];
         if (nd->used) {
-            TRACE(CPMAC, logout("starting AR7 nic CPMAC%u\n", n));
+            TRACE(CPMAC, logout("starting AR7 nic CPMAC%u", n));
             qemu_check_nic_model(nd, "ar7");
             if (n < 2) {
                 DeviceState *dev = qdev_create(NULL, TYPE_CPMAC_STATE);
@@ -3560,13 +3560,13 @@ static void ar7_nic_init(void)
 
 static int ar7_display_can_receive(void *opaque)
 {
-    //~ logout("%p\n", opaque);
+    //~ logout("%p", opaque);
     return 1;
 }
 
 static void ar7_display_receive(void *opaque, const uint8_t *buf, int size)
 {
-    //~ logout("%p, %d bytes (0x%02x)\n", opaque, size, buf[0]);
+    //~ logout("%p, %d bytes (0x%02x)", opaque, size, buf[0]);
     if (buf[0] == 'r') {
         uint32_t in = reg_read(av.gpio, GPIO_IN);
         reg_write(av.gpio, GPIO_IN, in ^ 0x00000800);
@@ -3582,7 +3582,7 @@ static void ar7_display_event(void *opaque, int event)
 {
     /* TODO: what should we do here? */
     /* Wird gleich am Anfang mit (NULL, 2) aufgerufen. */
-    TRACE(OTHER, logout("%p, %d\n", opaque, event));
+    TRACE(OTHER, logout("%p, %d", opaque, event));
     //~ if (event == CHR_EVENT_BREAK)
     AR7State *s = opaque;
 
@@ -3643,7 +3643,7 @@ static void ar7_reset(DeviceState *d)
     /* TODO: fix code. */
     //~ AR7State *s = AR7_STATE(d);
     //~ CPUMIPSState *env = opaque;
-    logout("%s:%u\n", __FILE__, __LINE__);
+    logout("%s:%u", __FILE__, __LINE__);
     //~ env->exception_index = EXCP_RESET;
     //~ env->exception_index = EXCP_SRESET;
     //~ mips_cpu_do_interrupt(env);
@@ -3723,15 +3723,15 @@ static void kernel_load(CPUMIPSState *env)
         kernel_addr = K1(KERNEL_LOAD_ADDR);
     }
     if (kernel_size > 0 && kernel_size < loaderparams.ram_size) {
-        fprintf(stderr, "qemu: elf kernel '%s' with start address 0x%08lx"
-                " and size %d bytes\n",
-                loaderparams.kernel_filename, (unsigned long)kernel_addr, kernel_size);
-        fprintf(stderr, "qemu: kernel low 0x%08lx, high 0x%08lx\n",
-                (unsigned long)kernel_low, (unsigned long)kernel_high);
+        warn_report("elf kernel '%s' with start address 0x%08" PRIx64
+                    " and size %d bytes",
+                    loaderparams.kernel_filename, kernel_addr, kernel_size);
+        warn_report("kernel low 0x%08" PRIx64 ", high 0x%08" PRIx64,
+                    kernel_low, kernel_high);
         loaderparams.kernel_addr = kernel_addr;
     } else {
-        fprintf(stderr, "qemu: could not load kernel '%s'\n",
-                loaderparams.kernel_filename);
+        warn_report("could not load kernel '%s'",
+                    loaderparams.kernel_filename);
         exit(1);
     }
 }
@@ -3761,8 +3761,8 @@ static void kernel_init(CPUMIPSState *env)
             KERNEL_LOAD_ADDR, loaderparams.ram_size);
         target_ulong i;
         if (size == (target_ulong) -1) {
-            fprintf(stderr, "qemu: could not load kernel parameters '%s'\n",
-                    loaderparams.kernel_cmdline);
+            error_report("could not load kernel parameters '%s'",
+                         loaderparams.kernel_cmdline);
             exit(1);
         }
         /* Replace all linefeeds by null bytes. */
@@ -3794,9 +3794,8 @@ static void kernel_init(CPUMIPSState *env)
             }
         }
 #else
-        fprintf(stderr,
-                "qemu: missing code for command line parameters '%s'\n",
-                loaderparams.kernel_cmdline);
+        error_report("missing code for command line parameters '%s'",
+                     loaderparams.kernel_cmdline);
         exit(1);
 #endif
     }
@@ -3916,8 +3915,8 @@ static void ar7_common_init(MachineState *machine,
     memory_region_init_ram(&s->ram, OBJECT(s), "ar7.ram",
                            machine->ram_size, &error_abort);
     memory_region_add_subregion(system_memory, KERNEL_LOAD_ADDR, &s->ram);
-    fprintf(stderr, "%s: ram_size = 0x" RAM_ADDR_FMT "\n",
-            __func__, machine->ram_size);
+    warn_report("%s: ram_size = 0x" RAM_ADDR_FMT,
+                __func__, machine->ram_size);
 
     /* The AR7 processor has 4 KiB internal RAM at physical address 0x00000000. */
     memory_region_init_ram(&s->internal_ram, OBJECT(s), "ar7.internal",
@@ -3947,8 +3946,8 @@ static void ar7_common_init(MachineState *machine,
             g_free(filename);
         }
     }
-    fprintf(stderr, "%s: load BIOS '%s', size %d\n",
-            __func__, "flashimage.bin", flash_size);
+    warn_report("%s: load BIOS '%s', size %d",
+                __func__, "flashimage.bin", flash_size);
 
     /* The AR7 processor has 4 KiB internal ROM at physical address 0x1fc00000. */
     memory_region_init_ram(&s->rom, OBJECT(s), "ar7.rom",
@@ -3959,15 +3958,15 @@ static void ar7_common_init(MachineState *machine,
     rom_size = load_image_targphys(filename, PROM_ADDR, 4 * KiB);
     g_free(filename);
     if ((rom_size > 0) && (rom_size <= 4 * KiB)) {
-        fprintf(stderr, "%s: load BIOS '%s', size %d\n", __func__, "mips_bios.bin", rom_size);
+        warn_report("%s: load BIOS '%s', size %d", __func__, "mips_bios.bin", rom_size);
     } else {
         /* Not fatal, write a jump to address 0xb0000000 into memory. */
         static const uint8_t jump[] = {
             /* lui t9,0xb000; jr t9 */
             0x00, 0xb0, 0x19, 0x3c, 0x08, 0x00, 0x20, 0x03
         };
-        fprintf(stderr, "QEMU: Warning, could not load MIPS bios '%s'.\n"
-                "QEMU added a jump instruction to flash start.\n", "mips_bios.bin");
+        warn_report("could not load MIPS bios 'mips_bios.bin'");
+        warn_report("QEMU added a jump instruction to flash start");
         cpu_physical_memory_write_rom(&address_space_memory, PROM_ADDR, jump, sizeof(jump));
         rom_size = 4 * KiB;
     }
@@ -4296,7 +4295,7 @@ static int cpmac_init(SysBusDevice *sbd)
     DeviceState *dev = DEVICE(sbd);
     CpmacState *s = CPMAC_STATE(dev);
 
-    logout("%s:%u\n", __FILE__, __LINE__);
+    logout("%s:%u", __FILE__, __LINE__);
 
     sysbus_init_irq(sbd, &s->irq);
     s->nic = qemu_new_nic(&ar7_net_info, &s->conf,
