@@ -27,19 +27,22 @@
 
 static void check_guest_memory(QTestState *qts)
 {
+    const int MAX_SECONDS = 3600;
+    const int LOOPS_PER_SECOND = 100;
     uint32_t signature;
     int i;
 
-    /* Poll until code has run and modified memory. Wait at most 600 seconds */
-    for (i = 0; i < 60000; ++i) {
+    /* Poll until code has run and modified memory. Wait at most MAX_SECONDS. */
+    for (i = 0; i < MAX_SECONDS * LOOPS_PER_SECOND; ++i) {
         signature = qtest_readl(qts, ADDRESS);
         if (signature == MAGIC) {
             break;
         }
-        g_usleep(10000);
+        g_usleep(1000 * (1000 / LOOPS_PER_SECOND));
     }
 
-printf(" i=%d ", i);
+printf("i=%d\n", i);
+    g_assert_cmpint(i, <, MAX_SECONDS * LOOPS_PER_SECOND);
     g_assert_cmphex(signature, ==, MAGIC);
 }
 
