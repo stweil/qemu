@@ -27,18 +27,20 @@
 
 static void check_guest_memory(void)
 {
+    const int max_seconds = 120;
     uint32_t signature;
     int i;
 
-    /* Poll until code has run and modified memory. Wait at most 120 seconds */
-    for (i = 0; i < 12000; ++i) {
+    /* Poll until code has run and modified memory. Wait at most max_seconds. */
+    for (i = 0; i < max_seconds; ++i) {
         signature = readl(ADDRESS);
         if (signature == MAGIC) {
             break;
         }
-        g_usleep(10000);
+        g_usleep(1000000);
     }
 
+    g_assert(i < max_seconds);
     g_assert_cmphex(signature, ==, MAGIC);
 }
 

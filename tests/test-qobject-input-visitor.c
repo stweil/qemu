@@ -1247,8 +1247,9 @@ static void test_visitor_in_fail_alternate(TestInputVisitorData *data,
     g_assert(!tmp);
 }
 
-static void do_test_visitor_in_qmp_introspect(TestInputVisitorData *data,
-                                              const char *schema_json)
+static void GCC_FMT_ATTR(2, 0)
+do_test_visitor_in_qmp_introspect(TestInputVisitorData *data,
+                                  const char *schema_json)
 {
     SchemaInfoList *schema = NULL;
     Visitor *v;

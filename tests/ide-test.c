@@ -675,7 +675,9 @@ static void test_flush_nodev(void)
     QPCIDevice *dev;
     QPCIBar bmdma_bar, ide_bar;
 
+#pragma GCC diagnostic ignored "-Wformat-zero-length"
     ide_test_start("");
+#pragma GCC diagnostic error "-Wformat-zero-length"
 
     dev = get_pci_device(&bmdma_bar, &ide_bar);
 
