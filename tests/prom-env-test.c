@@ -1,7 +1,7 @@
 /*
- * Test OpenBIOS-based machines.
+ * Test Open-Firmware-based machines.
  *
- * Copyright (c) 2016 Red Hat Inc.
+ * Copyright (c) 2016, 2017 Red Hat Inc.
  *
  * Author:
  *    Thomas Huth <thuth@redhat.com>
@@ -46,21 +46,18 @@ static void check_guest_memory(void)
 
 static void test_machine(const void *machine)
 {
-    char *args;
     const char *extra_args;
 
     /* The pseries firmware boots much faster without the default devices */
     extra_args = strcmp(machine, "pseries") == 0 ? "-nodefaults" : "";
 
-    args = g_strdup_printf("-M %s,accel=tcg %s -prom-env 'use-nvramrc?=true' "
-                           "-prom-env 'nvramrc=%x %x l!' ",
-                           (const char *)machine, extra_args, MAGIC, ADDRESS);
-
-    qtest_start(args);
+    global_qtest = qtest_startf("-M %s,accel=tcg %s "
+                                "-prom-env 'use-nvramrc?=true' "
+                                "-prom-env 'nvramrc=%x %x l!' ",
+                                (const char *)machine, extra_args,
+                                MAGIC, ADDRESS);
     check_guest_memory();
     qtest_quit(global_qtest);
-
-    g_free(args);
 }
 
 static void add_tests(const char *machines[])
@@ -80,7 +77,6 @@ int main(int argc, char *argv[])
     const char *sparc_machines[] = { "SPARCbook", "Voyager", "SS-20", NULL };
     const char *sparc64_machines[] = { "sun4u", NULL };
     const char *ppc_machines[] = { "mac99", "g3beige", NULL };
-    const char *ppc64_machines[] = { "mac99", "g3beige", "pseries", NULL };
     const char *arch = qtest_get_arch();
 
     g_test_init(&argc, &argv, NULL);
@@ -88,7 +84,10 @@ int main(int argc, char *argv[])
     if (!strcmp(arch, "ppc")) {
         add_tests(ppc_machines);
     } else if (!strcmp(arch, "ppc64")) {
-        add_tests(ppc64_machines);
+        add_tests(ppc_machines);
+        if (g_test_slow()) {
+            qtest_add_data_func("prom-env/pseries", "pseries", test_machine);
+        }
     } else if (!strcmp(arch, "sparc")) {
         add_tests(sparc_machines);
     } else if (!strcmp(arch, "sparc64")) {
