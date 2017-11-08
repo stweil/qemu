@@ -3824,17 +3824,18 @@ static void ar7_mips_init(CPUMIPSState *env)
     env->CP0_Config1 |= (0x3 << CP0C1_DA);
 
     /* Compare selected emulation values to original hardware registers. */
-    if (env->CP0_PRid != 0x00018448)    printf("CP0_PRid    = 0x%08x\n", env->CP0_PRid);
-    if (env->CP0_Config0 != 0x80240082) printf("CP0_Config0 = 0x%08x\n", env->CP0_Config0);
-    if (env->CP0_Config1 != 0x9e9b4d8a) printf("CP0_Config1 = 0x%08x\n", env->CP0_Config1);
-    if (env->CP0_Config2 != 0x80000000) printf("CP0_Config2 = 0x%08x\n", env->CP0_Config2);
-#if !defined(UR8)
-    if (first_cpu->bigendian) {
-        assert(env->CP0_Config0 == 0x80240082 + (1 << CP0C0_BE));
-    } else {
-        assert(env->CP0_Config0 == 0x80240082);
+    if ((env->CP0_PRid & ~0x68) != 0x00018400) {
+        printf("CP0_PRid    = 0x%08x\n", env->CP0_PRid);
     }
-#endif
+    if (env->CP0_Config0 != 0x80240082 + (first_cpu->bigendian ? (1 << CP0C0_BE) : 0)) {
+        printf("CP0_Config0 = 0x%08x\n", env->CP0_Config0);
+    }
+    if (env->CP0_Config1 != 0x9e9b4d8a) {
+        printf("CP0_Config1 = 0x%08x\n", env->CP0_Config1);
+    }
+    if (env->CP0_Config2 != 0x80000000) {
+        printf("CP0_Config2 = 0x%08x\n", env->CP0_Config2);
+    }
     assert(env->CP0_Config1 == 0x9e9b4d8a);
     assert(env->CP0_Config2 == 0x80000000);
     assert(env->CP0_Config3 == 0x00000000);
