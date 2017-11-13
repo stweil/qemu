@@ -9,7 +9,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 
-void qemu_log(const char *fmt, ...);
+void GCC_FMT_ATTR(1, 2) qemu_log(const char *fmt, ...);
 
 /* Any log message kills the test. */
 void qemu_log(const char *fmt, ...)
