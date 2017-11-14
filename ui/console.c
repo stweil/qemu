@@ -1472,6 +1472,7 @@ void unregister_displaychangelistener(DisplayChangeListener *dcl)
         dcl->con->dcls--;
     }
     QLIST_REMOVE(dcl, next);
+    dcl->ds = NULL;
     gui_setup_refresh(ds);
 }
 
