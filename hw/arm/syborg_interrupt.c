@@ -241,7 +241,8 @@ static const TypeInfo syborg_int_info = {
     .name  = "syborg,interrupt",
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size  = sizeof(SyborgIntState),
-    .class_init = syborg_int_class_init
+    .class_init = syborg_int_class_init,
+    .class_size = sizeof(SysBusDeviceClass)
 };
 
 static void syborg_interrupt_register_types(void)
