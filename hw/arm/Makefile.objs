@@ -13,8 +13,9 @@ obj-y += omap1.o omap2.o strongarm.o
 
 obj-y += arm_tt.o
 obj-y += bast.o
-obj-y += phycard-l.o
-obj-y += syborg.o
+#obj-y += phycard-l.o
+#obj-y += syborg.o
+#obj-y += syborg_interrupt.o
 obj-y += s3c2410x.o
 obj-y += s3c2440.o
 obj-y += s3c24xx_clkcon.o
