@@ -6,7 +6,7 @@ BUILD_DIR=$(CURDIR)
 # Before including a proper config-host.mak, assume we are in the source tree
 SRC_PATH=.
 
-UNCHECKED_GOALS := %clean TAGS cscope ctags docker docker-%
+UNCHECKED_GOALS := %clean TAGS cscope ctags docker docker-% help
 
 # All following code might depend on configuration variables
 ifneq ($(wildcard config-host.mak),)
@@ -731,10 +731,6 @@ endif
 	for d in $(TARGET_DIRS); do \
 	$(MAKE) $(SUBDIR_MAKEFLAGS) TARGET_DIR=$$d/ -C $$d $@ || exit 1 ; \
         done
-
-# various test targets
-test speed: all
-	$(MAKE) -C tests/tcg $@
 
 .PHONY: ctags
 ctags:

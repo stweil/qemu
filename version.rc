@@ -14,7 +14,7 @@ FILESUBTYPE VFT2_UNKNOWN
     BLOCK "040904E4"
     {
       VALUE "Comments", "patched version by Stefan Weil"
-      VALUE "CompanyName", "http://www.qemu.org/"
+      VALUE "CompanyName", "https://www.qemu.org"
       VALUE "FileDescription", "QEMU machine emulators and tools"
       VALUE "FileVersion", __DATE__ ", " __TIME__
       VALUE "InternalName", "qemu"
