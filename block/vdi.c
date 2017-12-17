@@ -986,7 +986,7 @@ static void vdi_close(BlockDriverState *bs)
 
 static void vdi_invalidate_cache(BlockDriverState *bs, Error **errp)
 {
-    BDRVVdiState *s = bs->opaque;
+    // BDRVVdiState *s = bs->opaque;
     // TODO: invalidate s->bmap
 }
 
