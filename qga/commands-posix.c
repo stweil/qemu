@@ -448,8 +448,8 @@ void qmp_guest_file_close(int64_t handle, Error **errp)
     g_free(gfh);
 }
 
-struct GuestFileRead *qmp_guest_file_read(int64_t handle, bool has_count,
-                                          int64_t count, Error **errp)
+GuestFileRead *qmp_guest_file_read(int64_t handle, bool has_count,
+                                   int64_t count, Error **errp)
 {
     GuestFileHandle *gfh = guest_file_handle_find(handle, errp);
     GuestFileRead *read_data = NULL;
@@ -558,9 +558,9 @@ GuestFileWrite *qmp_guest_file_write(int64_t handle, const char *buf_b64,
     return write_data;
 }
 
-struct GuestFileSeek *qmp_guest_file_seek(int64_t handle, int64_t offset,
-                                          GuestFileWhence *whence_code,
-                                          Error **errp)
+GuestFileSeek *qmp_guest_file_seek(int64_t handle, int64_t offset,
+                                   GuestFileWhence *whence_code,
+                                   Error **errp)
 {
     GuestFileHandle *gfh = guest_file_handle_find(handle, errp);
     GuestFileSeek *seek_data = NULL;
@@ -1118,7 +1118,7 @@ static void build_guest_fsinfo_for_device(char const *devpath,
 }
 
 /* Return a list of the disk device(s)' info which @mount lies on */
-static GuestFilesystemInfo *build_guest_fsinfo(struct FsMount *mount,
+static GuestFilesystemInfo *build_guest_fsinfo(FsMount *mount,
                                                Error **errp)
 {
     GuestFilesystemInfo *fs = g_malloc0(sizeof(*fs));
@@ -1150,7 +1150,7 @@ static GuestFilesystemInfo *build_guest_fsinfo(struct FsMount *mount,
 GuestFilesystemInfoList *qmp_guest_get_fsinfo(Error **errp)
 {
     FsMountList mounts;
-    struct FsMount *mount;
+    FsMount *mount;
     GuestFilesystemInfoList *new, *ret = NULL;
     Error *local_err = NULL;
 
@@ -1269,7 +1269,7 @@ int64_t qmp_guest_fsfreeze_freeze_list(bool has_mountpoints,
     int ret = 0, i = 0;
     strList *list;
     FsMountList mounts;
-    struct FsMount *mount;
+    FsMount *mount;
     Error *local_err = NULL;
     int fd;
 
@@ -1437,7 +1437,7 @@ qmp_guest_fstrim(bool has_minimum, int64_t minimum, Error **errp)
     GuestFilesystemTrimResult *result;
     int ret = 0;
     FsMountList mounts;
-    struct FsMount *mount;
+    FsMount *mount;
     int fd;
     Error *local_err = NULL;
     struct fstrim_range r;
