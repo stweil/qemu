@@ -984,6 +984,12 @@ static void vdi_close(BlockDriverState *bs)
     error_free(s->migration_blocker);
 }
 
+static void vdi_invalidate_cache(BlockDriverState *bs, Error **errp)
+{
+    BDRVVdiState *s = bs->opaque;
+    // TODO: invalidate s->bmap
+}
+
 static QemuOptsList vdi_create_opts = {
     .name = "vdi-create-opts",
     .head = QTAILQ_HEAD_INITIALIZER(vdi_create_opts.head),
@@ -1020,6 +1026,7 @@ static BlockDriver bdrv_vdi = {
     .bdrv_probe = vdi_probe,
     .bdrv_open = vdi_open,
     .bdrv_close = vdi_close,
+    .bdrv_invalidate_cache = vdi_invalidate_cache,
     .bdrv_reopen_prepare = vdi_reopen_prepare,
     .bdrv_child_perm          = bdrv_format_default_perms,
     .bdrv_co_create      = vdi_co_create,
