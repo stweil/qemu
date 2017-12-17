@@ -30,8 +30,9 @@ void trigger_pgm_exception(CPUS390XState *env, uint32_t code, uint32_t ilen)
     env->int_pgm_ilen = ilen;
 }
 
-void s390_program_interrupt(CPUS390XState *env, uint32_t code, int ilen,
-                            uintptr_t ra)
+static void QEMU_NORETURN
+s390_program_interrupt(CPUS390XState *env, uint32_t code, int ilen,
+                       uintptr_t ra)
 {
     S390CPU *cpu = s390_env_get_cpu(env);
 
