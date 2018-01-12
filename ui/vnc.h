@@ -251,6 +251,12 @@ struct VncJob
     QTAILQ_ENTRY(VncJob) next;
 };
 
+typedef enum {
+    VNC_STATE_UPDATE_NONE,
+    VNC_STATE_UPDATE_INCREMENTAL,
+    VNC_STATE_UPDATE_FORCE,
+} VncStateUpdate;
+
 struct VncState
 {
     QIOChannelSocket *sioc; /* The underlying socket */
@@ -263,8 +269,8 @@ struct VncState
                            * vnc-jobs-async.c */
 
     VncDisplay *vd;
-    int need_update;
-    int force_update;
+    VncStateUpdate update; /* Most recent pending request from client */
+    VncStateUpdate job_update; /* Currently processed by job thread */
     int has_dirty;
     uint32_t features;
     int absolute;
@@ -292,6 +298,18 @@ struct VncState
 
     VncClientInfo *info;
 
+    /* Job thread bottom half has put data for a forced update
+     * into the output buffer. This offset points to the end of
+     * the update data in the output buffer. This lets us determine
+     * when a force update is fully sent to the client, allowing
+     * us to process further forced updates. */
+    size_t force_update_offset;
+    /* We allow multiple incremental updates or audio capture
+     * samples to be queued in output buffer, provided the
+     * buffer size doesn't exceed this threshold. The value
+     * is calculating dynamically based on framebuffer size
+     * and audio sample settings in vnc_update_throttle_offset() */
+    size_t throttle_output_offset;
     Buffer output;
     Buffer input;
     /* current output mode information */
@@ -505,8 +523,8 @@ gboolean vnc_client_io(QIOChannel *ioc,
                        GIOCondition condition,
                        void *opaque);
 
-ssize_t vnc_client_read_buf(VncState *vs, void *data, size_t datalen);
-ssize_t vnc_client_write_buf(VncState *vs, const void *data, size_t datalen);
+size_t vnc_client_read_buf(VncState *vs, void *data, size_t datalen);
+size_t vnc_client_write_buf(VncState *vs, const void *data, size_t datalen);
 
 /* Protocol I/O functions */
 void vnc_write(VncState *vs, const void *data, size_t len);
@@ -525,7 +543,7 @@ uint32_t read_u32(uint8_t *data, size_t offset);
 
 /* Protocol stage functions */
 void vnc_client_error(VncState *vs);
-ssize_t vnc_client_io_error(VncState *vs, ssize_t ret, Error **errp);
+size_t vnc_client_io_error(VncState *vs, ssize_t ret, Error **errp);
 
 void start_client_init(VncState *vs);
 void start_auth_vnc(VncState *vs);
