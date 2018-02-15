@@ -1,8 +1,6 @@
 #ifndef QEMU_CHAR_H
 #define QEMU_CHAR_H
 
-#include "qemu-common.h"
-#include "qemu/option.h"
 #include "qemu/main-loop.h"
 #include "qemu/bitmap.h"
 #include "qom/object.h"
@@ -255,6 +253,9 @@ Chardev *qemu_chardev_new(const char *id, const char *typename,
                           ChardevBackend *backend, Error **errp);
 
 extern int term_escape_char;
+
+GSource *qemu_chr_timeout_add_ms(Chardev *chr, guint ms,
+                                 GSourceFunc func, void *private);
 
 /* console.c */
 void qemu_chr_parse_vc(QemuOpts *opts, ChardevBackend *backend, Error **errp);

@@ -17,7 +17,6 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 #include "qemu/osdep.h"
-#include "qapi/error.h"
 #include "hw/hw.h"
 #include "qemu/log.h"
 #include "sysemu/hw_accel.h"
@@ -51,10 +50,9 @@ static void xscom_complete(CPUState *cs, uint64_t hmer_bits)
 
 static uint32_t pnv_xscom_pcba(PnvChip *chip, uint64_t addr)
 {
-    PnvChipClass *pcc = PNV_CHIP_GET_CLASS(chip);
-
     addr &= (PNV_XSCOM_SIZE - 1);
-    if (pcc->chip_type == PNV_CHIP_POWER9) {
+
+    if (pnv_chip_is_power9(chip)) {
         return addr >> 3;
     } else {
         return ((addr >> 4) & ~0xfull) | ((addr >> 3) & 0xf);
@@ -231,7 +229,6 @@ int pnv_dt_xscom(PnvChip *chip, void *fdt, int root_offset)
     int xscom_offset;
     ForeachPopulateArgs args;
     char *name;
-    PnvChipClass *pcc = PNV_CHIP_GET_CLASS(chip);
 
     name = g_strdup_printf("xscom@%" PRIx64, be64_to_cpu(reg[0]));
     xscom_offset = fdt_add_subnode(fdt, root_offset, name);
@@ -242,7 +239,7 @@ int pnv_dt_xscom(PnvChip *chip, void *fdt, int root_offset)
     _FDT((fdt_setprop_cell(fdt, xscom_offset, "#size-cells", 1)));
     _FDT((fdt_setprop(fdt, xscom_offset, "reg", reg, sizeof(reg))));
 
-    if (pcc->chip_type == PNV_CHIP_POWER9) {
+    if (pnv_chip_is_power9(chip)) {
         _FDT((fdt_setprop(fdt, xscom_offset, "compatible", compat_p9,
                           sizeof(compat_p9))));
     } else {

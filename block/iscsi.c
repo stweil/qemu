@@ -28,7 +28,6 @@
 #include <poll.h>
 #include <math.h>
 #include <arpa/inet.h>
-#include "qemu-common.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
 #include "qemu/bitops.h"
@@ -36,8 +35,11 @@
 #include "block/block_int.h"
 #include "scsi/constants.h"
 #include "qemu/iov.h"
+#include "qemu/option.h"
 #include "qemu/uuid.h"
 #include "qmp-commands.h"
+#include "qapi/error.h"
+#include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qstring.h"
 #include "crypto/secret.h"
 #include "scsi/utils.h"
@@ -658,6 +660,8 @@ static int64_t coroutine_fn iscsi_co_get_block_status(BlockDriverState *bs,
     uint64_t lba;
     int64_t ret;
 
+    iscsi_co_init_iscsitask(iscsilun, &iTask);
+
     if (!is_sector_request_lun_aligned(sector_num, nb_sectors, iscsilun)) {
         ret = -EINVAL;
         goto out;
@@ -675,7 +679,6 @@ static int64_t coroutine_fn iscsi_co_get_block_status(BlockDriverState *bs,
 
     lba = sector_qemu2lun(sector_num, iscsilun);
 
-    iscsi_co_init_iscsitask(iscsilun, &iTask);
     qemu_mutex_lock(&iscsilun->mutex);
 retry:
     if (iscsi_get_lba_status_task(iscsilun->iscsi, iscsilun->lun,
@@ -1874,7 +1877,6 @@ static int iscsi_open(BlockDriverState *bs, QDict *options, int flags,
     if (iscsilun->dpofua) {
         bs->supported_write_flags = BDRV_REQ_FUA;
     }
-    bs->supported_zero_flags = BDRV_REQ_MAY_UNMAP;
 
     /* Check the write protect flag of the LUN if we want to write */
     if (iscsilun->type == TYPE_DISK && (flags & BDRV_O_RDWR) &&
@@ -1956,6 +1958,10 @@ static int iscsi_open(BlockDriverState *bs, QDict *options, int flags,
         if (iscsilun->lbprz) {
             ret = iscsi_allocmap_init(iscsilun, bs->open_flags);
         }
+    }
+
+    if (iscsilun->lbprz && iscsilun->lbp.lbpws) {
+        bs->supported_zero_flags = BDRV_REQ_MAY_UNMAP;
     }
 
 out:
@@ -2157,7 +2163,6 @@ static int iscsi_get_info(BlockDriverState *bs, BlockDriverInfo *bdi)
 {
     IscsiLun *iscsilun = bs->opaque;
     bdi->unallocated_blocks_are_zero = iscsilun->lbprz;
-    bdi->can_write_zeroes_with_unmap = iscsilun->lbprz && iscsilun->lbp.lbpws;
     bdi->cluster_size = iscsilun->cluster_sectors * BDRV_SECTOR_SIZE;
     return 0;
 }

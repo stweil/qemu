@@ -515,6 +515,11 @@ static void scsi_generic_realize(SCSIDevice *s, Error **errp)
         error_setg(errp, "SG_GET_SCSI_ID ioctl failed");
         return;
     }
+    if (!blkconf_apply_backend_options(&s->conf,
+                                       blk_is_read_only(s->conf.blk),
+                                       true, errp)) {
+        return;
+    }
 
     /* define device state */
     s->type = scsiid.scsi_type;
@@ -565,6 +570,7 @@ static SCSIRequest *scsi_new_request(SCSIDevice *d, uint32_t tag, uint32_t lun,
 
 static Property scsi_generic_properties[] = {
     DEFINE_PROP_DRIVE("drive", SCSIDevice, conf.blk),
+    DEFINE_PROP_BOOL("share-rw", SCSIDevice, conf.share_rw, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 

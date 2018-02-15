@@ -12,7 +12,6 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "qemu-common.h"
 #include "cpu.h"
 #include "hw/boards.h"
 #include "exec/address-spaces.h"
@@ -24,6 +23,7 @@
 #include "virtio-ccw.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
+#include "qemu/option.h"
 #include "s390-pci-bus.h"
 #include "hw/s390x/storage-keys.h"
 #include "hw/s390x/storage-attributes.h"
@@ -33,7 +33,6 @@
 #include "hw/s390x/css-bridge.h"
 #include "migration/register.h"
 #include "cpu_models.h"
-#include "qapi/qmp/qerror.h"
 #include "hw/nmi.h"
 
 S390CPU *s390_cpu_addr2state(uint16_t cpu_addr)
@@ -77,10 +76,6 @@ static void s390_init_cpus(MachineState *machine)
 {
     MachineClass *mc = MACHINE_GET_CLASS(machine);
     int i;
-
-    if (tcg_enabled() && max_cpus > 1) {
-        error_report("WARNING: SMP support on s390x is experimental!");
-    }
 
     /* initialize possible_cpus */
     mc->possible_cpu_arch_ids(machine);
@@ -414,6 +409,7 @@ static const CPUArchIdList *s390_possible_cpu_arch_ids(MachineState *ms)
                                   sizeof(CPUArchId) * max_cpus);
     ms->possible_cpus->len = max_cpus;
     for (i = 0; i < ms->possible_cpus->len; i++) {
+        ms->possible_cpus->cpus[i].type = ms->cpu_type;
         ms->possible_cpus->cpus[i].vcpus_count = 1;
         ms->possible_cpus->cpus[i].arch_id = i;
         ms->possible_cpus->cpus[i].props.has_core_id = true;

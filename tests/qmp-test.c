@@ -14,6 +14,8 @@
 #include "libqtest.h"
 #include "qapi-visit.h"
 #include "qapi/error.h"
+#include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qlist.h"
 #include "qapi/qobject-input-visitor.h"
 #include "qapi/util.h"
 #include "qapi/visitor.h"
@@ -271,7 +273,7 @@ static void add_query_tests(QmpSchema *schema)
 {
     SchemaInfoList *tail;
     SchemaInfo *si, *arg_type, *ret_type;
-    const char *test_name;
+    char *test_name;
 
     /* Test the query-like commands */
     for (tail = schema->list; tail; tail = tail->next) {
@@ -297,6 +299,7 @@ static void add_query_tests(QmpSchema *schema)
 
         test_name = g_strdup_printf("qmp/%s", si->name);
         qtest_add_data_func(test_name, si->name, test_query);
+        g_free(test_name);
     }
 }
 

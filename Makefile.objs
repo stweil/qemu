@@ -115,6 +115,7 @@ libvhost-user-obj-y = contrib/libvhost-user/
 vhost-user-scsi.o-cflags := $(LIBISCSI_CFLAGS)
 vhost-user-scsi.o-libs := $(LIBISCSI_LIBS)
 vhost-user-scsi-obj-y = contrib/vhost-user-scsi/
+vhost-user-blk-obj-y = contrib/vhost-user-blk/
 
 ######################################################################
 trace-events-subdirs =
@@ -149,11 +150,13 @@ trace-events-subdirs += hw/i386/xen
 trace-events-subdirs += hw/9pfs
 trace-events-subdirs += hw/ppc
 trace-events-subdirs += hw/pci
+trace-events-subdirs += hw/pci-host
 trace-events-subdirs += hw/s390x
 trace-events-subdirs += hw/vfio
 trace-events-subdirs += hw/acpi
 trace-events-subdirs += hw/arm
 trace-events-subdirs += hw/alpha
+trace-events-subdirs += hw/hppa
 trace-events-subdirs += hw/xen
 trace-events-subdirs += hw/ide
 trace-events-subdirs += ui

@@ -546,6 +546,8 @@ shape and this command should mostly work."""
         return None
 
     def add_vmcoreinfo(self):
+        if gdb.lookup_symbol("vmcoreinfo_realize")[0] is None:
+            return
         vmci = 'vmcoreinfo_realize::vmcoreinfo_state'
         if not gdb.parse_and_eval("%s" % vmci) \
            or not gdb.parse_and_eval("(%s)->has_vmcoreinfo" % vmci):
@@ -564,7 +566,7 @@ shape and this command should mostly work."""
 
         vmcoreinfo = self.phys_memory_read(addr, size)
         if vmcoreinfo:
-            self.elf.add_vmcoreinfo_note(vmcoreinfo.tobytes())
+            self.elf.add_vmcoreinfo_note(bytes(vmcoreinfo))
 
     def invoke(self, args, from_tty):
         """Handles command invocation from gdb."""

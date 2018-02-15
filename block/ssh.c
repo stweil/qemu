@@ -30,10 +30,12 @@
 #include "block/block_int.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
+#include "qemu/option.h"
 #include "qemu/cutils.h"
 #include "qemu/sockets.h"
 #include "qemu/uri.h"
 #include "qapi-visit.h"
+#include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qstring.h"
 #include "qapi/qobject-input-visitor.h"
 #include "qapi/qobject-output-visitor.h"
@@ -556,6 +558,7 @@ static QemuOptsList ssh_runtime_opts = {
             .type = QEMU_OPT_STRING,
             .help = "Defines how and what to check the host key against",
         },
+        { /* end of list */ }
     },
 };
 

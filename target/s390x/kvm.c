@@ -31,13 +31,13 @@
 #include "cpu.h"
 #include "internal.h"
 #include "kvm_s390x.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/timer.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/hw_accel.h"
 #include "hw/hw.h"
 #include "sysemu/device_tree.h"
-#include "qapi/qmp/qjson.h"
 #include "exec/gdbstub.h"
 #include "exec/address-spaces.h"
 #include "trace.h"
@@ -58,7 +58,7 @@
     if (DEBUG_KVM) {                          \
         fprintf(stderr, fmt, ## __VA_ARGS__); \
     }                                         \
-} while (0);
+} while (0)
 
 #define kvm_vm_check_mem_attr(s, attr) \
     kvm_vm_check_attr(s, KVM_S390_VM_MEM_CTRL, attr)
@@ -490,6 +490,11 @@ int kvm_arch_put_registers(CPUState *cs, int level)
         cs->kvm_run->kvm_dirty_regs |= KVM_SYNC_GSCB;
     }
 
+    if (can_sync_regs(cs, KVM_SYNC_BPBC)) {
+        cs->kvm_run->s.regs.bpbc = env->bpbc;
+        cs->kvm_run->kvm_dirty_regs |= KVM_SYNC_BPBC;
+    }
+
     /* Finally the prefix */
     if (can_sync_regs(cs, KVM_SYNC_PREFIX)) {
         cs->kvm_run->s.regs.prefix = env->psa;
@@ -598,6 +603,10 @@ int kvm_arch_get_registers(CPUState *cs)
 
     if (can_sync_regs(cs, KVM_SYNC_GSCB)) {
         memcpy(env->gscb, cs->kvm_run->s.regs.gscb, 32);
+    }
+
+    if (can_sync_regs(cs, KVM_SYNC_BPBC)) {
+        env->bpbc = cs->kvm_run->s.regs.bpbc;
     }
 
     /* pfault parameters */
@@ -1025,7 +1034,7 @@ void kvm_s390_vcpu_interrupt(S390CPU *cpu, struct kvm_s390_irq *irq)
     inject_vcpu_irq_legacy(cs, irq);
 }
 
-static void __kvm_s390_floating_interrupt(struct kvm_s390_irq *irq)
+void kvm_s390_floating_interrupt_legacy(struct kvm_s390_irq *irq)
 {
     struct kvm_s390_interrupt kvmint = {};
     int r;
@@ -1041,33 +1050,6 @@ static void __kvm_s390_floating_interrupt(struct kvm_s390_irq *irq)
         fprintf(stderr, "KVM failed to inject interrupt\n");
         exit(1);
     }
-}
-
-void kvm_s390_floating_interrupt(struct kvm_s390_irq *irq)
-{
-    static bool use_flic = true;
-    int r;
-
-    if (use_flic) {
-        r = kvm_s390_inject_flic(irq);
-        if (r == -ENOSYS) {
-            use_flic = false;
-        }
-        if (!r) {
-            return;
-        }
-    }
-    __kvm_s390_floating_interrupt(irq);
-}
-
-void kvm_s390_service_interrupt(uint32_t parm)
-{
-    struct kvm_s390_irq irq = {
-        .type = KVM_S390_INT_SERVICE,
-        .u.ext.ext_params = parm,
-    };
-
-    kvm_s390_floating_interrupt(&irq);
 }
 
 void kvm_s390_program_interrupt(S390CPU *cpu, uint16_t code)
@@ -1681,10 +1663,10 @@ static int handle_tsch(S390CPU *cpu)
          * If an I/O interrupt had been dequeued, we have to reinject it.
          */
         if (run->s390_tsch.dequeued) {
-            kvm_s390_io_interrupt(run->s390_tsch.subchannel_id,
-                                  run->s390_tsch.subchannel_nr,
-                                  run->s390_tsch.io_int_parm,
-                                  run->s390_tsch.io_int_word);
+            s390_io_interrupt(run->s390_tsch.subchannel_id,
+                              run->s390_tsch.subchannel_nr,
+                              run->s390_tsch.io_int_parm,
+                              run->s390_tsch.io_int_word);
         }
         ret = 0;
     }
@@ -1693,7 +1675,7 @@ static int handle_tsch(S390CPU *cpu)
 
 static void insert_stsi_3_2_2(S390CPU *cpu, __u64 addr, uint8_t ar)
 {
-    struct sysib_322 sysib;
+    SysIB_322 sysib;
     int del;
 
     if (s390_cpu_virt_mem_read(cpu, addr, ar, &sysib, sizeof(sysib))) {
@@ -1829,37 +1811,6 @@ int kvm_arch_handle_exit(CPUState *cs, struct kvm_run *run)
 bool kvm_arch_stop_on_emulation_error(CPUState *cpu)
 {
     return true;
-}
-
-void kvm_s390_io_interrupt(uint16_t subchannel_id,
-                           uint16_t subchannel_nr, uint32_t io_int_parm,
-                           uint32_t io_int_word)
-{
-    struct kvm_s390_irq irq = {
-        .u.io.subchannel_id = subchannel_id,
-        .u.io.subchannel_nr = subchannel_nr,
-        .u.io.io_int_parm = io_int_parm,
-        .u.io.io_int_word = io_int_word,
-    };
-
-    if (io_int_word & IO_INT_WORD_AI) {
-        irq.type = KVM_S390_INT_IO(1, 0, 0, 0);
-    } else {
-        irq.type = KVM_S390_INT_IO(0, (subchannel_id & 0xff00) >> 8,
-                                      (subchannel_id & 0x0006),
-                                      subchannel_nr);
-    }
-    kvm_s390_floating_interrupt(&irq);
-}
-
-void kvm_s390_crw_mchk(void)
-{
-    struct kvm_s390_irq irq = {
-        .type = KVM_S390_MCHK,
-        .u.mchk.cr14 = CR14_CHANNEL_REPORT_SC,
-        .u.mchk.mcic = s390_build_validity_mcic() | MCIC_SC_CP,
-    };
-    kvm_s390_floating_interrupt(&irq);
 }
 
 void kvm_s390_enable_css_support(S390CPU *cpu)
@@ -2270,12 +2221,25 @@ void kvm_s390_get_host_cpu_model(S390CPUModel *model, Error **errp)
         return;
     }
 
+    /* PTFF subfunctions might be indicated although kernel support missing */
+    if (!test_bit(S390_FEAT_MULTIPLE_EPOCH, model->features)) {
+        clear_bit(S390_FEAT_PTFF_QSIE, model->features);
+        clear_bit(S390_FEAT_PTFF_QTOUE, model->features);
+        clear_bit(S390_FEAT_PTFF_STOE, model->features);
+        clear_bit(S390_FEAT_PTFF_STOUE, model->features);
+    }
+
     /* with cpu model support, CMM is only indicated if really available */
     if (kvm_s390_cmma_available()) {
         set_bit(S390_FEAT_CMM, model->features);
     } else {
         /* no cmm -> no cmm nt */
         clear_bit(S390_FEAT_CMM_NT, model->features);
+    }
+
+    /* bpb needs kernel support for migration, VSIE and reset */
+    if (!kvm_check_extension(kvm_state, KVM_CAP_S390_BPB)) {
+        clear_bit(S390_FEAT_BPB, model->features);
     }
 
     /* We emulate a zPCI bus and AEN, therefore we don't need HW support */

@@ -31,6 +31,7 @@
 #include "libqos/pci-pc.h"
 
 #include "qemu-common.h"
+#include "qapi/qmp/qdict.h"
 #include "qemu/host-utils.h"
 
 #include "hw/pci/pci_ids.h"
@@ -1581,9 +1582,9 @@ static void test_atapi_tray(void)
     QDict *rsp;
 
     fd = prepare_iso(iso_size, &tx, &iso);
-    ahci = ahci_boot_and_enable("-drive if=none,id=drive0,file=%s,format=raw "
+    ahci = ahci_boot_and_enable("-blockdev node-name=drive0,driver=file,filename=%s "
                                 "-M q35 "
-                                "-device ide-cd,drive=drive0 ", iso);
+                                "-device ide-cd,id=cd0,drive=drive0 ", iso);
     port = ahci_port_select(ahci);
 
     ahci_atapi_eject(ahci, port);
@@ -1594,13 +1595,13 @@ static void test_atapi_tray(void)
 
     /* Remove media */
     qmp_async("{'execute': 'blockdev-open-tray', "
-               "'arguments': {'device': 'drive0'}}");
+               "'arguments': {'id': 'cd0'}}");
     atapi_wait_tray(true);
     rsp = qmp_receive();
     QDECREF(rsp);
 
-    qmp_discard_response("{'execute': 'x-blockdev-remove-medium', "
-                         "'arguments': {'device': 'drive0'}}");
+    qmp_discard_response("{'execute': 'blockdev-remove-medium', "
+                         "'arguments': {'id': 'cd0'}}");
 
     /* Test the tray without a medium */
     ahci_atapi_load(ahci, port);
@@ -1615,13 +1616,13 @@ static void test_atapi_tray(void)
                                         "'driver': 'raw', "
                                         "'file': { 'driver': 'file', "
                                                   "'filename': %s }}}", iso);
-    qmp_discard_response("{'execute': 'x-blockdev-insert-medium',"
-                          "'arguments': { 'device': 'drive0', "
+    qmp_discard_response("{'execute': 'blockdev-insert-medium',"
+                          "'arguments': { 'id': 'cd0', "
                                          "'node-name': 'node0' }}");
 
     /* Again, the event shows up first */
     qmp_async("{'execute': 'blockdev-close-tray', "
-               "'arguments': {'device': 'drive0'}}");
+               "'arguments': {'id': 'cd0'}}");
     atapi_wait_tray(false);
     rsp = qmp_receive();
     QDECREF(rsp);

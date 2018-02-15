@@ -22,6 +22,7 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
+#include "qapi/qmp/qnum.h"
 #include "acpi-build.h"
 #include "qemu-common.h"
 #include "qemu/bitmap.h"
@@ -2224,6 +2225,22 @@ build_dsdt(GArray *table_data, BIOSLinker *linker,
             aml_append(sb_scope, scope);
         }
     }
+
+    if (TPM_IS_CRB(tpm_find())) {
+        dev = aml_device("TPM");
+        aml_append(dev, aml_name_decl("_HID", aml_string("MSFT0101")));
+        crs = aml_resource_template();
+        aml_append(crs, aml_memory32_fixed(TPM_CRB_ADDR_BASE,
+                                           TPM_CRB_ADDR_SIZE, AML_READ_WRITE));
+        aml_append(dev, aml_name_decl("_CRS", crs));
+
+        method = aml_method("_STA", 0, AML_NOTSERIALIZED);
+        aml_append(method, aml_return(aml_int(0x0f)));
+        aml_append(dev, method);
+
+        aml_append(sb_scope, dev);
+    }
+
     aml_append(dsdt, sb_scope);
 
     /* copy AML table into ACPI tables blob and patch header there */
@@ -2285,18 +2302,20 @@ build_tpm2(GArray *table_data, BIOSLinker *linker, GArray *tcpalog)
     if (TPM_IS_TIS(tpm_find())) {
         tpm2_ptr->control_area_address = cpu_to_le64(0);
         tpm2_ptr->start_method = cpu_to_le32(TPM2_START_METHOD_MMIO);
-
-        tpm2_ptr->log_area_minimum_length =
-            cpu_to_le32(TPM_LOG_AREA_MINIMUM_SIZE);
-
-        /* log area start address to be filled by Guest linker */
-        bios_linker_loader_add_pointer(linker,
-            ACPI_BUILD_TABLE_FILE, log_addr_offset, log_addr_size,
-            ACPI_BUILD_TPMLOG_FILE, 0);
+    } else if (TPM_IS_CRB(tpm_find())) {
+        tpm2_ptr->control_area_address = cpu_to_le64(TPM_CRB_ADDR_CTRL);
+        tpm2_ptr->start_method = cpu_to_le32(TPM2_START_METHOD_CRB);
     } else {
         g_warn_if_reached();
     }
 
+    tpm2_ptr->log_area_minimum_length =
+        cpu_to_le32(TPM_LOG_AREA_MINIMUM_SIZE);
+
+    /* log area start address to be filled by Guest linker */
+    bios_linker_loader_add_pointer(linker, ACPI_BUILD_TABLE_FILE,
+                                   log_addr_offset, log_addr_size,
+                                   ACPI_BUILD_TPMLOG_FILE, 0);
     build_header(linker, table_data,
                  (void *)tpm2_ptr, "TPM2", sizeof(*tpm2_ptr), 4, NULL, NULL);
 }
@@ -2394,7 +2413,7 @@ build_srat(GArray *table_data, BIOSLinker *linker, MachineState *machine)
             }
             mem_base = 1ULL << 32;
             mem_len = next_base - pcms->below_4g_mem_size;
-            next_base += (1ULL << 32) - pcms->below_4g_mem_size;
+            next_base = mem_base + mem_len;
         }
         numamem = acpi_data_push(table_data, sizeof *numamem);
         build_srat_memory(numamem, mem_base, mem_len, i - 1,
@@ -2473,6 +2492,7 @@ build_dmar_q35(GArray *table_data, BIOSLinker *linker)
     AcpiDmarDeviceScope *scope = NULL;
     /* Root complex IOAPIC use one path[0] only */
     size_t ioapic_scope_size = sizeof(*scope) + sizeof(scope->path[0]);
+    IntelIOMMUState *intel_iommu = INTEL_IOMMU_DEVICE(iommu);
 
     assert(iommu);
     if (iommu->intr_supported) {
@@ -2480,7 +2500,7 @@ build_dmar_q35(GArray *table_data, BIOSLinker *linker)
     }
 
     dmar = acpi_data_push(table_data, sizeof(*dmar));
-    dmar->host_address_width = VTD_HOST_ADDRESS_WIDTH - 1;
+    dmar->host_address_width = intel_iommu->aw_bits - 1;
     dmar->flags = dmar_flags;
 
     /* DMAR Remapping Hardware Unit Definition structure */

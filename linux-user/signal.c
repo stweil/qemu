@@ -1487,12 +1487,13 @@ static int target_setup_sigframe(struct target_rt_sigframe *sf,
     }
 
     for (i = 0; i < 32; i++) {
+        uint64_t *q = aa64_vfp_qreg(env, i);
 #ifdef TARGET_WORDS_BIGENDIAN
-        __put_user(env->vfp.regs[i * 2], &aux->fpsimd.vregs[i * 2 + 1]);
-        __put_user(env->vfp.regs[i * 2 + 1], &aux->fpsimd.vregs[i * 2]);
+        __put_user(q[0], &aux->fpsimd.vregs[i * 2 + 1]);
+        __put_user(q[1], &aux->fpsimd.vregs[i * 2]);
 #else
-        __put_user(env->vfp.regs[i * 2], &aux->fpsimd.vregs[i * 2]);
-        __put_user(env->vfp.regs[i * 2 + 1], &aux->fpsimd.vregs[i * 2 + 1]);
+        __put_user(q[0], &aux->fpsimd.vregs[i * 2]);
+        __put_user(q[1], &aux->fpsimd.vregs[i * 2 + 1]);
 #endif
     }
     __put_user(vfp_get_fpsr(env), &aux->fpsimd.fpsr);
@@ -1539,12 +1540,13 @@ static int target_restore_sigframe(CPUARMState *env,
     }
 
     for (i = 0; i < 32; i++) {
+        uint64_t *q = aa64_vfp_qreg(env, i);
 #ifdef TARGET_WORDS_BIGENDIAN
-        __get_user(env->vfp.regs[i * 2], &aux->fpsimd.vregs[i * 2 + 1]);
-        __get_user(env->vfp.regs[i * 2 + 1], &aux->fpsimd.vregs[i * 2]);
+        __get_user(q[0], &aux->fpsimd.vregs[i * 2 + 1]);
+        __get_user(q[1], &aux->fpsimd.vregs[i * 2]);
 #else
-        __get_user(env->vfp.regs[i * 2], &aux->fpsimd.vregs[i * 2]);
-        __get_user(env->vfp.regs[i * 2 + 1], &aux->fpsimd.vregs[i * 2 + 1]);
+        __get_user(q[0], &aux->fpsimd.vregs[i * 2]);
+        __get_user(q[1], &aux->fpsimd.vregs[i * 2 + 1]);
 #endif
     }
     __get_user(fpsr, &aux->fpsimd.fpsr);
@@ -1903,7 +1905,7 @@ static abi_ulong *setup_sigframe_v2_vfp(abi_ulong *regspace, CPUARMState *env)
     __put_user(TARGET_VFP_MAGIC, &vfpframe->magic);
     __put_user(sizeof(*vfpframe), &vfpframe->size);
     for (i = 0; i < 32; i++) {
-        __put_user(float64_val(env->vfp.regs[i]), &vfpframe->ufp.fpregs[i]);
+        __put_user(*aa32_vfp_dreg(env, i), &vfpframe->ufp.fpregs[i]);
     }
     __put_user(vfp_get_fpscr(env), &vfpframe->ufp.fpscr);
     __put_user(env->vfp.xregs[ARM_VFP_FPEXC], &vfpframe->ufp_exc.fpexc);
@@ -2210,7 +2212,7 @@ static abi_ulong *restore_sigframe_v2_vfp(CPUARMState *env, abi_ulong *regspace)
         return 0;
     }
     for (i = 0; i < 32; i++) {
-        __get_user(float64_val(env->vfp.regs[i]), &vfpframe->ufp.fpregs[i]);
+        __get_user(*aa32_vfp_dreg(env, i), &vfpframe->ufp.fpregs[i]);
     }
     __get_user(fpscr, &vfpframe->ufp.fpscr);
     vfp_set_fpscr(env, fpscr);
@@ -2762,29 +2764,29 @@ long do_rt_sigreturn(CPUSPARCState *env)
 }
 
 #if defined(TARGET_SPARC64) && !defined(TARGET_ABI32)
-#define MC_TSTATE 0
-#define MC_PC 1
-#define MC_NPC 2
-#define MC_Y 3
-#define MC_G1 4
-#define MC_G2 5
-#define MC_G3 6
-#define MC_G4 7
-#define MC_G5 8
-#define MC_G6 9
-#define MC_G7 10
-#define MC_O0 11
-#define MC_O1 12
-#define MC_O2 13
-#define MC_O3 14
-#define MC_O4 15
-#define MC_O5 16
-#define MC_O6 17
-#define MC_O7 18
-#define MC_NGREG 19
+#define SPARC_MC_TSTATE 0
+#define SPARC_MC_PC 1
+#define SPARC_MC_NPC 2
+#define SPARC_MC_Y 3
+#define SPARC_MC_G1 4
+#define SPARC_MC_G2 5
+#define SPARC_MC_G3 6
+#define SPARC_MC_G4 7
+#define SPARC_MC_G5 8
+#define SPARC_MC_G6 9
+#define SPARC_MC_G7 10
+#define SPARC_MC_O0 11
+#define SPARC_MC_O1 12
+#define SPARC_MC_O2 13
+#define SPARC_MC_O3 14
+#define SPARC_MC_O4 15
+#define SPARC_MC_O5 16
+#define SPARC_MC_O6 17
+#define SPARC_MC_O7 18
+#define SPARC_MC_NGREG 19
 
 typedef abi_ulong target_mc_greg_t;
-typedef target_mc_greg_t target_mc_gregset_t[MC_NGREG];
+typedef target_mc_greg_t target_mc_gregset_t[SPARC_MC_NGREG];
 
 struct target_mc_fq {
     abi_ulong *mcfq_addr;
@@ -2844,8 +2846,8 @@ void sparc64_set_context(CPUSPARCState *env)
         goto do_sigsegv;
     }
     grp  = &ucp->tuc_mcontext.mc_gregs;
-    __get_user(pc, &((*grp)[MC_PC]));
-    __get_user(npc, &((*grp)[MC_NPC]));
+    __get_user(pc, &((*grp)[SPARC_MC_PC]));
+    __get_user(npc, &((*grp)[SPARC_MC_NPC]));
     if ((pc | npc) & 3) {
         goto do_sigsegv;
     }
@@ -2868,26 +2870,26 @@ void sparc64_set_context(CPUSPARCState *env)
     }
     env->pc = pc;
     env->npc = npc;
-    __get_user(env->y, &((*grp)[MC_Y]));
-    __get_user(tstate, &((*grp)[MC_TSTATE]));
+    __get_user(env->y, &((*grp)[SPARC_MC_Y]));
+    __get_user(tstate, &((*grp)[SPARC_MC_TSTATE]));
     env->asi = (tstate >> 24) & 0xff;
     cpu_put_ccr(env, tstate >> 32);
     cpu_put_cwp64(env, tstate & 0x1f);
-    __get_user(env->gregs[1], (&(*grp)[MC_G1]));
-    __get_user(env->gregs[2], (&(*grp)[MC_G2]));
-    __get_user(env->gregs[3], (&(*grp)[MC_G3]));
-    __get_user(env->gregs[4], (&(*grp)[MC_G4]));
-    __get_user(env->gregs[5], (&(*grp)[MC_G5]));
-    __get_user(env->gregs[6], (&(*grp)[MC_G6]));
-    __get_user(env->gregs[7], (&(*grp)[MC_G7]));
-    __get_user(env->regwptr[UREG_I0], (&(*grp)[MC_O0]));
-    __get_user(env->regwptr[UREG_I1], (&(*grp)[MC_O1]));
-    __get_user(env->regwptr[UREG_I2], (&(*grp)[MC_O2]));
-    __get_user(env->regwptr[UREG_I3], (&(*grp)[MC_O3]));
-    __get_user(env->regwptr[UREG_I4], (&(*grp)[MC_O4]));
-    __get_user(env->regwptr[UREG_I5], (&(*grp)[MC_O5]));
-    __get_user(env->regwptr[UREG_I6], (&(*grp)[MC_O6]));
-    __get_user(env->regwptr[UREG_I7], (&(*grp)[MC_O7]));
+    __get_user(env->gregs[1], (&(*grp)[SPARC_MC_G1]));
+    __get_user(env->gregs[2], (&(*grp)[SPARC_MC_G2]));
+    __get_user(env->gregs[3], (&(*grp)[SPARC_MC_G3]));
+    __get_user(env->gregs[4], (&(*grp)[SPARC_MC_G4]));
+    __get_user(env->gregs[5], (&(*grp)[SPARC_MC_G5]));
+    __get_user(env->gregs[6], (&(*grp)[SPARC_MC_G6]));
+    __get_user(env->gregs[7], (&(*grp)[SPARC_MC_G7]));
+    __get_user(env->regwptr[UREG_I0], (&(*grp)[SPARC_MC_O0]));
+    __get_user(env->regwptr[UREG_I1], (&(*grp)[SPARC_MC_O1]));
+    __get_user(env->regwptr[UREG_I2], (&(*grp)[SPARC_MC_O2]));
+    __get_user(env->regwptr[UREG_I3], (&(*grp)[SPARC_MC_O3]));
+    __get_user(env->regwptr[UREG_I4], (&(*grp)[SPARC_MC_O4]));
+    __get_user(env->regwptr[UREG_I5], (&(*grp)[SPARC_MC_O5]));
+    __get_user(env->regwptr[UREG_I6], (&(*grp)[SPARC_MC_O6]));
+    __get_user(env->regwptr[UREG_I7], (&(*grp)[SPARC_MC_O7]));
 
     __get_user(fp, &(ucp->tuc_mcontext.mc_fp));
     __get_user(i7, &(ucp->tuc_mcontext.mc_i7));
@@ -2975,25 +2977,25 @@ void sparc64_get_context(CPUSPARCState *env)
     }
 
     /* XXX: tstate must be saved properly */
-    //    __put_user(env->tstate, &((*grp)[MC_TSTATE]));
-    __put_user(env->pc, &((*grp)[MC_PC]));
-    __put_user(env->npc, &((*grp)[MC_NPC]));
-    __put_user(env->y, &((*grp)[MC_Y]));
-    __put_user(env->gregs[1], &((*grp)[MC_G1]));
-    __put_user(env->gregs[2], &((*grp)[MC_G2]));
-    __put_user(env->gregs[3], &((*grp)[MC_G3]));
-    __put_user(env->gregs[4], &((*grp)[MC_G4]));
-    __put_user(env->gregs[5], &((*grp)[MC_G5]));
-    __put_user(env->gregs[6], &((*grp)[MC_G6]));
-    __put_user(env->gregs[7], &((*grp)[MC_G7]));
-    __put_user(env->regwptr[UREG_I0], &((*grp)[MC_O0]));
-    __put_user(env->regwptr[UREG_I1], &((*grp)[MC_O1]));
-    __put_user(env->regwptr[UREG_I2], &((*grp)[MC_O2]));
-    __put_user(env->regwptr[UREG_I3], &((*grp)[MC_O3]));
-    __put_user(env->regwptr[UREG_I4], &((*grp)[MC_O4]));
-    __put_user(env->regwptr[UREG_I5], &((*grp)[MC_O5]));
-    __put_user(env->regwptr[UREG_I6], &((*grp)[MC_O6]));
-    __put_user(env->regwptr[UREG_I7], &((*grp)[MC_O7]));
+    //    __put_user(env->tstate, &((*grp)[SPARC_MC_TSTATE]));
+    __put_user(env->pc, &((*grp)[SPARC_MC_PC]));
+    __put_user(env->npc, &((*grp)[SPARC_MC_NPC]));
+    __put_user(env->y, &((*grp)[SPARC_MC_Y]));
+    __put_user(env->gregs[1], &((*grp)[SPARC_MC_G1]));
+    __put_user(env->gregs[2], &((*grp)[SPARC_MC_G2]));
+    __put_user(env->gregs[3], &((*grp)[SPARC_MC_G3]));
+    __put_user(env->gregs[4], &((*grp)[SPARC_MC_G4]));
+    __put_user(env->gregs[5], &((*grp)[SPARC_MC_G5]));
+    __put_user(env->gregs[6], &((*grp)[SPARC_MC_G6]));
+    __put_user(env->gregs[7], &((*grp)[SPARC_MC_G7]));
+    __put_user(env->regwptr[UREG_I0], &((*grp)[SPARC_MC_O0]));
+    __put_user(env->regwptr[UREG_I1], &((*grp)[SPARC_MC_O1]));
+    __put_user(env->regwptr[UREG_I2], &((*grp)[SPARC_MC_O2]));
+    __put_user(env->regwptr[UREG_I3], &((*grp)[SPARC_MC_O3]));
+    __put_user(env->regwptr[UREG_I4], &((*grp)[SPARC_MC_O4]));
+    __put_user(env->regwptr[UREG_I5], &((*grp)[SPARC_MC_O5]));
+    __put_user(env->regwptr[UREG_I6], &((*grp)[SPARC_MC_O6]));
+    __put_user(env->regwptr[UREG_I7], &((*grp)[SPARC_MC_O7]));
 
     w_addr = TARGET_STACK_BIAS+env->regwptr[UREG_I6];
     fp = i7 = 0;
@@ -6440,7 +6442,7 @@ static void setup_sigcontext(struct target_sigcontext *sc, CPUArchState *env)
         __put_user(env->fr[i], &sc->sc_fr[i]);
     }
 
-    __put_user(env->sar, &sc->sc_sar);
+    __put_user(env->cr[CR_SAR], &sc->sc_sar);
 }
 
 static void restore_sigcontext(CPUArchState *env, struct target_sigcontext *sc)
@@ -6461,7 +6463,7 @@ static void restore_sigcontext(CPUArchState *env, struct target_sigcontext *sc)
 
     __get_user(env->iaoq_f, &sc->sc_iaoq[0]);
     __get_user(env->iaoq_b, &sc->sc_iaoq[1]);
-    __get_user(env->sar, &sc->sc_sar);
+    __get_user(env->cr[CR_SAR], &sc->sc_sar);
 }
 
 /* No, this doesn't look right, but it's copied straight from the kernel.  */

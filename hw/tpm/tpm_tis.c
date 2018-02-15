@@ -90,7 +90,7 @@ typedef struct TPMState {
     if (DEBUG_TIS) { \
         printf(fmt, ## __VA_ARGS__); \
     } \
-} while (0);
+} while (0)
 
 /* tis registers */
 #define TPM_TIS_REG_ACCESS                0x00
@@ -393,7 +393,7 @@ static void tpm_tis_prep_abort(TPMState *s, uint8_t locty, uint8_t newlocty)
 /*
  * Callback from the TPM to indicate that the response was received.
  */
-static void tpm_tis_request_completed(TPMIf *ti)
+static void tpm_tis_request_completed(TPMIf *ti, int ret)
 {
     TPMState *s = TPM(ti);
     uint8_t locty = s->cmd.locty;
@@ -405,6 +405,7 @@ static void tpm_tis_request_completed(TPMIf *ti)
         }
     }
 
+    /* FIXME: report error if ret != 0 */
     tpm_tis_sts_set(&s->loc[locty],
                     TPM_TIS_STS_VALID | TPM_TIS_STS_DATA_AVAILABLE);
     s->loc[locty].state = TPM_TIS_STATE_COMPLETION;
@@ -945,11 +946,6 @@ static const MemoryRegionOps tpm_tis_memory_ops = {
     },
 };
 
-static int tpm_tis_do_startup_tpm(TPMState *s, size_t buffersize)
-{
-    return tpm_backend_startup_tpm(s->be_driver, buffersize);
-}
-
 /*
  * Get the TPMVersion of the backend device being used
  */
@@ -1004,7 +1000,7 @@ static void tpm_tis_reset(DeviceState *dev)
         s->rw_offset = 0;
     }
 
-    tpm_tis_do_startup_tpm(s, s->be_buffer_size);
+    tpm_backend_startup_tpm(s->be_driver, s->be_buffer_size);
 }
 
 static const VMStateDescription vmstate_tpm_tis = {

@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+
 #include "qemu/osdep.h"
 #include "qemu/cutils.h"
 #include "monitor/monitor.h"
@@ -30,8 +31,10 @@
 #include "chardev/char.h"
 #include "qmp-commands.h"
 #include "qapi-visit.h"
+#include "qapi/error.h"
 #include "sysemu/replay.h"
 #include "qemu/help_option.h"
+#include "qemu/option.h"
 
 #include "chardev/char-mux.h"
 
@@ -1082,6 +1085,24 @@ void qmp_chardev_send_break(const char *id, Error **errp)
         return;
     }
     qemu_chr_be_event(chr, CHR_EVENT_BREAK);
+}
+
+/*
+ * Add a timeout callback for the chardev (in milliseconds), return
+ * the GSource object created. Please use this to add timeout hook for
+ * chardev instead of g_timeout_add() and g_timeout_add_seconds(), to
+ * make sure the gcontext that the task bound to is correct.
+ */
+GSource *qemu_chr_timeout_add_ms(Chardev *chr, guint ms,
+                                 GSourceFunc func, void *private)
+{
+    GSource *source = g_timeout_source_new(ms);
+
+    assert(func);
+    g_source_set_callback(source, func, private, NULL);
+    g_source_attach(source, chr->gcontext);
+
+    return source;
 }
 
 void qemu_chr_cleanup(void)

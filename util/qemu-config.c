@@ -1,4 +1,7 @@
 #include "qemu/osdep.h"
+#include "qapi/error.h"
+#include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qlist.h"
 #include "qemu-common.h"
 #include "qemu/error-report.h"
 #include "qemu/option.h"
@@ -105,7 +108,8 @@ static void cleanup_infolist(CommandLineParameterInfoList *head)
             if (!strcmp(pre_entry->value->name, cur->next->value->name)) {
                 del_entry = cur->next;
                 cur->next = cur->next->next;
-                g_free(del_entry);
+                del_entry->next = NULL;
+                qapi_free_CommandLineParameterInfoList(del_entry);
                 break;
             }
             pre_entry = pre_entry->next;

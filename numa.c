@@ -30,6 +30,7 @@
 #include "qom/cpu.h"
 #include "qemu/error-report.h"
 #include "qapi-visit.h"
+#include "qapi/error.h"
 #include "qapi/opts-visitor.h"
 #include "hw/boards.h"
 #include "sysemu/hostmem.h"
@@ -456,13 +457,14 @@ static void allocate_system_memory_nonnuma(MemoryRegion *mr, Object *owner,
     if (mem_path) {
 #ifdef __linux__
         Error *err = NULL;
-        memory_region_init_ram_from_file(mr, owner, name, ram_size, false,
+        memory_region_init_ram_from_file(mr, owner, name, ram_size, 0, false,
                                          mem_path, &err);
         if (err) {
             error_report_err(err);
             if (mem_prealloc) {
                 exit(1);
             }
+            error_report("falling back to regular RAM allocation.");
 
             /* Legacy behavior: if allocation failed, fall back to
              * regular RAM allocation.
