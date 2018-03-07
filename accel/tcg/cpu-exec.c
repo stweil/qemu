@@ -666,7 +666,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 int cpu_exec(CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
-    int ret;
+    int ret = 0;
     SyncClocks sc = { 0 };
 
     /* replay_interrupt may need current_cpu */
