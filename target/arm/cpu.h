@@ -2597,7 +2597,7 @@ static inline bool arm_sctlr_b(CPUARMState *env)
 }
 
 /* Return true if the processor is in big-endian mode. */
-static bool arm_cpu_data_is_big_endian(CPUARMState *env)
+static inline bool arm_cpu_data_is_big_endian(CPUARMState *env)
 {
     int cur_el;
 
