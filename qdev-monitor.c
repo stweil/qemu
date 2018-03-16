@@ -22,9 +22,9 @@
 #include "hw/sysbus.h"
 #include "monitor/monitor.h"
 #include "monitor/qdev.h"
-#include "qmp-commands.h"
 #include "sysemu/arch_init.h"
 #include "qapi/error.h"
+#include "qapi/qapi-commands-misc.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/config-file.h"
@@ -122,12 +122,6 @@ static void qdev_print_devinfo(DeviceClass *dc)
     error_printf("\n");
 }
 
-static gint devinfo_cmp(gconstpointer a, gconstpointer b)
-{
-    return strcasecmp(object_class_get_name((ObjectClass *)a),
-                      object_class_get_name((ObjectClass *)b));
-}
-
 static void qdev_print_devinfos(bool show_no_user)
 {
     static const char *cat_name[DEVICE_CATEGORY_MAX + 1] = {
@@ -146,8 +140,7 @@ static void qdev_print_devinfos(bool show_no_user)
     int i;
     bool cat_printed;
 
-    list = g_slist_sort(object_class_get_list(TYPE_DEVICE, false),
-                        devinfo_cmp);
+    list = object_class_get_list_sorted(TYPE_DEVICE, false);
 
     for (i = 0; i <= DEVICE_CATEGORY_MAX; i++) {
         cat_printed = false;
@@ -258,8 +251,8 @@ int qdev_device_help(QemuOpts *opts)
 {
     Error *local_err = NULL;
     const char *driver;
-    DevicePropertyInfoList *prop_list;
-    DevicePropertyInfoList *prop;
+    ObjectPropertyInfoList *prop_list;
+    ObjectPropertyInfoList *prop;
 
     driver = qemu_opt_get(opts, "driver");
     if (driver && is_help_option(driver)) {
@@ -295,7 +288,7 @@ int qdev_device_help(QemuOpts *opts)
         }
     }
 
-    qapi_free_DevicePropertyInfoList(prop_list);
+    qapi_free_ObjectPropertyInfoList(prop_list);
     return 1;
 
 error:

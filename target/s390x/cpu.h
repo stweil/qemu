@@ -41,8 +41,6 @@
 
 #include "exec/cpu-all.h"
 
-#include "fpu/softfloat.h"
-
 #define NB_MMU_MODES 4
 #define TARGET_INSN_START_EXTRA_WORDS 1
 
@@ -84,6 +82,8 @@ struct CPUS390XState {
     uint64_t retxl;
 
     PSW psw;
+
+    S390CrashReason crash_reason;
 
     uint64_t cc_src;
     uint64_t cc_dst;
@@ -141,12 +141,9 @@ struct CPUS390XState {
      * architectures, there is a difference between a halt and a stop on s390.
      * If all cpus are either stopped (including check stop) or in the disabled
      * wait state, the vm can be shut down.
+     * The acceptable cpu_state values are defined in the CpuInfoS390State
+     * enum.
      */
-#define CPU_STATE_UNINITIALIZED        0x00
-#define CPU_STATE_STOPPED              0x01
-#define CPU_STATE_CHECK_STOP           0x02
-#define CPU_STATE_OPERATING            0x03
-#define CPU_STATE_LOAD                 0x04
     uint8_t cpu_state;
 
     /* currently processed sigp order */
@@ -312,11 +309,12 @@ extern const struct VMStateDescription vmstate_s390_cpu;
 
 #define FLAG_MASK_PSW_SHIFT     31
 #define FLAG_MASK_PER           (PSW_MASK_PER    >> FLAG_MASK_PSW_SHIFT)
+#define FLAG_MASK_DAT           (PSW_MASK_DAT    >> FLAG_MASK_PSW_SHIFT)
 #define FLAG_MASK_PSTATE        (PSW_MASK_PSTATE >> FLAG_MASK_PSW_SHIFT)
 #define FLAG_MASK_ASC           (PSW_MASK_ASC    >> FLAG_MASK_PSW_SHIFT)
 #define FLAG_MASK_64            (PSW_MASK_64     >> FLAG_MASK_PSW_SHIFT)
 #define FLAG_MASK_32            (PSW_MASK_32     >> FLAG_MASK_PSW_SHIFT)
-#define FLAG_MASK_PSW		(FLAG_MASK_PER | FLAG_MASK_PSTATE \
+#define FLAG_MASK_PSW           (FLAG_MASK_PER | FLAG_MASK_DAT | FLAG_MASK_PSTATE \
                                 | FLAG_MASK_ASC | FLAG_MASK_64 | FLAG_MASK_32)
 
 /* Control register 0 bits */
@@ -340,6 +338,10 @@ extern const struct VMStateDescription vmstate_s390_cpu;
 
 static inline int cpu_mmu_index(CPUS390XState *env, bool ifetch)
 {
+    if (!(env->psw.mask & PSW_MASK_DAT)) {
+        return MMU_REAL_IDX;
+    }
+
     switch (env->psw.mask & PSW_MASK_ASC) {
     case PSW_ASC_PRIMARY:
         return MMU_PRIMARY_IDX;
@@ -536,39 +538,39 @@ typedef union SysIB {
 QEMU_BUILD_BUG_ON(sizeof(SysIB) != 4096);
 
 /* MMU defines */
-#define _ASCE_ORIGIN            ~0xfffULL /* segment table origin             */
-#define _ASCE_SUBSPACE          0x200     /* subspace group control           */
-#define _ASCE_PRIVATE_SPACE     0x100     /* private space control            */
-#define _ASCE_ALT_EVENT         0x80      /* storage alteration event control */
-#define _ASCE_SPACE_SWITCH      0x40      /* space switch event               */
-#define _ASCE_REAL_SPACE        0x20      /* real space control               */
-#define _ASCE_TYPE_MASK         0x0c      /* asce table type mask             */
-#define _ASCE_TYPE_REGION1      0x0c      /* region first table type          */
-#define _ASCE_TYPE_REGION2      0x08      /* region second table type         */
-#define _ASCE_TYPE_REGION3      0x04      /* region third table type          */
-#define _ASCE_TYPE_SEGMENT      0x00      /* segment table type               */
-#define _ASCE_TABLE_LENGTH      0x03      /* region table length              */
+#define ASCE_ORIGIN           (~0xfffULL) /* segment table origin             */
+#define ASCE_SUBSPACE         0x200       /* subspace group control           */
+#define ASCE_PRIVATE_SPACE    0x100       /* private space control            */
+#define ASCE_ALT_EVENT        0x80        /* storage alteration event control */
+#define ASCE_SPACE_SWITCH     0x40        /* space switch event               */
+#define ASCE_REAL_SPACE       0x20        /* real space control               */
+#define ASCE_TYPE_MASK        0x0c        /* asce table type mask             */
+#define ASCE_TYPE_REGION1     0x0c        /* region first table type          */
+#define ASCE_TYPE_REGION2     0x08        /* region second table type         */
+#define ASCE_TYPE_REGION3     0x04        /* region third table type          */
+#define ASCE_TYPE_SEGMENT     0x00        /* segment table type               */
+#define ASCE_TABLE_LENGTH     0x03        /* region table length              */
 
-#define _REGION_ENTRY_ORIGIN    ~0xfffULL /* region/segment table origin      */
-#define _REGION_ENTRY_RO        0x200     /* region/segment protection bit    */
-#define _REGION_ENTRY_TF        0xc0      /* region/segment table offset      */
-#define _REGION_ENTRY_INV       0x20      /* invalid region table entry       */
-#define _REGION_ENTRY_TYPE_MASK 0x0c      /* region/segment table type mask   */
-#define _REGION_ENTRY_TYPE_R1   0x0c      /* region first table type          */
-#define _REGION_ENTRY_TYPE_R2   0x08      /* region second table type         */
-#define _REGION_ENTRY_TYPE_R3   0x04      /* region third table type          */
-#define _REGION_ENTRY_LENGTH    0x03      /* region third length              */
+#define REGION_ENTRY_ORIGIN   (~0xfffULL) /* region/segment table origin    */
+#define REGION_ENTRY_RO       0x200       /* region/segment protection bit  */
+#define REGION_ENTRY_TF       0xc0        /* region/segment table offset    */
+#define REGION_ENTRY_INV      0x20        /* invalid region table entry     */
+#define REGION_ENTRY_TYPE_MASK 0x0c       /* region/segment table type mask */
+#define REGION_ENTRY_TYPE_R1  0x0c        /* region first table type        */
+#define REGION_ENTRY_TYPE_R2  0x08        /* region second table type       */
+#define REGION_ENTRY_TYPE_R3  0x04        /* region third table type        */
+#define REGION_ENTRY_LENGTH   0x03        /* region third length            */
 
-#define _SEGMENT_ENTRY_ORIGIN   ~0x7ffULL /* segment table origin             */
-#define _SEGMENT_ENTRY_FC       0x400     /* format control                   */
-#define _SEGMENT_ENTRY_RO       0x200     /* page protection bit              */
-#define _SEGMENT_ENTRY_INV      0x20      /* invalid segment table entry      */
+#define SEGMENT_ENTRY_ORIGIN  (~0x7ffULL) /* segment table origin        */
+#define SEGMENT_ENTRY_FC      0x400       /* format control              */
+#define SEGMENT_ENTRY_RO      0x200       /* page protection bit         */
+#define SEGMENT_ENTRY_INV     0x20        /* invalid segment table entry */
 
-#define VADDR_PX                0xff000   /* page index bits                  */
+#define VADDR_PX              0xff000     /* page index bits   */
 
-#define _PAGE_RO        0x200            /* HW read-only bit  */
-#define _PAGE_INVALID   0x400            /* HW invalid bit    */
-#define _PAGE_RES0      0x800            /* bit must be zero  */
+#define PAGE_RO               0x200       /* HW read-only bit  */
+#define PAGE_INVALID          0x400       /* HW invalid bit    */
+#define PAGE_RES0             0x800       /* bit must be zero  */
 
 #define SK_C                    (0x1 << 1)
 #define SK_R                    (0x1 << 2)
@@ -618,10 +620,6 @@ QEMU_BUILD_BUG_ON(sizeof(SysIB) != 4096);
 
 /* SIGP order code mask corresponding to bit positions 56-63 */
 #define SIGP_ORDER_MASK 0x000000ff
-
-/* from s390-virtio-ccw */
-#define MEM_SECTION_SIZE             0x10000000UL
-#define MAX_AVAIL_SLOTS              32
 
 /* machine check interruption code */
 
@@ -694,7 +692,6 @@ int s390_get_clock(uint8_t *tod_high, uint64_t *tod_low);
 int s390_set_clock(uint8_t *tod_high, uint64_t *tod_low);
 void s390_crypto_reset(void);
 bool s390_get_squash_mcss(void);
-int s390_get_memslot_count(void);
 int s390_set_memory_limit(uint64_t new_limit, uint64_t *hw_limit);
 void s390_cmma_reset(void);
 void s390_enable_css_support(S390CPU *cpu);

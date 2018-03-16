@@ -41,18 +41,20 @@
 #include "savevm.h"
 #include "postcopy-ram.h"
 #include "qapi/error.h"
+#include "qapi/qapi-commands-migration.h"
+#include "qapi/qapi-commands-misc.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/error-report.h"
 #include "sysemu/cpus.h"
 #include "exec/memory.h"
 #include "exec/target_page.h"
-#include "qmp-commands.h"
 #include "trace.h"
 #include "qemu/iov.h"
 #include "block/snapshot.h"
 #include "qemu/cutils.h"
 #include "io/channel-buffer.h"
 #include "io/channel-file.h"
+#include "sysemu/replay.h"
 
 #ifndef ETH_P_RARP
 #define ETH_P_RARP 0x8035
@@ -1027,6 +1029,11 @@ int qemu_savevm_state_iterate(QEMUFile *f, bool postcopy)
                 continue;
             }
         }
+        if (se->ops && se->ops->is_active_iterate) {
+            if (!se->ops->is_active_iterate(se->opaque)) {
+                continue;
+            }
+        }
         /*
          * In the postcopy phase, any device that doesn't know how to
          * do postcopy should have saved it's state in the _complete
@@ -1219,13 +1226,15 @@ int qemu_savevm_state_complete_precopy(QEMUFile *f, bool iterable_only,
  * for units that can't do postcopy.
  */
 void qemu_savevm_state_pending(QEMUFile *f, uint64_t threshold_size,
-                               uint64_t *res_non_postcopiable,
-                               uint64_t *res_postcopiable)
+                               uint64_t *res_precopy_only,
+                               uint64_t *res_compatible,
+                               uint64_t *res_postcopy_only)
 {
     SaveStateEntry *se;
 
-    *res_non_postcopiable = 0;
-    *res_postcopiable = 0;
+    *res_precopy_only = 0;
+    *res_compatible = 0;
+    *res_postcopy_only = 0;
 
 
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
@@ -1238,7 +1247,8 @@ void qemu_savevm_state_pending(QEMUFile *f, uint64_t threshold_size,
             }
         }
         se->ops->save_live_pending(f, se->opaque, threshold_size,
-                                   res_non_postcopiable, res_postcopiable);
+                                   res_precopy_only, res_compatible,
+                                   res_postcopy_only);
     }
 }
 
@@ -1257,8 +1267,11 @@ void qemu_savevm_state_cleanup(void)
 static int qemu_savevm_state(QEMUFile *f, Error **errp)
 {
     int ret;
-    MigrationState *ms = migrate_init();
+    MigrationState *ms = migrate_get_current();
     MigrationStatus status;
+
+    migrate_init(ms);
+
     ms->to_dst_file = f;
 
     if (migration_is_blocked(errp)) {
@@ -1681,6 +1694,8 @@ static void loadvm_postcopy_handle_run_bh(void *opaque)
 
     trace_loadvm_postcopy_handle_run_vmstart();
 
+    dirty_bitmap_mig_before_vm_start();
+
     if (autostart) {
         /* Hold onto your hats, starting the CPU */
         vm_start();
@@ -1781,6 +1796,11 @@ static int loadvm_process_command(QEMUFile *f)
     cmd = qemu_get_be16(f);
     len = qemu_get_be16(f);
 
+    /* Check validity before continue processing of cmds */
+    if (qemu_file_get_error(f)) {
+        return qemu_file_get_error(f);
+    }
+
     trace_loadvm_process_command(cmd, len);
     if (cmd >= MIG_CMD_MAX || cmd == MIG_CMD_INVALID) {
         error_report("MIG_CMD 0x%x unknown (len 0x%x)", cmd, len);
@@ -1846,6 +1866,7 @@ static int loadvm_process_command(QEMUFile *f)
  */
 static bool check_section_footer(QEMUFile *f, SaveStateEntry *se)
 {
+    int ret;
     uint8_t read_mark;
     uint32_t read_section_id;
 
@@ -1855,6 +1876,13 @@ static bool check_section_footer(QEMUFile *f, SaveStateEntry *se)
     }
 
     read_mark = qemu_get_byte(f);
+
+    ret = qemu_file_get_error(f);
+    if (ret) {
+        error_report("%s: Read section footer failed: %d",
+                     __func__, ret);
+        return false;
+    }
 
     if (read_mark != QEMU_VM_SECTION_FOOTER) {
         error_report("Missing section footer for %s", se->idstr);
@@ -1890,6 +1918,13 @@ qemu_loadvm_section_start_full(QEMUFile *f, MigrationIncomingState *mis)
     }
     instance_id = qemu_get_be32(f);
     version_id = qemu_get_be32(f);
+
+    ret = qemu_file_get_error(f);
+    if (ret) {
+        error_report("%s: Failed to read instance/version ID: %d",
+                     __func__, ret);
+        return ret;
+    }
 
     trace_qemu_loadvm_state_section_startfull(section_id, idstr,
             instance_id, version_id);
@@ -1937,6 +1972,13 @@ qemu_loadvm_section_part_end(QEMUFile *f, MigrationIncomingState *mis)
     int ret;
 
     section_id = qemu_get_be32(f);
+
+    ret = qemu_file_get_error(f);
+    if (ret) {
+        error_report("%s: Failed to read section ID: %d",
+                     __func__, ret);
+        return ret;
+    }
 
     trace_qemu_loadvm_state_section_partend(section_id);
     QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
@@ -2005,8 +2047,14 @@ static int qemu_loadvm_state_main(QEMUFile *f, MigrationIncomingState *mis)
     uint8_t section_type;
     int ret = 0;
 
-    while ((section_type = qemu_get_byte(f)) != QEMU_VM_EOF) {
-        ret = 0;
+    while (true) {
+        section_type = qemu_get_byte(f);
+
+        if (qemu_file_get_error(f)) {
+            ret = qemu_file_get_error(f);
+            break;
+        }
+
         trace_qemu_loadvm_state_section(section_type);
         switch (section_type) {
         case QEMU_VM_SECTION_START:
@@ -2030,6 +2078,9 @@ static int qemu_loadvm_state_main(QEMUFile *f, MigrationIncomingState *mis)
                 goto out;
             }
             break;
+        case QEMU_VM_EOF:
+            /* This is the end of migration */
+            goto out;
         default:
             error_report("Unknown savevm section type %d", section_type);
             ret = -EINVAL;
@@ -2156,6 +2207,12 @@ int save_snapshot(const char *name, Error **errp)
     qemu_timeval tv;
     struct tm tm;
     AioContext *aio_context;
+
+    if (!replay_can_snapshot()) {
+        error_report("Record/replay does not allow making snapshot "
+                     "right now. Try once more later.");
+        return ret;
+    }
 
     if (!bdrv_all_can_snapshot(&bs)) {
         error_setg(errp, "Device '%s' is writable but does not support "
@@ -2284,8 +2341,7 @@ void qmp_xen_save_devices_state(const char *filename, bool has_live, bool live,
     f = qemu_fopen_channel_output(QIO_CHANNEL(ioc));
     object_unref(OBJECT(ioc));
     ret = qemu_save_device_state(f);
-    qemu_fclose(f);
-    if (ret < 0) {
+    if (ret < 0 || qemu_fclose(f) < 0) {
         error_setg(errp, QERR_IO_ERROR);
     } else {
         /* libxl calls the QMP command "stop" before calling
@@ -2348,6 +2404,12 @@ int load_snapshot(const char *name, Error **errp)
     int ret;
     AioContext *aio_context;
     MigrationIncomingState *mis = migration_incoming_get_current();
+
+    if (!replay_can_snapshot()) {
+        error_report("Record/replay does not allow loading snapshot "
+                     "right now. Try once more later.");
+        return -EINVAL;
+    }
 
     if (!bdrv_all_can_snapshot(&bs)) {
         error_setg(errp,

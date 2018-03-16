@@ -104,11 +104,9 @@ int main(int argc, char **argv)
 #include "sysemu/kvm.h"
 #include "sysemu/hax.h"
 #include "qapi/qobject-input-visitor.h"
-#include "qapi-visit.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
 #include "qemu-options.h"
-#include "qmp-commands.h"
 #include "qemu/main-loop.h"
 #ifdef CONFIG_VIRTFS
 #include "fsdev/qemu-fsdev.h"
@@ -129,10 +127,14 @@ int main(int argc, char **argv)
 #include "qapi/string-input-visitor.h"
 #include "qapi/opts-visitor.h"
 #include "qom/object_interfaces.h"
-#include "qapi-event.h"
 #include "exec/semihost.h"
 #include "crypto/init.h"
 #include "sysemu/replay.h"
+#include "qapi/qapi-events-run-state.h"
+#include "qapi/qapi-visit-block-core.h"
+#include "qapi/qapi-commands-block-core.h"
+#include "qapi/qapi-commands-misc.h"
+#include "qapi/qapi-commands-run-state.h"
 #include "qapi/qmp/qerror.h"
 #include "sysemu/iothread.h"
 
@@ -143,7 +145,6 @@ static const char *data_dir[16];
 static int data_dir_idx;
 const char *bios_name = NULL;
 enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
-int request_opengl = -1;
 int display_opengl;
 const char* keyboard_layout = NULL;
 ram_addr_t ram_size;
@@ -157,10 +158,8 @@ static int rtc_utc = 1;
 static int rtc_date_offset = -1; /* -1 means no change */
 QEMUClockType rtc_clock;
 int vga_interface_type = VGA_NONE;
-static int full_screen = 0;
+static DisplayOptions dpy;
 int no_frame;
-int no_quit = 0;
-static bool grab_on_hover;
 Chardev *serial_hds[MAX_SERIAL_PORTS];
 Chardev *parallel_hds[MAX_PARALLEL_PORTS];
 Chardev *virtcon_hds[MAX_VIRTIO_CONSOLES];
@@ -1749,7 +1748,7 @@ void qemu_system_reset(ShutdownCause reason)
 
 void qemu_system_guest_panicked(GuestPanicInformation *info)
 {
-    qemu_log_mask(LOG_GUEST_ERROR, "Guest crashed\n");
+    qemu_log_mask(LOG_GUEST_ERROR, "Guest crashed");
 
     if (current_cpu) {
         current_cpu->crash_occurred = true;
@@ -1765,13 +1764,20 @@ void qemu_system_guest_panicked(GuestPanicInformation *info)
 
     if (info) {
         if (info->type == GUEST_PANIC_INFORMATION_TYPE_HYPER_V) {
-            qemu_log_mask(LOG_GUEST_ERROR, "HV crash parameters: (%#"PRIx64
+            qemu_log_mask(LOG_GUEST_ERROR, "\nHV crash parameters: (%#"PRIx64
                           " %#"PRIx64" %#"PRIx64" %#"PRIx64" %#"PRIx64")\n",
                           info->u.hyper_v.arg1,
                           info->u.hyper_v.arg2,
                           info->u.hyper_v.arg3,
                           info->u.hyper_v.arg4,
                           info->u.hyper_v.arg5);
+        } else if (info->type == GUEST_PANIC_INFORMATION_TYPE_S390) {
+            qemu_log_mask(LOG_GUEST_ERROR, " on cpu %d: %s\n"
+                          "PSW: 0x%016" PRIx64 " 0x%016" PRIx64"\n",
+                          info->u.s390.core,
+                          S390CrashReason_str(info->u.s390.reason),
+                          info->u.s390.psw_mask,
+                          info->u.s390.psw_addr);
         }
         qapi_free_GuestPanicInformation(info);
     }
@@ -1952,7 +1958,7 @@ static void main_loop(void)
 
 static void version(void)
 {
-    printf("QEMU emulator version " QEMU_VERSION QEMU_PKGVERSION "\n"
+    printf("QEMU emulator version " QEMU_FULL_VERSION "\n"
            QEMU_COPYRIGHT "\n");
 }
 
@@ -2093,28 +2099,18 @@ static void select_vgahw(const char *p)
     }
 }
 
-typedef enum DisplayType {
-    DT_DEFAULT,
-    DT_CURSES,
-    DT_SDL,
-    DT_COCOA,
-    DT_GTK,
-    DT_EGL,
-    DT_NONE,
-} DisplayType;
-
-static DisplayType select_display(const char *p)
+static void parse_display(const char *p)
 {
     const char *opts;
-    DisplayType display = DT_DEFAULT;
 
     if (strstart(p, "sdl", &opts)) {
-#ifdef CONFIG_SDL
-        display = DT_SDL;
+        dpy.type = DISPLAY_TYPE_SDL;
         while (*opts) {
             const char *nextopt;
 
             if (strstart(opts, ",frame=", &nextopt)) {
+                g_printerr("The frame= sdl option is deprecated, and will be\n"
+                           "removed in a future release.\n");
                 opts = nextopt;
                 if (strstart(opts, "on", &nextopt)) {
                     no_frame = 0;
@@ -2143,19 +2139,21 @@ static DisplayType select_display(const char *p)
                 }
             } else if (strstart(opts, ",window_close=", &nextopt)) {
                 opts = nextopt;
+                dpy.has_window_close = true;
                 if (strstart(opts, "on", &nextopt)) {
-                    no_quit = 0;
+                    dpy.window_close = true;
                 } else if (strstart(opts, "off", &nextopt)) {
-                    no_quit = 1;
+                    dpy.window_close = false;
                 } else {
                     goto invalid_sdl_args;
                 }
             } else if (strstart(opts, ",gl=", &nextopt)) {
                 opts = nextopt;
+                dpy.has_gl = true;
                 if (strstart(opts, "on", &nextopt)) {
-                    request_opengl = 1;
+                    dpy.gl = true;
                 } else if (strstart(opts, "off", &nextopt)) {
-                    request_opengl = 0;
+                    dpy.gl = false;
                 } else {
                     goto invalid_sdl_args;
                 }
@@ -2166,10 +2164,6 @@ static DisplayType select_display(const char *p)
             }
             opts = nextopt;
         }
-#else
-        error_report("SDL support is disabled");
-        exit(1);
-#endif
     } else if (strstart(p, "vnc", &opts)) {
         if (*opts == '=') {
             vnc_parse(opts + 1, &error_fatal);
@@ -2178,42 +2172,31 @@ static DisplayType select_display(const char *p)
             exit(1);
         }
     } else if (strstart(p, "egl-headless", &opts)) {
-#ifdef CONFIG_OPENGL_DMABUF
-        request_opengl = 1;
-        display_opengl = 1;
-        display = DT_EGL;
-#else
-        error_report("egl support is disabled");
-        exit(1);
-#endif
+        dpy.type = DISPLAY_TYPE_EGL_HEADLESS;
     } else if (strstart(p, "curses", &opts)) {
-#ifdef CONFIG_CURSES
-        display = DT_CURSES;
-#else
-        error_report("curses support is disabled");
-        exit(1);
-#endif
+        dpy.type = DISPLAY_TYPE_CURSES;
     } else if (strstart(p, "gtk", &opts)) {
-#ifdef CONFIG_GTK
-        display = DT_GTK;
+        dpy.type = DISPLAY_TYPE_GTK;
         while (*opts) {
             const char *nextopt;
 
             if (strstart(opts, ",grab_on_hover=", &nextopt)) {
                 opts = nextopt;
+                dpy.u.gtk.has_grab_on_hover = true;
                 if (strstart(opts, "on", &nextopt)) {
-                    grab_on_hover = true;
+                    dpy.u.gtk.grab_on_hover = true;
                 } else if (strstart(opts, "off", &nextopt)) {
-                    grab_on_hover = false;
+                    dpy.u.gtk.grab_on_hover = false;
                 } else {
                     goto invalid_gtk_args;
                 }
             } else if (strstart(opts, ",gl=", &nextopt)) {
                 opts = nextopt;
+                dpy.has_gl = true;
                 if (strstart(opts, "on", &nextopt)) {
-                    request_opengl = 1;
+                    dpy.gl = true;
                 } else if (strstart(opts, "off", &nextopt)) {
-                    request_opengl = 0;
+                    dpy.gl = false;
                 } else {
                     goto invalid_gtk_args;
                 }
@@ -2224,23 +2207,20 @@ static DisplayType select_display(const char *p)
             }
             opts = nextopt;
         }
-#else
-        error_report("GTK support is disabled");
-        exit(1);
-#endif
     } else if (strstart(p, "none", &opts)) {
-        display = DT_NONE;
+        dpy.type = DISPLAY_TYPE_NONE;
     } else {
         error_report("unknown display type");
         exit(1);
     }
-
-    return display;
 }
 
 static int balloon_parse(const char *arg)
 {
     QemuOpts *opts;
+
+    warn_report("This option is deprecated. "
+                "Use '--device virtio-balloon' to enable the balloon device.");
 
     if (strcmp(arg, "none") == 0) {
         return 0;
@@ -2468,10 +2448,6 @@ static int mon_init_func(void *opaque, QemuOpts *opts, Error **errp)
 
     if (qemu_opt_get_bool(opts, "pretty", 0))
         flags |= MONITOR_USE_PRETTY;
-
-    if (qemu_opt_get_bool(opts, "default", 0)) {
-        error_report("option 'default' does nothing and is deprecated");
-    }
 
     chardev = qemu_opt_get(opts, "chardev");
     chr = qemu_chr_find(chardev);
@@ -2766,7 +2742,7 @@ static void qemu_run_exit_notifiers(void)
     notifier_list_notify(&exit_notifiers, NULL);
 }
 
-static bool machine_init_done;
+bool machine_init_done;
 
 void qemu_add_machine_init_done_notifier(Notifier *notify)
 {
@@ -2783,8 +2759,8 @@ void qemu_remove_machine_init_done_notifier(Notifier *notify)
 
 static void qemu_run_machine_init_done_notifiers(void)
 {
-    notifier_list_notify(&machine_init_done_notifiers, NULL);
     machine_init_done = true;
+    notifier_list_notify(&machine_init_done_notifiers, NULL);
 }
 
 static const QEMUOption *lookup_opt(int argc, char **argv,
@@ -2898,6 +2874,12 @@ static bool object_create_initial(const char *type)
         g_str_has_prefix(type, "pr-manager-")) {
         return false;
     }
+
+#if defined(CONFIG_VHOST_USER) && defined(CONFIG_LINUX)
+    if (g_str_equal(type, "cryptodev-vhost-user")) {
+        return false;
+    }
+#endif
 
     /*
      * return false for concrete netfilters since
@@ -3099,7 +3081,6 @@ int main(int argc, char **argv)
     const char *incoming = NULL;
     bool userconfig = true;
     bool nographic = false;
-    DisplayType display_type = DT_DEFAULT;
     int display_remote = 0;
     const char *log_mask = NULL;
     const char *log_file = NULL;
@@ -3123,6 +3104,7 @@ int main(int argc, char **argv)
 
     qemu_init_cpu_list();
     qemu_init_cpu_loop();
+
     qemu_mutex_lock_iothread();
 
     atexit(qemu_run_exit_notifiers);
@@ -3140,6 +3122,7 @@ int main(int argc, char **argv)
     qemu_add_opts(&qemu_chardev_opts);
     qemu_add_opts(&qemu_device_opts);
     qemu_add_opts(&qemu_netdev_opts);
+    qemu_add_opts(&qemu_nic_opts);
     qemu_add_opts(&qemu_net_opts);
     qemu_add_opts(&qemu_rtc_opts);
     qemu_add_opts(&qemu_global_opts);
@@ -3293,17 +3276,17 @@ int main(int argc, char **argv)
                 }
                 break;
             case QEMU_OPTION_display:
-                display_type = select_display(optarg);
+                parse_display(optarg);
                 break;
             case QEMU_OPTION_nographic:
                 olist = qemu_find_opts("machine");
                 qemu_opts_parse_noisily(olist, "graphics=off", false);
                 nographic = true;
-                display_type = DT_NONE;
+                dpy.type = DISPLAY_TYPE_NONE;
                 break;
             case QEMU_OPTION_curses:
 #ifdef CONFIG_CURSES
-                display_type = DT_CURSES;
+                dpy.type = DISPLAY_TYPE_CURSES;
 #else
                 error_report("curses support is disabled");
                 exit(1);
@@ -3357,6 +3340,12 @@ int main(int argc, char **argv)
             case QEMU_OPTION_netdev:
                 default_net = 0;
                 if (net_client_parse(qemu_find_opts("netdev"), optarg) == -1) {
+                    exit(1);
+                }
+                break;
+            case QEMU_OPTION_nic:
+                default_net = 0;
+                if (net_client_parse(qemu_find_opts("nic"), optarg) == -1) {
                     exit(1);
                 }
                 break;
@@ -3467,6 +3456,8 @@ int main(int argc, char **argv)
                 break;
             case QEMU_OPTION_localtime:
                 rtc_utc = 0;
+                warn_report("This option is deprecated, "
+                            "use '-rtc base=localtime' instead.");
                 break;
             case QEMU_OPTION_vga:
                 vga_model = optarg;
@@ -3686,9 +3677,12 @@ int main(int argc, char **argv)
                 loadvm = optarg;
                 break;
             case QEMU_OPTION_full_screen:
-                full_screen = 1;
+                dpy.has_full_screen = true;
+                dpy.full_screen = true;
                 break;
             case QEMU_OPTION_no_frame:
+                g_printerr("The -no-frame switch is deprecated, and will be\n"
+                           "removed in a future release.\n");
                 no_frame = 1;
                 break;
             case QEMU_OPTION_alt_grab:
@@ -3698,11 +3692,12 @@ int main(int argc, char **argv)
                 ctrl_grab = 1;
                 break;
             case QEMU_OPTION_no_quit:
-                no_quit = 1;
+                dpy.has_window_close = true;
+                dpy.window_close = false;
                 break;
             case QEMU_OPTION_sdl:
 #ifdef CONFIG_SDL
-                display_type = DT_SDL;
+                dpy.type = DISPLAY_TYPE_SDL;
                 break;
 #else
                 error_report("SDL support is disabled");
@@ -3722,6 +3717,8 @@ int main(int argc, char **argv)
                 };
 
                 qdev_prop_register_global(&slew_lost_ticks);
+                warn_report("This option is deprecated, "
+                            "use '-rtc driftfix=slew' instead.");
                 break;
             }
             case QEMU_OPTION_acpitable:
@@ -3899,9 +3896,6 @@ int main(int argc, char **argv)
                     exit(1);
                 }
                 break;
-            case QEMU_OPTION_tdf:
-                warn_report("ignoring deprecated option");
-                break;
             case QEMU_OPTION_name:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("name"),
                                                optarg, true);
@@ -3926,6 +3920,7 @@ int main(int argc, char **argv)
                  */
                 break;
             case QEMU_OPTION_startdate:
+                warn_report("This option is deprecated, use '-rtc base=' instead.");
                 configure_rtc_date_offset(optarg, 1);
                 break;
             case QEMU_OPTION_rtc:
@@ -4320,7 +4315,7 @@ int main(int argc, char **argv)
             exit(1);
         }
 #ifdef CONFIG_CURSES
-        if (display_type == DT_CURSES) {
+        if (dpy.type == DISPLAY_TYPE_CURSES) {
             error_report("curses display cannot be used with -daemonize");
             exit(1);
         }
@@ -4366,40 +4361,32 @@ int main(int argc, char **argv)
         display_remote++;
     }
 #endif
-    if (display_type == DT_DEFAULT && !display_remote) {
-#if defined(CONFIG_GTK)
-        display_type = DT_GTK;
-#elif defined(CONFIG_SDL)
-        display_type = DT_SDL;
-#elif defined(CONFIG_COCOA)
-        display_type = DT_COCOA;
-#elif defined(CONFIG_VNC)
-        vnc_parse("localhost:0,to=99,id=default", &error_abort);
-#else
-        display_type = DT_NONE;
+    if (dpy.type == DISPLAY_TYPE_DEFAULT && !display_remote) {
+        if (!qemu_display_find_default(&dpy)) {
+            dpy.type = DISPLAY_TYPE_NONE;
+#if defined(CONFIG_VNC)
+            vnc_parse("localhost:0,to=99,id=default", &error_abort);
 #endif
+        }
+    }
+    if (dpy.type == DISPLAY_TYPE_DEFAULT) {
+        dpy.type = DISPLAY_TYPE_NONE;
     }
 
-    if ((no_frame || alt_grab || ctrl_grab) && display_type != DT_SDL) {
+    if ((no_frame || alt_grab || ctrl_grab) && dpy.type != DISPLAY_TYPE_SDL) {
         error_report("-no-frame, -alt-grab and -ctrl-grab are only valid "
                      "for SDL, ignoring option");
     }
-    if (no_quit && (display_type != DT_GTK && display_type != DT_SDL)) {
+    if (dpy.has_window_close &&
+        (dpy.type != DISPLAY_TYPE_GTK && dpy.type != DISPLAY_TYPE_SDL)) {
         error_report("-no-quit is only valid for GTK and SDL, "
                      "ignoring option");
     }
 
-    if (display_type == DT_GTK) {
-        early_gtk_display_init(request_opengl);
-    }
-
-    if (display_type == DT_SDL) {
-        sdl_display_early_init(request_opengl);
-    }
-
+    qemu_display_early_init(&dpy);
     qemu_console_early_init();
 
-    if (request_opengl == 1 && display_opengl == 0) {
+    if (dpy.has_gl && dpy.gl && display_opengl == 0) {
 #if defined(CONFIG_OPENGL)
         error_report("OpenGL is not supported by the display");
 #else
@@ -4536,7 +4523,8 @@ int main(int argc, char **argv)
 
     colo_info_init();
 
-    if (net_init_clients() < 0) {
+    if (net_init_clients(&err) < 0) {
+        error_report_err(err);
         exit(1);
     }
 
@@ -4564,6 +4552,7 @@ int main(int argc, char **argv)
 
     blk_mig_init();
     ram_mig_init();
+    dirty_bitmap_mig_init();
 
     /* If the currently selected machine wishes to override the units-per-bus
      * property of its default HBA interface type, do so now. */
@@ -4691,15 +4680,6 @@ int main(int argc, char **argv)
 
     rom_reset_order_override();
 
-    /*
-     * Create frontends for -drive if=scsi leftovers.
-     * Normally, frontends for -drive get created by machine
-     * initialization for onboard SCSI HBAs.  However, we create a few
-     * more ever since SCSI qdevification, but this is pretty much an
-     * implementation accident, and deprecated.
-     */
-    scsi_legacy_handle_cmdline();
-
     /* Did we create any drives that we failed to create a device for? */
     drive_check_orphaned();
 
@@ -4721,25 +4701,9 @@ int main(int argc, char **argv)
         qemu_register_reset(restore_boot_order, g_strdup(boot_order));
     }
 
-    ds = init_displaystate();
-
     /* init local displays */
-    switch (display_type) {
-    case DT_CURSES:
-        curses_display_init(ds, full_screen);
-        break;
-    case DT_SDL:
-        sdl_display_init(ds, full_screen);
-        break;
-    case DT_COCOA:
-        cocoa_display_init(ds, full_screen);
-        break;
-    case DT_GTK:
-        gtk_display_init(ds, full_screen, grab_on_hover);
-        break;
-    default:
-        break;
-    }
+    ds = init_displaystate();
+    qemu_display_init(ds, &dpy);
 
     /* must be after terminal init, SDL library changes signal handlers */
     os_setup_signal_handling();
@@ -4753,12 +4717,6 @@ int main(int argc, char **argv)
     if (using_spice) {
         qemu_spice_display_init();
     }
-
-#ifdef CONFIG_OPENGL_DMABUF
-    if (display_type == DT_EGL) {
-        egl_headless_init();
-    }
-#endif
 
     if (foreach_device_config(DEV_GDB, gdbserver_start) < 0) {
         exit(1);
@@ -4815,11 +4773,12 @@ int main(int argc, char **argv)
     os_setup_post();
 
     main_loop();
-    replay_disable_events();
-    iothread_stop_all();
 
-    pause_all_vcpus();
+    /* No more vcpu or device emulation activity beyond this point */
+    vm_shutdown();
+
     bdrv_close_all();
+
     res_free();
 
     /* vhost-user must be cleaned up before chardevs.  */

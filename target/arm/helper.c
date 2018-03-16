@@ -1,4 +1,5 @@
 #include "qemu/osdep.h"
+#include "target/arm/idau.h"
 #include "trace.h"
 #include "cpu.h"
 #include "internals.h"
@@ -15,6 +16,7 @@
 #include <zlib.h> /* For crc32 */
 #include "exec/semihost.h"
 #include "sysemu/kvm.h"
+#include "fpu/softfloat.h"
 
 #define ARM_CPU_FREQ 1000000000 /* FIXME: 1 GHz, should be configurable */
 
@@ -3356,10 +3358,12 @@ static const ARMCPRegInfo v8_cp_reginfo[] = {
       .writefn = aa64_daif_write, .resetfn = arm_cp_reset_ignore },
     { .name = "FPCR", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 3, .opc2 = 0, .crn = 4, .crm = 4,
-      .access = PL0_RW, .readfn = aa64_fpcr_read, .writefn = aa64_fpcr_write },
+      .access = PL0_RW, .type = ARM_CP_FPU | ARM_CP_SUPPRESS_TB_END,
+      .readfn = aa64_fpcr_read, .writefn = aa64_fpcr_write },
     { .name = "FPSR", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 3, .opc2 = 1, .crn = 4, .crm = 4,
-      .access = PL0_RW, .readfn = aa64_fpsr_read, .writefn = aa64_fpsr_write },
+      .access = PL0_RW, .type = ARM_CP_FPU | ARM_CP_SUPPRESS_TB_END,
+      .readfn = aa64_fpsr_read, .writefn = aa64_fpsr_write },
     { .name = "DCZID_EL0", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 3, .opc2 = 7, .crn = 0, .crm = 0,
       .access = PL0_R, .type = ARM_CP_NO_RAW,
@@ -4333,20 +4337,6 @@ static int sve_exception_el(CPUARMState *env)
     return 0;
 }
 
-static CPAccessResult zcr_access(CPUARMState *env, const ARMCPRegInfo *ri,
-                                 bool isread)
-{
-    switch (sve_exception_el(env)) {
-    case 3:
-        return CP_ACCESS_TRAP_EL3;
-    case 2:
-        return CP_ACCESS_TRAP_EL2;
-    case 1:
-        return CP_ACCESS_TRAP;
-    }
-    return CP_ACCESS_OK;
-}
-
 static void zcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                       uint64_t value)
 {
@@ -4357,7 +4347,7 @@ static void zcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static const ARMCPRegInfo zcr_el1_reginfo = {
     .name = "ZCR_EL1", .state = ARM_CP_STATE_AA64,
     .opc0 = 3, .opc1 = 0, .crn = 1, .crm = 2, .opc2 = 0,
-    .access = PL1_RW, .accessfn = zcr_access, .type = ARM_CP_64BIT,
+    .access = PL1_RW, .type = ARM_CP_SVE | ARM_CP_FPU,
     .fieldoffset = offsetof(CPUARMState, vfp.zcr_el[1]),
     .writefn = zcr_write, .raw_writefn = raw_write
 };
@@ -4365,7 +4355,7 @@ static const ARMCPRegInfo zcr_el1_reginfo = {
 static const ARMCPRegInfo zcr_el2_reginfo = {
     .name = "ZCR_EL2", .state = ARM_CP_STATE_AA64,
     .opc0 = 3, .opc1 = 4, .crn = 1, .crm = 2, .opc2 = 0,
-    .access = PL2_RW, .accessfn = zcr_access, .type = ARM_CP_64BIT,
+    .access = PL2_RW, .type = ARM_CP_SVE | ARM_CP_FPU,
     .fieldoffset = offsetof(CPUARMState, vfp.zcr_el[2]),
     .writefn = zcr_write, .raw_writefn = raw_write
 };
@@ -4373,14 +4363,14 @@ static const ARMCPRegInfo zcr_el2_reginfo = {
 static const ARMCPRegInfo zcr_no_el2_reginfo = {
     .name = "ZCR_EL2", .state = ARM_CP_STATE_AA64,
     .opc0 = 3, .opc1 = 4, .crn = 1, .crm = 2, .opc2 = 0,
-    .access = PL2_RW, .type = ARM_CP_64BIT,
+    .access = PL2_RW, .type = ARM_CP_SVE | ARM_CP_FPU,
     .readfn = arm_cp_read_zero, .writefn = arm_cp_write_ignore
 };
 
 static const ARMCPRegInfo zcr_el3_reginfo = {
     .name = "ZCR_EL3", .state = ARM_CP_STATE_AA64,
     .opc0 = 3, .opc1 = 6, .crn = 1, .crm = 2, .opc2 = 0,
-    .access = PL3_RW, .accessfn = zcr_access, .type = ARM_CP_64BIT,
+    .access = PL3_RW, .type = ARM_CP_SVE | ARM_CP_FPU,
     .fieldoffset = offsetof(CPUARMState, vfp.zcr_el[3]),
     .writefn = zcr_write, .raw_writefn = raw_write
 };
@@ -5080,8 +5070,8 @@ void register_cp_regs_for_features(ARMCPU *cpu)
             { .name = "VPIDR", .state = ARM_CP_STATE_AA32,
               .cp = 15, .opc1 = 4, .crn = 0, .crm = 0, .opc2 = 0,
               .access = PL2_RW, .accessfn = access_el3_aa32ns,
-              .resetvalue = cpu->midr,
-              .fieldoffset = offsetof(CPUARMState, cp15.vpidr_el2) },
+              .resetvalue = cpu->midr, .type = ARM_CP_ALIAS,
+              .fieldoffset = offsetoflow32(CPUARMState, cp15.vpidr_el2) },
             { .name = "VPIDR_EL2", .state = ARM_CP_STATE_AA64,
               .opc0 = 3, .opc1 = 4, .crn = 0, .crm = 0, .opc2 = 0,
               .access = PL2_RW, .resetvalue = cpu->midr,
@@ -5089,8 +5079,8 @@ void register_cp_regs_for_features(ARMCPU *cpu)
             { .name = "VMPIDR", .state = ARM_CP_STATE_AA32,
               .cp = 15, .opc1 = 4, .crn = 0, .crm = 0, .opc2 = 5,
               .access = PL2_RW, .accessfn = access_el3_aa32ns,
-              .resetvalue = vmpidr_def,
-              .fieldoffset = offsetof(CPUARMState, cp15.vmpidr_el2) },
+              .resetvalue = vmpidr_def, .type = ARM_CP_ALIAS,
+              .fieldoffset = offsetoflow32(CPUARMState, cp15.vmpidr_el2) },
             { .name = "VMPIDR_EL2", .state = ARM_CP_STATE_AA64,
               .opc0 = 3, .opc1 = 4, .crn = 0, .crm = 0, .opc2 = 5,
               .access = PL2_RW,
@@ -9751,17 +9741,30 @@ static void v8m_security_lookup(CPUARMState *env, uint32_t address,
      */
     ARMCPU *cpu = arm_env_get_cpu(env);
     int r;
+    bool idau_exempt = false, idau_ns = true, idau_nsc = true;
+    int idau_region = IREGION_NOTVALID;
 
-    /* TODO: implement IDAU */
+    if (cpu->idau) {
+        IDAUInterfaceClass *iic = IDAU_INTERFACE_GET_CLASS(cpu->idau);
+        IDAUInterface *ii = IDAU_INTERFACE(cpu->idau);
+
+        iic->check(ii, address, &idau_region, &idau_exempt, &idau_ns,
+                   &idau_nsc);
+    }
 
     if (access_type == MMU_INST_FETCH && extract32(address, 28, 4) == 0xf) {
         /* 0xf0000000..0xffffffff is always S for insn fetches */
         return;
     }
 
-    if (v8m_is_sau_exempt(env, address, access_type)) {
+    if (idau_exempt || v8m_is_sau_exempt(env, address, access_type)) {
         sattrs->ns = !regime_is_secure(env, mmu_idx);
         return;
+    }
+
+    if (idau_region != IREGION_NOTVALID) {
+        sattrs->irvalid = true;
+        sattrs->iregion = idau_region;
     }
 
     switch (env->sau.ctrl & 3) {
@@ -9800,7 +9803,15 @@ static void v8m_security_lookup(CPUARMState *env, uint32_t address,
             }
         }
 
-        /* TODO when we support the IDAU then it may override the result here */
+        /* The IDAU will override the SAU lookup results if it specifies
+         * higher security than the SAU does.
+         */
+        if (!idau_ns) {
+            if (sattrs->ns || (!idau_nsc && sattrs->nsc)) {
+                sattrs->ns = false;
+                sattrs->nsc = idau_nsc;
+            }
+        }
         break;
     }
 }
@@ -10414,6 +10425,16 @@ uint32_t HELPER(v7m_mrs)(CPUARMState *env, uint32_t reg)
                 return 0;
             }
             return env->v7m.other_ss_psp;
+        case 0x8a: /* MSPLIM_NS */
+            if (!env->v7m.secure) {
+                return 0;
+            }
+            return env->v7m.msplim[M_REG_NS];
+        case 0x8b: /* PSPLIM_NS */
+            if (!env->v7m.secure) {
+                return 0;
+            }
+            return env->v7m.psplim[M_REG_NS];
         case 0x90: /* PRIMASK_NS */
             if (!env->v7m.secure) {
                 return 0;
@@ -10455,6 +10476,16 @@ uint32_t HELPER(v7m_mrs)(CPUARMState *env, uint32_t reg)
         return v7m_using_psp(env) ? env->v7m.other_sp : env->regs[13];
     case 9: /* PSP */
         return v7m_using_psp(env) ? env->regs[13] : env->v7m.other_sp;
+    case 10: /* MSPLIM */
+        if (!arm_feature(env, ARM_FEATURE_V8)) {
+            goto bad_reg;
+        }
+        return env->v7m.msplim[env->v7m.secure];
+    case 11: /* PSPLIM */
+        if (!arm_feature(env, ARM_FEATURE_V8)) {
+            goto bad_reg;
+        }
+        return env->v7m.psplim[env->v7m.secure];
     case 16: /* PRIMASK */
         return env->v7m.primask[env->v7m.secure];
     case 17: /* BASEPRI */
@@ -10463,6 +10494,7 @@ uint32_t HELPER(v7m_mrs)(CPUARMState *env, uint32_t reg)
     case 19: /* FAULTMASK */
         return env->v7m.faultmask[env->v7m.secure];
     default:
+    bad_reg:
         qemu_log_mask(LOG_GUEST_ERROR, "Attempt to read unknown special"
                                        " register %d\n", reg);
         return 0;
@@ -10500,6 +10532,18 @@ void HELPER(v7m_msr)(CPUARMState *env, uint32_t maskreg, uint32_t val)
             }
             env->v7m.other_ss_psp = val;
             return;
+        case 0x8a: /* MSPLIM_NS */
+            if (!env->v7m.secure) {
+                return;
+            }
+            env->v7m.msplim[M_REG_NS] = val & ~7;
+            return;
+        case 0x8b: /* PSPLIM_NS */
+            if (!env->v7m.secure) {
+                return;
+            }
+            env->v7m.psplim[M_REG_NS] = val & ~7;
+            return;
         case 0x90: /* PRIMASK_NS */
             if (!env->v7m.secure) {
                 return;
@@ -10517,6 +10561,16 @@ void HELPER(v7m_msr)(CPUARMState *env, uint32_t maskreg, uint32_t val)
                 return;
             }
             env->v7m.faultmask[M_REG_NS] = val & 1;
+            return;
+        case 0x94: /* CONTROL_NS */
+            if (!env->v7m.secure) {
+                return;
+            }
+            write_v7m_control_spsel_for_secstate(env,
+                                                 val & R_V7M_CONTROL_SPSEL_MASK,
+                                                 M_REG_NS);
+            env->v7m.control[M_REG_NS] &= ~R_V7M_CONTROL_NPRIV_MASK;
+            env->v7m.control[M_REG_NS] |= val & R_V7M_CONTROL_NPRIV_MASK;
             return;
         case 0x98: /* SP_NS */
         {
@@ -10569,6 +10623,18 @@ void HELPER(v7m_msr)(CPUARMState *env, uint32_t maskreg, uint32_t val)
             env->v7m.other_sp = val;
         }
         break;
+    case 10: /* MSPLIM */
+        if (!arm_feature(env, ARM_FEATURE_V8)) {
+            goto bad_reg;
+        }
+        env->v7m.msplim[env->v7m.secure] = val & ~7;
+        break;
+    case 11: /* PSPLIM */
+        if (!arm_feature(env, ARM_FEATURE_V8)) {
+            goto bad_reg;
+        }
+        env->v7m.psplim[env->v7m.secure] = val & ~7;
+        break;
     case 16: /* PRIMASK */
         env->v7m.primask[env->v7m.secure] = val & 1;
         break;
@@ -10601,6 +10667,7 @@ void HELPER(v7m_msr)(CPUARMState *env, uint32_t maskreg, uint32_t val)
         env->v7m.control[env->v7m.secure] |= val & R_V7M_CONTROL_NPRIV_MASK;
         break;
     default:
+    bad_reg:
         qemu_log_mask(LOG_GUEST_ERROR, "Attempt to write unknown special"
                                        " register %d\n", reg);
         return;
@@ -11057,6 +11124,7 @@ uint32_t HELPER(vfp_get_fpscr)(CPUARMState *env)
             | (env->vfp.vec_stride << 20);
     i = get_float_exception_flags(&env->vfp.fp_status);
     i |= get_float_exception_flags(&env->vfp.standard_fp_status);
+    i |= get_float_exception_flags(&env->vfp.fp_status_f16);
     fpscr |= vfp_exceptbits_from_host(i);
     return fpscr;
 }
@@ -11114,16 +11182,31 @@ void HELPER(vfp_set_fpscr)(CPUARMState *env, uint32_t val)
             break;
         }
         set_float_rounding_mode(i, &env->vfp.fp_status);
+        set_float_rounding_mode(i, &env->vfp.fp_status_f16);
     }
-    if (changed & (1 << 24)) {
-        set_flush_to_zero((val & (1 << 24)) != 0, &env->vfp.fp_status);
-        set_flush_inputs_to_zero((val & (1 << 24)) != 0, &env->vfp.fp_status);
+    if (changed & FPCR_FZ16) {
+        bool ftz_enabled = val & FPCR_FZ16;
+        set_flush_to_zero(ftz_enabled, &env->vfp.fp_status_f16);
+        set_flush_inputs_to_zero(ftz_enabled, &env->vfp.fp_status_f16);
     }
-    if (changed & (1 << 25))
-        set_default_nan_mode((val & (1 << 25)) != 0, &env->vfp.fp_status);
+    if (changed & FPCR_FZ) {
+        bool ftz_enabled = val & FPCR_FZ;
+        set_flush_to_zero(ftz_enabled, &env->vfp.fp_status);
+        set_flush_inputs_to_zero(ftz_enabled, &env->vfp.fp_status);
+    }
+    if (changed & FPCR_DN) {
+        bool dnan_enabled = val & FPCR_DN;
+        set_default_nan_mode(dnan_enabled, &env->vfp.fp_status);
+        set_default_nan_mode(dnan_enabled, &env->vfp.fp_status_f16);
+    }
 
+    /* The exception flags are ORed together when we read fpscr so we
+     * only need to preserve the current state in one of our
+     * float_status values.
+     */
     i = vfp_exceptbits_to_host(val);
     set_float_exception_flags(i, &env->vfp.fp_status);
+    set_float_exception_flags(0, &env->vfp.fp_status_f16);
     set_float_exception_flags(0, &env->vfp.standard_fp_status);
 }
 
@@ -11240,8 +11323,10 @@ CONV_ITOF(vfp_##name##to##p, fsz, sign) \
 CONV_FTOI(vfp_to##name##p, fsz, sign, ) \
 CONV_FTOI(vfp_to##name##z##p, fsz, sign, _round_to_zero)
 
+FLOAT_CONVS(si, h, 16, )
 FLOAT_CONVS(si, s, 32, )
 FLOAT_CONVS(si, d, 64, )
+FLOAT_CONVS(ui, h, 16, u)
 FLOAT_CONVS(ui, s, 32, u)
 FLOAT_CONVS(ui, d, 64, u)
 
@@ -11324,6 +11409,8 @@ VFP_CONV_FIX_A64(sq, s, 32, 64, int64)
 VFP_CONV_FIX(uh, s, 32, 32, uint16)
 VFP_CONV_FIX(ul, s, 32, 32, uint32)
 VFP_CONV_FIX_A64(uq, s, 32, 64, uint64)
+VFP_CONV_FIX_A64(sl, h, 16, 32, int32)
+VFP_CONV_FIX_A64(ul, h, 16, 32, uint32)
 #undef VFP_CONV_FIX
 #undef VFP_CONV_FIX_FLOAT
 #undef VFP_CONV_FLOAT_FIX_ROUND
@@ -11331,9 +11418,9 @@ VFP_CONV_FIX_A64(uq, s, 32, 64, uint64)
 /* Set the current fp rounding mode and return the old one.
  * The argument is a softfloat float_round_ value.
  */
-uint32_t HELPER(set_rmode)(uint32_t rmode, CPUARMState *env)
+uint32_t HELPER(set_rmode)(uint32_t rmode, void *fpstp)
 {
-    float_status *fp_status = &env->vfp.fp_status;
+    float_status *fp_status = fpstp;
 
     uint32_t prev_rmode = get_float_rounding_mode(fp_status);
     set_float_rounding_mode(rmode, fp_status);
@@ -11457,80 +11544,75 @@ float32 HELPER(rsqrts_f32)(float32 a, float32 b, CPUARMState *env)
  * int->float conversions at run-time.  */
 #define float64_256 make_float64(0x4070000000000000LL)
 #define float64_512 make_float64(0x4080000000000000LL)
+#define float16_maxnorm make_float16(0x7bff)
 #define float32_maxnorm make_float32(0x7f7fffff)
 #define float64_maxnorm make_float64(0x7fefffffffffffffLL)
 
 /* Reciprocal functions
  *
  * The algorithm that must be used to calculate the estimate
- * is specified by the ARM ARM, see FPRecipEstimate()
+ * is specified by the ARM ARM, see FPRecipEstimate()/RecipEstimate
  */
 
-static float64 recip_estimate(float64 a, float_status *real_fp_status)
+/* See RecipEstimate()
+ *
+ * input is a 9 bit fixed point number
+ * input range 256 .. 511 for a number from 0.5 <= x < 1.0.
+ * result range 256 .. 511 for a number from 1.0 to 511/256.
+ */
+
+static int recip_estimate(int input)
 {
-    /* These calculations mustn't set any fp exception flags,
-     * so we use a local copy of the fp_status.
-     */
-    float_status dummy_status = *real_fp_status;
-    float_status *s = &dummy_status;
-    /* q = (int)(a * 512.0) */
-    float64 q = float64_mul(float64_512, a, s);
-    int64_t q_int = float64_to_int64_round_to_zero(q, s);
-
-    /* r = 1.0 / (((double)q + 0.5) / 512.0) */
-    q = int64_to_float64(q_int, s);
-    q = float64_add(q, float64_half, s);
-    q = float64_div(q, float64_512, s);
-    q = float64_div(float64_one, q, s);
-
-    /* s = (int)(256.0 * r + 0.5) */
-    q = float64_mul(q, float64_256, s);
-    q = float64_add(q, float64_half, s);
-    q_int = float64_to_int64_round_to_zero(q, s);
-
-    /* return (double)s / 256.0 */
-    return float64_div(int64_to_float64(q_int, s), float64_256, s);
+    int a, b, r;
+    assert(256 <= input && input < 512);
+    a = (input * 2) + 1;
+    b = (1 << 19) / a;
+    r = (b + 1) >> 1;
+    assert(256 <= r && r < 512);
+    return r;
 }
 
-/* Common wrapper to call recip_estimate */
-static float64 call_recip_estimate(float64 num, int off, float_status *fpst)
-{
-    uint64_t val64 = float64_val(num);
-    uint64_t frac = extract64(val64, 0, 52);
-    int64_t exp = extract64(val64, 52, 11);
-    uint64_t sbit;
-    float64 scaled, estimate;
+/*
+ * Common wrapper to call recip_estimate
+ *
+ * The parameters are exponent and 64 bit fraction (without implicit
+ * bit) where the binary point is nominally at bit 52. Returns a
+ * float64 which can then be rounded to the appropriate size by the
+ * callee.
+ */
 
-    /* Generate the scaled number for the estimate function */
-    if (exp == 0) {
+static uint64_t call_recip_estimate(int *exp, int exp_off, uint64_t frac)
+{
+    uint32_t scaled, estimate;
+    uint64_t result_frac;
+    int result_exp;
+
+    /* Handle sub-normals */
+    if (*exp == 0) {
         if (extract64(frac, 51, 1) == 0) {
-            exp = -1;
-            frac = extract64(frac, 0, 50) << 2;
+            *exp = -1;
+            frac <<= 2;
         } else {
-            frac = extract64(frac, 0, 51) << 1;
+            frac <<= 1;
         }
     }
 
-    /* scaled = '0' : '01111111110' : fraction<51:44> : Zeros(44); */
-    scaled = make_float64((0x3feULL << 52)
-                          | extract64(frac, 44, 8) << 44);
+    /* scaled = UInt('1':fraction<51:44>) */
+    scaled = deposit32(1 << 8, 0, 8, extract64(frac, 44, 8));
+    estimate = recip_estimate(scaled);
 
-    estimate = recip_estimate(scaled, fpst);
-
-    /* Build new result */
-    val64 = float64_val(estimate);
-    sbit = 0x8000000000000000ULL & val64;
-    exp = off - exp;
-    frac = extract64(val64, 0, 52);
-
-    if (exp == 0) {
-        frac = 1ULL << 51 | extract64(frac, 1, 51);
-    } else if (exp == -1) {
-        frac = 1ULL << 50 | extract64(frac, 2, 50);
-        exp = 0;
+    result_exp = exp_off - *exp;
+    result_frac = deposit64(0, 44, 8, estimate);
+    if (result_exp == 0) {
+        result_frac = deposit64(result_frac >> 1, 51, 1, 1);
+    } else if (result_exp == -1) {
+        result_frac = deposit64(result_frac >> 2, 50, 2, 1);
+        result_exp = 0;
     }
 
-    return make_float64(sbit | (exp << 52) | frac);
+    *exp = result_exp;
+
+    return result_frac;
 }
 
 static bool round_to_inf(float_status *fpst, bool sign_bit)
@@ -11549,18 +11631,63 @@ static bool round_to_inf(float_status *fpst, bool sign_bit)
     g_assert_not_reached();
 }
 
+float16 HELPER(recpe_f16)(float16 input, void *fpstp)
+{
+    float_status *fpst = fpstp;
+    float16 f16 = float16_squash_input_denormal(input, fpst);
+    uint32_t f16_val = float16_val(f16);
+    uint32_t f16_sign = float16_is_neg(f16);
+    int f16_exp = extract32(f16_val, 10, 5);
+    uint32_t f16_frac = extract32(f16_val, 0, 10);
+    uint64_t f64_frac;
+
+    if (float16_is_any_nan(f16)) {
+        float16 nan = f16;
+        if (float16_is_signaling_nan(f16, fpst)) {
+            float_raise(float_flag_invalid, fpst);
+            nan = float16_maybe_silence_nan(f16, fpst);
+        }
+        if (fpst->default_nan_mode) {
+            nan =  float16_default_nan(fpst);
+        }
+        return nan;
+    } else if (float16_is_infinity(f16)) {
+        return float16_set_sign(float16_zero, float16_is_neg(f16));
+    } else if (float16_is_zero(f16)) {
+        float_raise(float_flag_divbyzero, fpst);
+        return float16_set_sign(float16_infinity, float16_is_neg(f16));
+    } else if (float16_abs(f16) < (1 << 8)) {
+        /* Abs(value) < 2.0^-16 */
+        float_raise(float_flag_overflow | float_flag_inexact, fpst);
+        if (round_to_inf(fpst, f16_sign)) {
+            return float16_set_sign(float16_infinity, f16_sign);
+        } else {
+            return float16_set_sign(float16_maxnorm, f16_sign);
+        }
+    } else if (f16_exp >= 29 && fpst->flush_to_zero) {
+        float_raise(float_flag_underflow, fpst);
+        return float16_set_sign(float16_zero, float16_is_neg(f16));
+    }
+
+    f64_frac = call_recip_estimate(&f16_exp, 29,
+                                   ((uint64_t) f16_frac) << (52 - 10));
+
+    /* result = sign : result_exp<4:0> : fraction<51:42> */
+    f16_val = deposit32(0, 15, 1, f16_sign);
+    f16_val = deposit32(f16_val, 10, 5, f16_exp);
+    f16_val = deposit32(f16_val, 0, 10, extract64(f64_frac, 52 - 10, 10));
+    return make_float16(f16_val);
+}
+
 float32 HELPER(recpe_f32)(float32 input, void *fpstp)
 {
     float_status *fpst = fpstp;
     float32 f32 = float32_squash_input_denormal(input, fpst);
     uint32_t f32_val = float32_val(f32);
-    uint32_t f32_sbit = 0x80000000ULL & f32_val;
-    int32_t f32_exp = extract32(f32_val, 23, 8);
+    bool f32_sign = float32_is_neg(f32);
+    int f32_exp = extract32(f32_val, 23, 8);
     uint32_t f32_frac = extract32(f32_val, 0, 23);
-    float64 f64, r64;
-    uint64_t r64_val;
-    int64_t r64_exp;
-    uint64_t r64_frac;
+    uint64_t f64_frac;
 
     if (float32_is_any_nan(f32)) {
         float32 nan = f32;
@@ -11577,30 +11704,27 @@ float32 HELPER(recpe_f32)(float32 input, void *fpstp)
     } else if (float32_is_zero(f32)) {
         float_raise(float_flag_divbyzero, fpst);
         return float32_set_sign(float32_infinity, float32_is_neg(f32));
-    } else if ((f32_val & ~(1ULL << 31)) < (1ULL << 21)) {
+    } else if (float32_abs(f32) < (1ULL << 21)) {
         /* Abs(value) < 2.0^-128 */
         float_raise(float_flag_overflow | float_flag_inexact, fpst);
-        if (round_to_inf(fpst, f32_sbit)) {
-            return float32_set_sign(float32_infinity, float32_is_neg(f32));
+        if (round_to_inf(fpst, f32_sign)) {
+            return float32_set_sign(float32_infinity, f32_sign);
         } else {
-            return float32_set_sign(float32_maxnorm, float32_is_neg(f32));
+            return float32_set_sign(float32_maxnorm, f32_sign);
         }
     } else if (f32_exp >= 253 && fpst->flush_to_zero) {
         float_raise(float_flag_underflow, fpst);
         return float32_set_sign(float32_zero, float32_is_neg(f32));
     }
 
+    f64_frac = call_recip_estimate(&f32_exp, 253,
+                                   ((uint64_t) f32_frac) << (52 - 23));
 
-    f64 = make_float64(((int64_t)(f32_exp) << 52) | (int64_t)(f32_frac) << 29);
-    r64 = call_recip_estimate(f64, 253, fpst);
-    r64_val = float64_val(r64);
-    r64_exp = extract64(r64_val, 52, 11);
-    r64_frac = extract64(r64_val, 0, 52);
-
-    /* result = sign : result_exp<7:0> : fraction<51:29>; */
-    return make_float32(f32_sbit |
-                        (r64_exp & 0xff) << 23 |
-                        extract64(r64_frac, 29, 24));
+    /* result = sign : result_exp<7:0> : fraction<51:29> */
+    f32_val = deposit32(0, 31, 1, f32_sign);
+    f32_val = deposit32(f32_val, 23, 8, f32_exp);
+    f32_val = deposit32(f32_val, 0, 23, extract64(f64_frac, 52 - 23, 23));
+    return make_float32(f32_val);
 }
 
 float64 HELPER(recpe_f64)(float64 input, void *fpstp)
@@ -11608,12 +11732,9 @@ float64 HELPER(recpe_f64)(float64 input, void *fpstp)
     float_status *fpst = fpstp;
     float64 f64 = float64_squash_input_denormal(input, fpst);
     uint64_t f64_val = float64_val(f64);
-    uint64_t f64_sbit = 0x8000000000000000ULL & f64_val;
-    int64_t f64_exp = extract64(f64_val, 52, 11);
-    float64 r64;
-    uint64_t r64_val;
-    int64_t r64_exp;
-    uint64_t r64_frac;
+    bool f64_sign = float64_is_neg(f64);
+    int f64_exp = extract64(f64_val, 52, 11);
+    uint64_t f64_frac = extract64(f64_val, 0, 52);
 
     /* Deal with any special cases */
     if (float64_is_any_nan(f64)) {
@@ -11634,80 +11755,119 @@ float64 HELPER(recpe_f64)(float64 input, void *fpstp)
     } else if ((f64_val & ~(1ULL << 63)) < (1ULL << 50)) {
         /* Abs(value) < 2.0^-1024 */
         float_raise(float_flag_overflow | float_flag_inexact, fpst);
-        if (round_to_inf(fpst, f64_sbit)) {
-            return float64_set_sign(float64_infinity, float64_is_neg(f64));
+        if (round_to_inf(fpst, f64_sign)) {
+            return float64_set_sign(float64_infinity, f64_sign);
         } else {
-            return float64_set_sign(float64_maxnorm, float64_is_neg(f64));
+            return float64_set_sign(float64_maxnorm, f64_sign);
         }
     } else if (f64_exp >= 2045 && fpst->flush_to_zero) {
         float_raise(float_flag_underflow, fpst);
         return float64_set_sign(float64_zero, float64_is_neg(f64));
     }
 
-    r64 = call_recip_estimate(f64, 2045, fpst);
-    r64_val = float64_val(r64);
-    r64_exp = extract64(r64_val, 52, 11);
-    r64_frac = extract64(r64_val, 0, 52);
+    f64_frac = call_recip_estimate(&f64_exp, 2045, f64_frac);
 
-    /* result = sign : result_exp<10:0> : fraction<51:0> */
-    return make_float64(f64_sbit |
-                        ((r64_exp & 0x7ff) << 52) |
-                        r64_frac);
+    /* result = sign : result_exp<10:0> : fraction<51:0>; */
+    f64_val = deposit64(0, 63, 1, f64_sign);
+    f64_val = deposit64(f64_val, 52, 11, f64_exp);
+    f64_val = deposit64(f64_val, 0, 52, f64_frac);
+    return make_float64(f64_val);
 }
 
 /* The algorithm that must be used to calculate the estimate
  * is specified by the ARM ARM.
  */
-static float64 recip_sqrt_estimate(float64 a, float_status *real_fp_status)
+
+static int do_recip_sqrt_estimate(int a)
 {
-    /* These calculations mustn't set any fp exception flags,
-     * so we use a local copy of the fp_status.
-     */
-    float_status dummy_status = *real_fp_status;
-    float_status *s = &dummy_status;
-    float64 q;
-    int64_t q_int;
+    int b, estimate;
 
-    if (float64_lt(a, float64_half, s)) {
-        /* range 0.25 <= a < 0.5 */
-
-        /* a in units of 1/512 rounded down */
-        /* q0 = (int)(a * 512.0);  */
-        q = float64_mul(float64_512, a, s);
-        q_int = float64_to_int64_round_to_zero(q, s);
-
-        /* reciprocal root r */
-        /* r = 1.0 / sqrt(((double)q0 + 0.5) / 512.0);  */
-        q = int64_to_float64(q_int, s);
-        q = float64_add(q, float64_half, s);
-        q = float64_div(q, float64_512, s);
-        q = float64_sqrt(q, s);
-        q = float64_div(float64_one, q, s);
+    assert(128 <= a && a < 512);
+    if (a < 256) {
+        a = a * 2 + 1;
     } else {
-        /* range 0.5 <= a < 1.0 */
-
-        /* a in units of 1/256 rounded down */
-        /* q1 = (int)(a * 256.0); */
-        q = float64_mul(float64_256, a, s);
-        int64_t q_int = float64_to_int64_round_to_zero(q, s);
-
-        /* reciprocal root r */
-        /* r = 1.0 /sqrt(((double)q1 + 0.5) / 256); */
-        q = int64_to_float64(q_int, s);
-        q = float64_add(q, float64_half, s);
-        q = float64_div(q, float64_256, s);
-        q = float64_sqrt(q, s);
-        q = float64_div(float64_one, q, s);
+        a = (a >> 1) << 1;
+        a = (a + 1) * 2;
     }
-    /* r in units of 1/256 rounded to nearest */
-    /* s = (int)(256.0 * r + 0.5); */
+    b = 512;
+    while (a * (b + 1) * (b + 1) < (1 << 28)) {
+        b += 1;
+    }
+    estimate = (b + 1) / 2;
+    assert(256 <= estimate && estimate < 512);
 
-    q = float64_mul(q, float64_256,s );
-    q = float64_add(q, float64_half, s);
-    q_int = float64_to_int64_round_to_zero(q, s);
+    return estimate;
+}
 
-    /* return (double)s / 256.0;*/
-    return float64_div(int64_to_float64(q_int, s), float64_256, s);
+
+static uint64_t recip_sqrt_estimate(int *exp , int exp_off, uint64_t frac)
+{
+    int estimate;
+    uint32_t scaled;
+
+    if (*exp == 0) {
+        while (extract64(frac, 51, 1) == 0) {
+            frac = frac << 1;
+            *exp -= 1;
+        }
+        frac = extract64(frac, 0, 51) << 1;
+    }
+
+    if (*exp & 1) {
+        /* scaled = UInt('01':fraction<51:45>) */
+        scaled = deposit32(1 << 7, 0, 7, extract64(frac, 45, 7));
+    } else {
+        /* scaled = UInt('1':fraction<51:44>) */
+        scaled = deposit32(1 << 8, 0, 8, extract64(frac, 44, 8));
+    }
+    estimate = do_recip_sqrt_estimate(scaled);
+
+    *exp = (exp_off - *exp) / 2;
+    return extract64(estimate, 0, 8) << 44;
+}
+
+float16 HELPER(rsqrte_f16)(float16 input, void *fpstp)
+{
+    float_status *s = fpstp;
+    float16 f16 = float16_squash_input_denormal(input, s);
+    uint16_t val = float16_val(f16);
+    bool f16_sign = float16_is_neg(f16);
+    int f16_exp = extract32(val, 10, 5);
+    uint16_t f16_frac = extract32(val, 0, 10);
+    uint64_t f64_frac;
+
+    if (float16_is_any_nan(f16)) {
+        float16 nan = f16;
+        if (float16_is_signaling_nan(f16, s)) {
+            float_raise(float_flag_invalid, s);
+            nan = float16_maybe_silence_nan(f16, s);
+        }
+        if (s->default_nan_mode) {
+            nan =  float16_default_nan(s);
+        }
+        return nan;
+    } else if (float16_is_zero(f16)) {
+        float_raise(float_flag_divbyzero, s);
+        return float16_set_sign(float16_infinity, f16_sign);
+    } else if (f16_sign) {
+        float_raise(float_flag_invalid, s);
+        return float16_default_nan(s);
+    } else if (float16_is_infinity(f16)) {
+        return float16_zero;
+    }
+
+    /* Scale and normalize to a double-precision value between 0.25 and 1.0,
+     * preserving the parity of the exponent.  */
+
+    f64_frac = ((uint64_t) f16_frac) << (52 - 10);
+
+    f64_frac = recip_sqrt_estimate(&f16_exp, 44, f64_frac);
+
+    /* result = sign : result_exp<4:0> : estimate<7:0> : Zeros(2) */
+    val = deposit32(0, 15, 1, f16_sign);
+    val = deposit32(val, 10, 5, f16_exp);
+    val = deposit32(val, 2, 8, extract64(f64_frac, 52 - 8, 8));
+    return make_float16(val);
 }
 
 float32 HELPER(rsqrte_f32)(float32 input, void *fpstp)
@@ -11715,13 +11875,10 @@ float32 HELPER(rsqrte_f32)(float32 input, void *fpstp)
     float_status *s = fpstp;
     float32 f32 = float32_squash_input_denormal(input, s);
     uint32_t val = float32_val(f32);
-    uint32_t f32_sbit = 0x80000000 & val;
-    int32_t f32_exp = extract32(val, 23, 8);
+    uint32_t f32_sign = float32_is_neg(f32);
+    int f32_exp = extract32(val, 23, 8);
     uint32_t f32_frac = extract32(val, 0, 23);
     uint64_t f64_frac;
-    uint64_t val64;
-    int result_exp;
-    float64 f64;
 
     if (float32_is_any_nan(f32)) {
         float32 nan = f32;
@@ -11747,32 +11904,13 @@ float32 HELPER(rsqrte_f32)(float32 input, void *fpstp)
      * preserving the parity of the exponent.  */
 
     f64_frac = ((uint64_t) f32_frac) << 29;
-    if (f32_exp == 0) {
-        while (extract64(f64_frac, 51, 1) == 0) {
-            f64_frac = f64_frac << 1;
-            f32_exp = f32_exp-1;
-        }
-        f64_frac = extract64(f64_frac, 0, 51) << 1;
-    }
 
-    if (extract64(f32_exp, 0, 1) == 0) {
-        f64 = make_float64(((uint64_t) f32_sbit) << 32
-                           | (0x3feULL << 52)
-                           | f64_frac);
-    } else {
-        f64 = make_float64(((uint64_t) f32_sbit) << 32
-                           | (0x3fdULL << 52)
-                           | f64_frac);
-    }
+    f64_frac = recip_sqrt_estimate(&f32_exp, 380, f64_frac);
 
-    result_exp = (380 - f32_exp) / 2;
-
-    f64 = recip_sqrt_estimate(f64, s);
-
-    val64 = float64_val(f64);
-
-    val = ((result_exp & 0xff) << 23)
-        | ((val64 >> 29)  & 0x7fffff);
+    /* result = sign : result_exp<4:0> : estimate<7:0> : Zeros(15) */
+    val = deposit32(0, 31, 1, f32_sign);
+    val = deposit32(val, 23, 8, f32_exp);
+    val = deposit32(val, 15, 8, extract64(f64_frac, 52 - 8, 8));
     return make_float32(val);
 }
 
@@ -11781,11 +11919,9 @@ float64 HELPER(rsqrte_f64)(float64 input, void *fpstp)
     float_status *s = fpstp;
     float64 f64 = float64_squash_input_denormal(input, s);
     uint64_t val = float64_val(f64);
-    uint64_t f64_sbit = 0x8000000000000000ULL & val;
-    int64_t f64_exp = extract64(val, 52, 11);
+    bool f64_sign = float64_is_neg(f64);
+    int f64_exp = extract64(val, 52, 11);
     uint64_t f64_frac = extract64(val, 0, 52);
-    int64_t result_exp;
-    uint64_t result_frac;
 
     if (float64_is_any_nan(f64)) {
         float64 nan = f64;
@@ -11807,75 +11943,41 @@ float64 HELPER(rsqrte_f64)(float64 input, void *fpstp)
         return float64_zero;
     }
 
-    /* Scale and normalize to a double-precision value between 0.25 and 1.0,
-     * preserving the parity of the exponent.  */
+    f64_frac = recip_sqrt_estimate(&f64_exp, 3068, f64_frac);
 
-    if (f64_exp == 0) {
-        while (extract64(f64_frac, 51, 1) == 0) {
-            f64_frac = f64_frac << 1;
-            f64_exp = f64_exp - 1;
-        }
-        f64_frac = extract64(f64_frac, 0, 51) << 1;
-    }
-
-    if (extract64(f64_exp, 0, 1) == 0) {
-        f64 = make_float64(f64_sbit
-                           | (0x3feULL << 52)
-                           | f64_frac);
-    } else {
-        f64 = make_float64(f64_sbit
-                           | (0x3fdULL << 52)
-                           | f64_frac);
-    }
-
-    result_exp = (3068 - f64_exp) / 2;
-
-    f64 = recip_sqrt_estimate(f64, s);
-
-    result_frac = extract64(float64_val(f64), 0, 52);
-
-    return make_float64(f64_sbit |
-                        ((result_exp & 0x7ff) << 52) |
-                        result_frac);
+    /* result = sign : result_exp<4:0> : estimate<7:0> : Zeros(44) */
+    val = deposit64(0, 61, 1, f64_sign);
+    val = deposit64(val, 52, 11, f64_exp);
+    val = deposit64(val, 44, 8, extract64(f64_frac, 52 - 8, 8));
+    return make_float64(val);
 }
 
 uint32_t HELPER(recpe_u32)(uint32_t a, void *fpstp)
 {
-    float_status *s = fpstp;
-    float64 f64;
+    /* float_status *s = fpstp; */
+    int input, estimate;
 
     if ((a & 0x80000000) == 0) {
         return 0xffffffff;
     }
 
-    f64 = make_float64((0x3feULL << 52)
-                       | ((int64_t)(a & 0x7fffffff) << 21));
+    input = extract32(a, 23, 9);
+    estimate = recip_estimate(input);
 
-    f64 = recip_estimate(f64, s);
-
-    return 0x80000000 | ((float64_val(f64) >> 21) & 0x7fffffff);
+    return deposit32(0, (32 - 9), 9, estimate);
 }
 
 uint32_t HELPER(rsqrte_u32)(uint32_t a, void *fpstp)
 {
-    float_status *fpst = fpstp;
-    float64 f64;
+    int estimate;
 
     if ((a & 0xc0000000) == 0) {
         return 0xffffffff;
     }
 
-    if (a & 0x80000000) {
-        f64 = make_float64((0x3feULL << 52)
-                           | ((uint64_t)(a & 0x7fffffff) << 21));
-    } else { /* bits 31-30 == '01' */
-        f64 = make_float64((0x3fdULL << 52)
-                           | ((uint64_t)(a & 0x3fffffff) << 22));
-    }
+    estimate = do_recip_sqrt_estimate(extract32(a, 23, 9));
 
-    f64 = recip_sqrt_estimate(f64, fpst);
-
-    return 0x80000000 | ((float64_val(f64) >> 21) & 0x7fffffff);
+    return deposit32(0, 23, 9, estimate);
 }
 
 /* VFPv4 fused multiply-accumulate */

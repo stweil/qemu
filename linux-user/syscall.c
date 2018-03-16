@@ -4901,6 +4901,9 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
             return -TARGET_EINVAL;
         }
     }
+    if (!guest_range_valid(shmaddr, shm_info.shm_segsz)) {
+        return -TARGET_EINVAL;
+    }
 
     mmap_lock();
 
@@ -4945,6 +4948,9 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
 static inline abi_long do_shmdt(abi_ulong shmaddr)
 {
     int i;
+    abi_long rv;
+
+    mmap_lock();
 
     for (i = 0; i < N_SHM_REGIONS; ++i) {
         if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
@@ -4953,8 +4959,11 @@ static inline abi_long do_shmdt(abi_ulong shmaddr)
             break;
         }
     }
+    rv = get_errno(shmdt(g2h(shmaddr)));
 
-    return get_errno(shmdt(g2h(shmaddr)));
+    mmap_unlock();
+
+    return rv;
 }
 
 #ifdef TARGET_NR_ipc
@@ -5636,6 +5645,15 @@ static abi_long do_ioctl_kdsigaccept(const IOCTLEntry *ie, uint8_t *buf_temp,
     int sig = target_to_host_signal(arg);
     return get_errno(safe_ioctl(fd, ie->host_cmd, sig));
 }
+
+#ifdef TIOCGPTPEER
+static abi_long do_ioctl_tiocgptpeer(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                     int fd, int cmd, abi_long arg)
+{
+    int flags = target_to_host_bitmask(arg, fcntl_flags_tbl);
+    return get_errno(safe_ioctl(fd, ie->host_cmd, flags));
+}
+#endif
 
 static IOCTLEntry ioctl_entries[] = {
 #define IOCTL(cmd, access, ...) \
@@ -7459,7 +7477,7 @@ static int open_self_maps(void *cpu_env, int fd)
         }
         if (h2g_valid(min)) {
             int flags = page_get_flags(h2g(min));
-            max = h2g_valid(max - 1) ? max : (uintptr_t)g2h(GUEST_ADDR_MAX);
+            max = h2g_valid(max - 1) ? max : (uintptr_t)g2h(GUEST_ADDR_MAX) + 1;
             if (page_check_range(h2g(min), max - min, flags) == -1) {
                 continue;
             }
@@ -8546,9 +8564,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_ioctl:
         ret = do_ioctl(arg1, arg2, arg3);
         break;
+#ifdef TARGET_NR_fcntl
     case TARGET_NR_fcntl:
         ret = do_fcntl(arg1, arg2, arg3);
         break;
+#endif
 #ifdef TARGET_NR_mpx
     case TARGET_NR_mpx:
         goto unimplemented;
@@ -9534,6 +9554,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             __put_user(stfs.f_fsid.__val[1], &target_stfs->f_fsid.val[1]);
             __put_user(stfs.f_namelen, &target_stfs->f_namelen);
             __put_user(stfs.f_frsize, &target_stfs->f_frsize);
+#ifdef _STATFS_F_FLAGS
+            __put_user(stfs.f_flags, &target_stfs->f_flags);
+#else
+            __put_user(0, &target_stfs->f_flags);
+#endif
             memset(target_stfs->f_spare, 0, sizeof(target_stfs->f_spare));
             unlock_user_struct(target_stfs, arg2, 1);
         }
@@ -10493,7 +10518,9 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     ret = arg2;
                 }
 
-                ret = host_to_target_cpu_mask(mask, mask_size, arg3, arg2);
+                if (host_to_target_cpu_mask(mask, mask_size, arg3, ret)) {
+                    goto efault;
+                }
             }
         }
         break;
@@ -10659,6 +10686,33 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             break;
         }
 #endif
+#ifdef TARGET_AARCH64
+        case TARGET_PR_SVE_SET_VL:
+            /* We cannot support either PR_SVE_SET_VL_ONEXEC
+               or PR_SVE_VL_INHERIT.  Therefore, anything above
+               ARM_MAX_VQ results in EINVAL.  */
+            ret = -TARGET_EINVAL;
+            if (arm_feature(cpu_env, ARM_FEATURE_SVE)
+                && arg2 >= 0 && arg2 <= ARM_MAX_VQ * 16 && !(arg2 & 15)) {
+                CPUARMState *env = cpu_env;
+                int old_vq = (env->vfp.zcr_el[1] & 0xf) + 1;
+                int vq = MAX(arg2 / 16, 1);
+
+                if (vq < old_vq) {
+                    aarch64_sve_narrow_vq(env, vq);
+                }
+                env->vfp.zcr_el[1] = vq - 1;
+                ret = vq * 16;
+            }
+            break;
+        case TARGET_PR_SVE_GET_VL:
+            ret = -TARGET_EINVAL;
+            if (arm_feature(cpu_env, ARM_FEATURE_SVE)) {
+                CPUARMState *env = cpu_env;
+                ret = ((env->vfp.zcr_el[1] & 0xf) + 1) * 16;
+            }
+            break;
+#endif /* AARCH64 */
         case PR_GET_SECCOMP:
         case PR_SET_SECCOMP:
             /* Disable seccomp to prevent the target disabling syscalls we

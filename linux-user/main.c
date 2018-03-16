@@ -38,6 +38,7 @@
 #include "elf.h"
 #include "exec/log.h"
 #include "trace/control.h"
+#include "target_elf.h"
 
 char *exec_path;
 
@@ -926,95 +927,6 @@ void cpu_loop(CPUARMState *env)
 }
 #endif /* ndef TARGET_ABI32 */
 
-#endif
-
-#ifdef TARGET_UNICORE32
-
-void cpu_loop(CPUUniCore32State *env)
-{
-    CPUState *cs = CPU(uc32_env_get_cpu(env));
-    int trapnr;
-    unsigned int n, insn;
-    target_siginfo_t info;
-
-    for (;;) {
-        cpu_exec_start(cs);
-        trapnr = cpu_exec(cs);
-        cpu_exec_end(cs);
-        process_queued_cpu_work(cs);
-
-        switch (trapnr) {
-        case UC32_EXCP_PRIV:
-            {
-                /* system call */
-                get_user_u32(insn, env->regs[31] - 4);
-                n = insn & 0xffffff;
-
-                if (n >= UC32_SYSCALL_BASE) {
-                    /* linux syscall */
-                    n -= UC32_SYSCALL_BASE;
-                    if (n == UC32_SYSCALL_NR_set_tls) {
-                            cpu_set_tls(env, env->regs[0]);
-                            env->regs[0] = 0;
-                    } else {
-                        abi_long ret = do_syscall(env,
-                                                  n,
-                                                  env->regs[0],
-                                                  env->regs[1],
-                                                  env->regs[2],
-                                                  env->regs[3],
-                                                  env->regs[4],
-                                                  env->regs[5],
-                                                  0, 0);
-                        if (ret == -TARGET_ERESTARTSYS) {
-                            env->regs[31] -= 4;
-                        } else if (ret != -TARGET_QEMU_ESIGRETURN) {
-                            env->regs[0] = ret;
-                        }
-                    }
-                } else {
-                    goto error;
-                }
-            }
-            break;
-        case UC32_EXCP_DTRAP:
-        case UC32_EXCP_ITRAP:
-            info.si_signo = TARGET_SIGSEGV;
-            info.si_errno = 0;
-            /* XXX: check env->error_code */
-            info.si_code = TARGET_SEGV_MAPERR;
-            info._sifields._sigfault._addr = env->cp0.c4_faultaddr;
-            queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
-            break;
-        case EXCP_INTERRUPT:
-            /* just indicate that signals should be handled asap */
-            break;
-        case EXCP_DEBUG:
-            {
-                int sig;
-
-                sig = gdb_handlesig(cs, TARGET_SIGTRAP);
-                if (sig) {
-                    info.si_signo = sig;
-                    info.si_errno = 0;
-                    info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(env, info.si_signo, QEMU_SI_FAULT, &info);
-                }
-            }
-            break;
-        case EXCP_ATOMIC:
-            cpu_exec_step_atomic(cs);
-            break;
-        default:
-            goto error;
-        }
-        process_pending_signals(env);
-    }
-
-error:
-    EXCP_DUMP(env, "qemu: unhandled CPU exception 0x%x - aborting\n", trapnr);
-    abort();
-}
 #endif
 
 #ifdef TARGET_SPARC
@@ -3697,6 +3609,100 @@ void cpu_loop(CPUTLGState *env)
 
 #endif
 
+#ifdef TARGET_RISCV
+
+void cpu_loop(CPURISCVState *env)
+{
+    CPUState *cs = CPU(riscv_env_get_cpu(env));
+    int trapnr, signum, sigcode;
+    target_ulong sigaddr;
+    target_ulong ret;
+
+    for (;;) {
+        cpu_exec_start(cs);
+        trapnr = cpu_exec(cs);
+        cpu_exec_end(cs);
+        process_queued_cpu_work(cs);
+
+        signum = 0;
+        sigcode = 0;
+        sigaddr = 0;
+
+        switch (trapnr) {
+        case EXCP_INTERRUPT:
+            /* just indicate that signals should be handled asap */
+            break;
+        case EXCP_ATOMIC:
+            cpu_exec_step_atomic(cs);
+            break;
+        case RISCV_EXCP_U_ECALL:
+            env->pc += 4;
+            if (env->gpr[xA7] == TARGET_NR_arch_specific_syscall + 15) {
+                /* riscv_flush_icache_syscall is a no-op in QEMU as
+                   self-modifying code is automatically detected */
+                ret = 0;
+            } else {
+                ret = do_syscall(env,
+                                 env->gpr[xA7],
+                                 env->gpr[xA0],
+                                 env->gpr[xA1],
+                                 env->gpr[xA2],
+                                 env->gpr[xA3],
+                                 env->gpr[xA4],
+                                 env->gpr[xA5],
+                                 0, 0);
+            }
+            if (ret == -TARGET_ERESTARTSYS) {
+                env->pc -= 4;
+            } else if (ret != -TARGET_QEMU_ESIGRETURN) {
+                env->gpr[xA0] = ret;
+            }
+            if (cs->singlestep_enabled) {
+                goto gdbstep;
+            }
+            break;
+        case RISCV_EXCP_ILLEGAL_INST:
+            signum = TARGET_SIGILL;
+            sigcode = TARGET_ILL_ILLOPC;
+            break;
+        case RISCV_EXCP_BREAKPOINT:
+            signum = TARGET_SIGTRAP;
+            sigcode = TARGET_TRAP_BRKPT;
+            sigaddr = env->pc;
+            break;
+        case RISCV_EXCP_INST_PAGE_FAULT:
+        case RISCV_EXCP_LOAD_PAGE_FAULT:
+        case RISCV_EXCP_STORE_PAGE_FAULT:
+            signum = TARGET_SIGSEGV;
+            sigcode = TARGET_SEGV_MAPERR;
+            break;
+        case EXCP_DEBUG:
+        gdbstep:
+            signum = gdb_handlesig(cs, TARGET_SIGTRAP);
+            sigcode = TARGET_TRAP_BRKPT;
+            break;
+        default:
+            EXCP_DUMP(env, "\nqemu: unhandled CPU exception %#x - aborting\n",
+                     trapnr);
+            exit(EXIT_FAILURE);
+        }
+
+        if (signum) {
+            target_siginfo_t info = {
+                .si_signo = signum,
+                .si_errno = 0,
+                .si_code = sigcode,
+                ._sifields._sigfault._addr = sigaddr
+            };
+            queue_signal(env, info.si_signo, QEMU_SI_KILL, &info);
+        }
+
+        process_pending_signals(env);
+    }
+}
+
+#endif /* TARGET_RISCV */
+
 #ifdef TARGET_HPPA
 
 static abi_ulong hppa_lws(CPUHPPAState *env)
@@ -3880,7 +3886,7 @@ void cpu_loop(CPUHPPAState *env)
 
 #endif /* TARGET_HPPA */
 
-THREAD CPUState *thread_cpu;
+__thread CPUState *thread_cpu;
 
 bool qemu_cpu_is_self(CPUState *cpu)
 {
@@ -4116,7 +4122,7 @@ static void handle_arg_strace(const char *arg)
 
 static void handle_arg_version(const char *arg)
 {
-    printf("qemu-" TARGET_NAME " version " QEMU_VERSION QEMU_PKGVERSION
+    printf("qemu-" TARGET_NAME " version " QEMU_FULL_VERSION
            "\n" QEMU_COPYRIGHT "\n");
     exit(EXIT_SUCCESS);
 }
@@ -4391,46 +4397,17 @@ int main(int argc, char **argv)
 
     init_qemu_uname_release();
 
+    execfd = qemu_getauxval(AT_EXECFD);
+    if (execfd == 0) {
+        execfd = open(filename, O_RDONLY);
+        if (execfd < 0) {
+            printf("Error while loading %s: %s\n", filename, strerror(errno));
+            _exit(EXIT_FAILURE);
+        }
+    }
+
     if (cpu_model == NULL) {
-#if defined(TARGET_I386)
-#ifdef TARGET_X86_64
-        cpu_model = "qemu64";
-#else
-        cpu_model = "qemu32";
-#endif
-#elif defined(TARGET_ARM)
-        cpu_model = "any";
-#elif defined(TARGET_UNICORE32)
-        cpu_model = "any";
-#elif defined(TARGET_M68K)
-        cpu_model = "any";
-#elif defined(TARGET_SPARC)
-#ifdef TARGET_SPARC64
-        cpu_model = "TI UltraSparc II";
-#else
-        cpu_model = "Fujitsu MB86904";
-#endif
-#elif defined(TARGET_MIPS)
-#if defined(TARGET_ABI_MIPSN32) || defined(TARGET_ABI_MIPSN64)
-        cpu_model = "5KEf";
-#else
-        cpu_model = "24Kf";
-#endif
-#elif defined TARGET_OPENRISC
-        cpu_model = "or1200";
-#elif defined(TARGET_PPC)
-# ifdef TARGET_PPC64
-        cpu_model = "POWER8";
-# else
-        cpu_model = "750";
-# endif
-#elif defined TARGET_SH4
-        cpu_model = "sh7785";
-#elif defined TARGET_S390X
-        cpu_model = "qemu";
-#else
-        cpu_model = "any";
-#endif
+        cpu_model = cpu_get_model(get_elf_eflags(execfd));
     }
     tcg_exec_init(0);
     /* NOTE: we need to init the CPU at this stage to get
@@ -4522,15 +4499,6 @@ int main(int argc, char **argv)
     ts->bprm = &bprm;
     cpu->opaque = ts;
     task_settid(ts);
-
-    execfd = qemu_getauxval(AT_EXECFD);
-    if (execfd == 0) {
-        execfd = open(filename, O_RDONLY);
-        if (execfd < 0) {
-            printf("Error while loading %s: %s\n", filename, strerror(errno));
-            _exit(EXIT_FAILURE);
-        }
-    }
 
     ret = loader_exec(execfd, filename, target_argv, target_environ, regs,
         info, &bprm);
@@ -4728,14 +4696,6 @@ int main(int argc, char **argv)
         }
 #endif
     }
-#elif defined(TARGET_UNICORE32)
-    {
-        int i;
-        cpu_asr_write(env, regs->uregs[32], 0xffffffff);
-        for (i = 0; i < 32; i++) {
-            env->regs[i] = regs->uregs[i];
-        }
-    }
 #elif defined(TARGET_SPARC)
     {
         int i;
@@ -4888,6 +4848,11 @@ int main(int argc, char **argv)
         env->pc = regs->pc;
         cpu_set_sr(env, regs->sr);
     }
+#elif defined(TARGET_RISCV)
+    {
+        env->pc = regs->sepc;
+        env->gpr[xSP] = regs->sp;
+    }
 #elif defined(TARGET_SH4)
     {
         int i;
@@ -4960,7 +4925,7 @@ int main(int argc, char **argv)
 #error unsupported target CPU
 #endif
 
-#if defined(TARGET_ARM) || defined(TARGET_M68K) || defined(TARGET_UNICORE32)
+#if defined(TARGET_ARM) || defined(TARGET_M68K)
     ts->stack_base = info->start_stack;
     ts->heap_base = info->brk;
     /* This will be filled in on the first SYS_HEAPINFO call.  */

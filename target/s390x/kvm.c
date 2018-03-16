@@ -41,7 +41,6 @@
 #include "exec/gdbstub.h"
 #include "exec/address-spaces.h"
 #include "trace.h"
-#include "qapi-event.h"
 #include "hw/s390x/s390-pci-inst.h"
 #include "hw/s390x/s390-pci-bus.h"
 #include "hw/s390x/ipl.h"
@@ -144,7 +143,7 @@ static int cap_gs;
 
 static int active_cmma;
 
-static void *legacy_s390_alloc(size_t size, uint64_t *align);
+static void *legacy_s390_alloc(size_t size, uint64_t *align, bool shared);
 
 static int kvm_s390_query_mem_limit(uint64_t *memory_limit)
 {
@@ -752,7 +751,7 @@ int kvm_s390_mem_op(S390CPU *cpu, vaddr addr, uint8_t ar, void *hostbuf,
  * to grow. We also have to use MAP parameters that avoid
  * read-only mapping of guest pages.
  */
-static void *legacy_s390_alloc(size_t size, uint64_t *align)
+static void *legacy_s390_alloc(size_t size, uint64_t *align, bool shared)
 {
     void *mem;
 
@@ -1541,15 +1540,14 @@ static int handle_instruction(S390CPU *cpu, struct kvm_run *run)
     return r;
 }
 
-static void unmanageable_intercept(S390CPU *cpu, const char *str, int pswoffset)
+static void unmanageable_intercept(S390CPU *cpu, S390CrashReason reason,
+                                   int pswoffset)
 {
     CPUState *cs = CPU(cpu);
 
-    error_report("Unmanageable %s! CPU%i new PSW: 0x%016lx:%016lx",
-                 str, cs->cpu_index, ldq_phys(cs->as, cpu->env.psa + pswoffset),
-                 ldq_phys(cs->as, cpu->env.psa + pswoffset + 8));
     s390_cpu_halt(cpu);
-    qemu_system_guest_panicked(NULL);
+    cpu->env.crash_reason = reason;
+    qemu_system_guest_panicked(cpu_get_crash_info(cs));
 }
 
 /* try to detect pgm check loops */
@@ -1579,7 +1577,7 @@ static int handle_oper_loop(S390CPU *cpu, struct kvm_run *run)
         !(oldpsw.mask & PSW_MASK_PSTATE) &&
         (newpsw.mask & PSW_MASK_ASC) == (oldpsw.mask & PSW_MASK_ASC) &&
         (newpsw.mask & PSW_MASK_DAT) == (oldpsw.mask & PSW_MASK_DAT)) {
-        unmanageable_intercept(cpu, "operation exception loop",
+        unmanageable_intercept(cpu, S390_CRASH_REASON_OPINT_LOOP,
                                offsetof(LowCore, program_new_psw));
         return EXCP_HALTED;
     }
@@ -1600,12 +1598,12 @@ static int handle_intercept(S390CPU *cpu)
             r = handle_instruction(cpu, run);
             break;
         case ICPT_PROGRAM:
-            unmanageable_intercept(cpu, "program interrupt",
+            unmanageable_intercept(cpu, S390_CRASH_REASON_PGMINT_LOOP,
                                    offsetof(LowCore, program_new_psw));
             r = EXCP_HALTED;
             break;
         case ICPT_EXT_INT:
-            unmanageable_intercept(cpu, "external interrupt",
+            unmanageable_intercept(cpu, S390_CRASH_REASON_EXTINT_LOOP,
                                    offsetof(LowCore, external_new_psw));
             r = EXCP_HALTED;
             break;
@@ -1855,11 +1853,6 @@ int kvm_s390_assign_subch_ioeventfd(EventNotifier *notifier, uint32_t sch,
     return kvm_vm_ioctl(kvm_state, KVM_IOEVENTFD, &kick);
 }
 
-int kvm_s390_get_memslot_count(void)
-{
-    return kvm_check_extension(kvm_state, KVM_CAP_NR_MEMSLOTS);
-}
-
 int kvm_s390_get_ri(void)
 {
     return cap_ri;
@@ -1881,16 +1874,16 @@ int kvm_s390_set_cpu_state(S390CPU *cpu, uint8_t cpu_state)
     }
 
     switch (cpu_state) {
-    case CPU_STATE_STOPPED:
+    case S390_CPU_STATE_STOPPED:
         mp_state.mp_state = KVM_MP_STATE_STOPPED;
         break;
-    case CPU_STATE_CHECK_STOP:
+    case S390_CPU_STATE_CHECK_STOP:
         mp_state.mp_state = KVM_MP_STATE_CHECK_STOP;
         break;
-    case CPU_STATE_OPERATING:
+    case S390_CPU_STATE_OPERATING:
         mp_state.mp_state = KVM_MP_STATE_OPERATING;
         break;
-    case CPU_STATE_LOAD:
+    case S390_CPU_STATE_LOAD:
         mp_state.mp_state = KVM_MP_STATE_LOAD;
         break;
     default:

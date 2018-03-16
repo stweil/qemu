@@ -41,6 +41,7 @@
 
 static DisplayChangeListener *dcl;
 static DisplaySurface *surface;
+static DisplayOptions *opts;
 static SDL_Surface *real_screen;
 static SDL_Surface *guest_screen = NULL;
 static int gui_grab; /* if true, all keyboard/mouse events are grabbed */
@@ -200,6 +201,9 @@ static kbd_layout_t *kbd_layout = NULL;
 
 static uint8_t sdl_keyevent_to_keycode_generic(const SDL_KeyboardEvent *ev)
 {
+    bool shift = modifiers_state[0x2a] || modifiers_state[0x36];
+    bool altgr = modifiers_state[0xb8];
+    bool ctrl  = modifiers_state[0x1d] || modifiers_state[0x9d];
     int keysym;
     /* workaround for X11+SDL bug with AltGR */
     keysym = ev->keysym.sym;
@@ -209,7 +213,8 @@ static uint8_t sdl_keyevent_to_keycode_generic(const SDL_KeyboardEvent *ev)
     if (keysym == 92 && ev->keysym.scancode == 133) {
         keysym = 0xa5;
     }
-    return keysym2scancode(kbd_layout, keysym) & SCANCODE_KEYMASK;
+    return keysym2scancode(kbd_layout, keysym,
+                           shift, altgr, ctrl) & SCANCODE_KEYMASK;
 }
 
 
@@ -769,6 +774,7 @@ static void handle_activation(SDL_Event *ev)
 static void sdl_refresh(DisplayChangeListener *dcl)
 {
     SDL_Event ev1, *ev = &ev1;
+    bool allow_close = true;
     int idle = 1;
 
     if (last_vm_running != runstate_is_running()) {
@@ -793,7 +799,10 @@ static void sdl_refresh(DisplayChangeListener *dcl)
             handle_keyup(ev);
             break;
         case SDL_QUIT:
-            if (!no_quit) {
+            if (opts->has_window_close && !opts->window_close) {
+                allow_close = false;
+            }
+            if (allow_close) {
                 no_shutdown = 0;
                 qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_UI);
             }
@@ -892,17 +901,7 @@ static const DisplayChangeListenerOps dcl_ops = {
     .dpy_cursor_define    = sdl_mouse_define,
 };
 
-void sdl_display_early_init(int opengl)
-{
-    if (opengl == 1 /* on */) {
-        fprintf(stderr,
-                "SDL1 display code has no opengl support.\n"
-                "Please recompile qemu with SDL2, using\n"
-                "./configure --enable-sdl --with-sdlabi=2.0\n");
-    }
-}
-
-void sdl_display_init(DisplayState *ds, int full_screen)
+static void sdl1_display_init(DisplayState *ds, DisplayOptions *o)
 {
     int flags;
     uint8_t data = 0;
@@ -910,6 +909,8 @@ void sdl_display_init(DisplayState *ds, int full_screen)
     SDL_SysWMinfo info;
     char *filename;
 
+    assert(o->type == DISPLAY_TYPE_SDL);
+    opts = o;
 #if defined(__APPLE__)
     /* always use generic keymaps */
     if (!keyboard_layout)
@@ -924,7 +925,7 @@ void sdl_display_init(DisplayState *ds, int full_screen)
     g_printerr("Running QEMU with SDL 1.2 is deprecated, and will be removed\n"
                "in a future release. Please switch to SDL 2.0 instead\n");
 
-    if (!full_screen) {
+    if (opts->has_full_screen && opts->full_screen) {
         setenv("SDL_VIDEO_ALLOW_SCREENSAVER", "1", 0);
     }
 #ifdef __linux__
@@ -967,7 +968,7 @@ void sdl_display_init(DisplayState *ds, int full_screen)
         g_free(filename);
     }
 
-    if (full_screen) {
+    if (opts->has_full_screen && opts->full_screen) {
         gui_fullscreen = 1;
         sdl_grab_start();
     }
@@ -1012,3 +1013,15 @@ void sdl_display_init(DisplayState *ds, int full_screen)
 
     atexit(sdl_cleanup);
 }
+
+static QemuDisplay qemu_display_sdl1 = {
+    .type       = DISPLAY_TYPE_SDL,
+    .init       = sdl1_display_init,
+};
+
+static void register_sdl1(void)
+{
+    qemu_display_register(&qemu_display_sdl1);
+}
+
+type_init(register_sdl1);

@@ -187,7 +187,7 @@ static QSDHCI *machine_start(const struct sdhci_t *test)
         global_qtest = qtest_startf("-machine %s -device sdhci-pci",
                                     test->machine);
 
-        s->pci.bus = qpci_init_pc(NULL);
+        s->pci.bus = qpci_init_pc(global_qtest, NULL);
 
         /* Find PCI device and verify it's the right one */
         s->pci.dev = qpci_device_find(s->pci.bus, QPCI_DEVFN(4, 0));
@@ -209,8 +209,10 @@ static QSDHCI *machine_start(const struct sdhci_t *test)
 
 static void machine_stop(QSDHCI *s)
 {
+    qpci_free_pc(s->pci.bus);
     g_free(s->pci.dev);
     qtest_quit(global_qtest);
+    g_free(s);
 }
 
 static void test_machine(const void *data)

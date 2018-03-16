@@ -38,6 +38,7 @@
 #include "sysemu/qtest.h"
 #include "qemu/cutils.h"
 #include "disas/capstone.h"
+#include "fpu/softfloat.h"
 
 //#define PPC_DUMP_CPU
 //#define PPC_DEBUG_SPR
@@ -179,11 +180,11 @@ static void spr_write_ureg(DisasContext *ctx, int sprn, int gprn)
 #if !defined(CONFIG_USER_ONLY)
 static void spr_read_decr(DisasContext *ctx, int gprn, int sprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_load_decr(cpu_gpr[gprn], cpu_env);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -191,11 +192,11 @@ static void spr_read_decr(DisasContext *ctx, int gprn, int sprn)
 
 static void spr_write_decr(DisasContext *ctx, int sprn, int gprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_store_decr(cpu_env, cpu_gpr[gprn]);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -206,11 +207,11 @@ static void spr_write_decr(DisasContext *ctx, int sprn, int gprn)
 /* Time base */
 static void spr_read_tbl(DisasContext *ctx, int gprn, int sprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_load_tbl(cpu_gpr[gprn], cpu_env);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -218,11 +219,11 @@ static void spr_read_tbl(DisasContext *ctx, int gprn, int sprn)
 
 static void spr_read_tbu(DisasContext *ctx, int gprn, int sprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_load_tbu(cpu_gpr[gprn], cpu_env);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -243,11 +244,11 @@ static void spr_read_atbu(DisasContext *ctx, int gprn, int sprn)
 #if !defined(CONFIG_USER_ONLY)
 static void spr_write_tbl(DisasContext *ctx, int sprn, int gprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_store_tbl(cpu_env, cpu_gpr[gprn]);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -255,11 +256,11 @@ static void spr_write_tbl(DisasContext *ctx, int sprn, int gprn)
 
 static void spr_write_tbu(DisasContext *ctx, int sprn, int gprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_store_tbu(cpu_env, cpu_gpr[gprn]);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -287,11 +288,11 @@ static void spr_read_purr(DisasContext *ctx, int gprn, int sprn)
 /* HDECR */
 static void spr_read_hdecr(DisasContext *ctx, int gprn, int sprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_load_hdecr(cpu_gpr[gprn], cpu_env);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -299,11 +300,11 @@ static void spr_read_hdecr(DisasContext *ctx, int gprn, int sprn)
 
 static void spr_write_hdecr(DisasContext *ctx, int sprn, int gprn)
 {
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_start();
     }
     gen_helper_store_hdecr(cpu_env, cpu_gpr[gprn]);
-    if (tb_cflags(ctx->tb) & CF_USE_ICOUNT) {
+    if (tb_cflags(ctx->base.tb) & CF_USE_ICOUNT) {
         gen_io_end();
         gen_stop_exception(ctx);
     }
@@ -8691,6 +8692,8 @@ POWERPC_FAMILY(POWER8)(ObjectClass *oc, void *data)
                     (1ull << MSR_DR) |
                     (1ull << MSR_PMM) |
                     (1ull << MSR_RI) |
+                    (1ull << MSR_TS0) |
+                    (1ull << MSR_TS1) |
                     (1ull << MSR_LE);
     pcc->mmu_model = POWERPC_MMU_2_07;
 #if defined(CONFIG_SOFTMMU)

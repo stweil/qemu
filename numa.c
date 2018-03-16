@@ -29,12 +29,12 @@
 #include "qemu/bitmap.h"
 #include "qom/cpu.h"
 #include "qemu/error-report.h"
-#include "qapi-visit.h"
 #include "qapi/error.h"
 #include "qapi/opts-visitor.h"
+#include "qapi/qapi-commands-misc.h"
+#include "qapi/qapi-visit-misc.h"
 #include "hw/boards.h"
 #include "sysemu/hostmem.h"
-#include "qmp-commands.h"
 #include "hw/mem/pc-dimm.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
@@ -80,7 +80,7 @@ static void parse_numa_node(MachineState *ms, NumaNodeOptions *node,
         return;
     }
 
-    if (!mc->cpu_index_to_instance_props) {
+    if (!mc->cpu_index_to_instance_props || !mc->get_default_cpu_node_id) {
         error_report("NUMA is not supported by this machine-type");
         exit(1);
     }

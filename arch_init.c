@@ -28,9 +28,9 @@
 #include "sysemu/arch_init.h"
 #include "hw/pci/pci.h"
 #include "hw/audio/soundhw.h"
+#include "qapi/qapi-commands-misc.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
-#include "qmp-commands.h"
 #include "hw/acpi/acpi.h"
 #include "qemu/help_option.h"
 
@@ -71,6 +71,8 @@ int graphic_depth = 32;
 #define QEMU_ARCH QEMU_ARCH_OPENRISC
 #elif defined(TARGET_PPC)
 #define QEMU_ARCH QEMU_ARCH_PPC
+#elif defined(TARGET_RISCV)
+#define QEMU_ARCH QEMU_ARCH_RISCV
 #elif defined(TARGET_S390X)
 #define QEMU_ARCH QEMU_ARCH_S390X
 #elif defined(TARGET_SH4)

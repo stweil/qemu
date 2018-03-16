@@ -39,8 +39,6 @@
 #include "cpu-qom.h"
 #include "exec/cpu-defs.h"
 
-#include "fpu/softfloat.h"
-
 #define EXCP_UDEF            1   /* undefined instruction */
 #define EXCP_SWI             2   /* software interrupt */
 #define EXCP_PREFETCH_ABORT  3
@@ -170,6 +168,7 @@ typedef struct {
  *  Qn = regs[n].d[1]:regs[n].d[0]
  *  Dn = regs[n].d[0]
  *  Sn = regs[n].d[0] bits 31..0
+ *  Hn = regs[n].d[0] bits 15..0
  *
  * This corresponds to the architecturally defined mapping between
  * the two execution states, and means we do not need to explicitly
@@ -496,6 +495,10 @@ typedef struct CPUARMState {
         uint32_t faultmask[M_REG_NUM_BANKS];
         uint32_t aircr; /* only holds r/w state if security extn implemented */
         uint32_t secure; /* Is CPU in Secure state? (not guest visible) */
+        uint32_t csselr[M_REG_NUM_BANKS];
+        uint32_t scr[M_REG_NUM_BANKS];
+        uint32_t msplim[M_REG_NUM_BANKS];
+        uint32_t psplim[M_REG_NUM_BANKS];
     } v7m;
 
     /* Information associated with an exception about to be taken:
@@ -535,19 +538,29 @@ typedef struct CPUARMState {
         /* scratch space when Tn are not sufficient.  */
         uint32_t scratch[8];
 
-        /* fp_status is the "normal" fp status. standard_fp_status retains
-         * values corresponding to the ARM "Standard FPSCR Value", ie
-         * default-NaN, flush-to-zero, round-to-nearest and is used by
-         * any operations (generally Neon) which the architecture defines
-         * as controlled by the standard FPSCR value rather than the FPSCR.
+        /* There are a number of distinct float control structures:
+         *
+         *  fp_status: is the "normal" fp status.
+         *  fp_status_fp16: used for half-precision calculations
+         *  standard_fp_status : the ARM "Standard FPSCR Value"
+         *
+         * Half-precision operations are governed by a separate
+         * flush-to-zero control bit in FPSCR:FZ16. We pass a separate
+         * status structure to control this.
+         *
+         * The "Standard FPSCR", ie default-NaN, flush-to-zero,
+         * round-to-nearest and is used by any operations (generally
+         * Neon) which the architecture defines as controlled by the
+         * standard FPSCR value rather than the FPSCR.
          *
          * To avoid having to transfer exception bits around, we simply
          * say that the FPSCR cumulative exception flags are the logical
-         * OR of the flags in the two fp statuses. This relies on the
+         * OR of the flags in the three fp statuses. This relies on the
          * only thing which needs to read the exception flags being
          * an explicit FPSCR read.
          */
         float_status fp_status;
+        float_status fp_status_f16;
         float_status standard_fp_status;
 
         /* ZCR_EL[1-3] */
@@ -681,6 +694,9 @@ struct ARMCPU {
     /* MemoryRegion to use for secure physical accesses */
     MemoryRegion *secure_memory;
 
+    /* For v8M, pointer to the IDAU interface provided by board/SoC */
+    Object *idau;
+
     /* 'compatible' string for this CPU for Linux device trees */
     const char *dtb_compatible;
 
@@ -715,6 +731,9 @@ struct ARMCPU {
      */
     uint32_t psci_conduit;
 
+    /* For v8M, initial value of the Secure VTOR */
+    uint32_t init_svtor;
+
     /* [QEMU_]KVM_ARM_TARGET_* constant for this CPU, or
      * QEMU_KVM_ARM_TARGET_NONE if the kernel doesn't support this CPU type.
      */
@@ -725,6 +744,16 @@ struct ARMCPU {
 
     /* Uniprocessor system with MP extensions */
     bool mp_is_up;
+
+    /* True if we tried kvm_arm_host_cpu_features() during CPU instance_init
+     * and the probe failed (so we need to report the error in realize)
+     */
+    bool host_cpu_probe_failed;
+
+    /* Specify the number of cores in this CPU cluster. Used for the L2CTLR
+     * register.
+     */
+    int32_t core_count;
 
     /* The instance init functions for implementation-specific subclasses
      * set these fields to specify the implementation-dependent values of
@@ -842,6 +871,7 @@ int arm_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cs,
 #ifdef TARGET_AARCH64
 int aarch64_cpu_gdb_read_register(CPUState *cpu, uint8_t *buf, int reg);
 int aarch64_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
+void aarch64_sve_narrow_vq(CPUARMState *env, unsigned vq);
 #endif
 
 target_ulong do_arm_semihosting(CPUARMState *env);
@@ -1187,12 +1217,20 @@ static inline void xpsr_write(CPUARMState *env, uint32_t val, uint32_t mask)
 uint32_t vfp_get_fpscr(CPUARMState *env);
 void vfp_set_fpscr(CPUARMState *env, uint32_t val);
 
-/* For A64 the FPSCR is split into two logically distinct registers,
+/* FPCR, Floating Point Control Register
+ * FPSR, Floating Poiht Status Register
+ *
+ * For A64 the FPSCR is split into two logically distinct registers,
  * FPCR and FPSR. However since they still use non-overlapping bits
  * we store the underlying state in fpscr and just mask on read/write.
  */
 #define FPSR_MASK 0xf800009f
 #define FPCR_MASK 0x07f79f00
+
+#define FPCR_FZ16   (1 << 19)   /* ARMv8.2+, FP16 flush-to-zero */
+#define FPCR_FZ     (1 << 24)   /* Flush-to-zero enable bit */
+#define FPCR_DN     (1 << 25)   /* Default NaN enable bit */
+
 static inline uint32_t vfp_get_fpsr(CPUARMState *env)
 {
     return vfp_get_fpscr(env) & FPSR_MASK;
@@ -1256,6 +1294,12 @@ FIELD(V7M_CCR, BFHFNMIGN, 8, 1)
 FIELD(V7M_CCR, STKALIGN, 9, 1)
 FIELD(V7M_CCR, DC, 16, 1)
 FIELD(V7M_CCR, IC, 17, 1)
+
+/* V7M SCR bits */
+FIELD(V7M_SCR, SLEEPONEXIT, 1, 1)
+FIELD(V7M_SCR, SLEEPDEEP, 2, 1)
+FIELD(V7M_SCR, SLEEPDEEPS, 3, 1)
+FIELD(V7M_SCR, SEVONPEND, 4, 1)
 
 /* V7M AIRCR bits */
 FIELD(V7M_AIRCR, VECTRESET, 0, 1)
@@ -1325,6 +1369,23 @@ FIELD(V7M_MPU_CTRL, ENABLE, 0, 1)
 FIELD(V7M_MPU_CTRL, HFNMIENA, 1, 1)
 FIELD(V7M_MPU_CTRL, PRIVDEFENA, 2, 1)
 
+/* v7M CLIDR bits */
+FIELD(V7M_CLIDR, CTYPE_ALL, 0, 21)
+FIELD(V7M_CLIDR, LOUIS, 21, 3)
+FIELD(V7M_CLIDR, LOC, 24, 3)
+FIELD(V7M_CLIDR, LOUU, 27, 3)
+FIELD(V7M_CLIDR, ICB, 30, 2)
+
+FIELD(V7M_CSSELR, IND, 0, 1)
+FIELD(V7M_CSSELR, LEVEL, 1, 3)
+/* We use the combination of InD and Level to index into cpu->ccsidr[];
+ * define a mask for this and check that it doesn't permit running off
+ * the end of the array.
+ */
+FIELD(V7M_CSSELR, INDEX, 0, 4)
+
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(((ARMCPU *)0)->ccsidr) <= R_V7M_CSSELR_INDEX_MASK);
+
 /* If adding a feature bit which corresponds to a Linux ELF
  * HWCAP bit, remember to update the feature-bit-to-hwcap
  * mapping in linux-user/elfload.c:get_elf_hwcap().
@@ -1389,6 +1450,9 @@ enum arm_features {
     ARM_FEATURE_V8_SHA3, /* implements SHA3 part of v8 Crypto Extensions */
     ARM_FEATURE_V8_SM3, /* implements SM3 part of v8 Crypto Extensions */
     ARM_FEATURE_V8_SM4, /* implements SM4 part of v8 Crypto Extensions */
+    ARM_FEATURE_V8_RDM, /* implements v8.1 simd round multiply */
+    ARM_FEATURE_V8_FP16, /* implements v8.2 half-precision float */
+    ARM_FEATURE_V8_FCMA, /* has complex number part of v8.3 extensions.  */
 };
 
 static inline int arm_feature(CPUARMState *env, int feature)
@@ -1720,7 +1784,7 @@ static inline uint64_t cpreg_to_kvm_id(uint32_t cpregid)
 }
 
 /* ARMCPRegInfo type field bits. If the SPECIAL bit is set this is a
- * special-behaviour cp reg and bits [15..8] indicate what behaviour
+ * special-behaviour cp reg and bits [11..8] indicate what behaviour
  * it has. Otherwise it is a simple cp reg, where CONST indicates that
  * TCG can assume the value to be constant (ie load at translate time)
  * and 64BIT indicates a 64 bit wide coprocessor register. SUPPRESS_TB_END
@@ -1741,24 +1805,26 @@ static inline uint64_t cpreg_to_kvm_id(uint32_t cpregid)
  * need to be surrounded by gen_io_start()/gen_io_end(). In particular,
  * registers which implement clocks or timers require this.
  */
-#define ARM_CP_SPECIAL 1
-#define ARM_CP_CONST 2
-#define ARM_CP_64BIT 4
-#define ARM_CP_SUPPRESS_TB_END 8
-#define ARM_CP_OVERRIDE 16
-#define ARM_CP_ALIAS 32
-#define ARM_CP_IO 64
-#define ARM_CP_NO_RAW 128
-#define ARM_CP_NOP (ARM_CP_SPECIAL | (1 << 8))
-#define ARM_CP_WFI (ARM_CP_SPECIAL | (2 << 8))
-#define ARM_CP_NZCV (ARM_CP_SPECIAL | (3 << 8))
-#define ARM_CP_CURRENTEL (ARM_CP_SPECIAL | (4 << 8))
-#define ARM_CP_DC_ZVA (ARM_CP_SPECIAL | (5 << 8))
-#define ARM_LAST_SPECIAL ARM_CP_DC_ZVA
+#define ARM_CP_SPECIAL           0x0001
+#define ARM_CP_CONST             0x0002
+#define ARM_CP_64BIT             0x0004
+#define ARM_CP_SUPPRESS_TB_END   0x0008
+#define ARM_CP_OVERRIDE          0x0010
+#define ARM_CP_ALIAS             0x0020
+#define ARM_CP_IO                0x0040
+#define ARM_CP_NO_RAW            0x0080
+#define ARM_CP_NOP               (ARM_CP_SPECIAL | 0x0100)
+#define ARM_CP_WFI               (ARM_CP_SPECIAL | 0x0200)
+#define ARM_CP_NZCV              (ARM_CP_SPECIAL | 0x0300)
+#define ARM_CP_CURRENTEL         (ARM_CP_SPECIAL | 0x0400)
+#define ARM_CP_DC_ZVA            (ARM_CP_SPECIAL | 0x0500)
+#define ARM_LAST_SPECIAL         ARM_CP_DC_ZVA
+#define ARM_CP_FPU               0x1000
+#define ARM_CP_SVE               0x2000
 /* Used only as a terminator for ARMCPRegInfo lists */
-#define ARM_CP_SENTINEL 0xffff
+#define ARM_CP_SENTINEL          0xffff
 /* Mask of only the flag bits in a type field */
-#define ARM_CP_FLAG_MASK 0xff
+#define ARM_CP_FLAG_MASK         0x30ff
 
 /* Valid values for ARMCPRegInfo state field, indicating which of
  * the AArch32 and AArch64 execution states this register is visible in.
@@ -2489,6 +2555,14 @@ static inline int arm_debug_target_el(CPUARMState *env)
     } else {
         return 1;
     }
+}
+
+static inline bool arm_v7m_csselr_razwi(ARMCPU *cpu)
+{
+    /* If all the CLIDR.Ctypem bits are 0 there are no caches, and
+     * CSSELR is RAZ/WI.
+     */
+    return (cpu->clidr & R_V7M_CLIDR_CTYPE_ALL_MASK) != 0;
 }
 
 static inline bool aa64_generate_debug_exceptions(CPUARMState *env)

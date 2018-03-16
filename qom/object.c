@@ -16,9 +16,9 @@
 #include "qom/object_interfaces.h"
 #include "qemu/cutils.h"
 #include "qapi/visitor.h"
-#include "qapi-visit.h"
 #include "qapi/string-input-visitor.h"
 #include "qapi/string-output-visitor.h"
+#include "qapi/qapi-builtin-visit.h"
 #include "qapi/qmp/qerror.h"
 #include "trace.h"
 
@@ -891,6 +891,19 @@ GSList *object_class_get_list(const char *implements_type,
     return list;
 }
 
+static gint object_class_cmp(gconstpointer a, gconstpointer b)
+{
+    return strcasecmp(object_class_get_name((ObjectClass *)a),
+                      object_class_get_name((ObjectClass *)b));
+}
+
+GSList *object_class_get_list_sorted(const char *implements_type,
+                                     bool include_abstract)
+{
+    return g_slist_sort(object_class_get_list(implements_type, include_abstract),
+                        object_class_cmp);
+}
+
 void object_ref(Object *obj)
 {
     if (!obj) {
@@ -1035,6 +1048,13 @@ ObjectProperty *object_property_iter_next(ObjectPropertyIterator *iter)
         iter->nextclass = object_class_get_parent(iter->nextclass);
     }
     return val;
+}
+
+void object_class_property_iter_init(ObjectPropertyIterator *iter,
+                                     ObjectClass *klass)
+{
+    g_hash_table_iter_init(&iter->iter, klass->properties);
+    iter->nextclass = klass;
 }
 
 ObjectProperty *object_class_property_find(ObjectClass *klass, const char *name,

@@ -40,10 +40,12 @@
 #include "qemu/error-report.h"
 #include "qemu/option.h"
 #include "qemu/config-file.h"
+#include "qapi/qapi-commands-block.h"
+#include "qapi/qapi-commands-transaction.h"
+#include "qapi/qapi-visit-block-core.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qnum.h"
 #include "qapi/qmp/qstring.h"
-#include "qapi-visit.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
 #include "qapi/qmp/qlist.h"
@@ -51,7 +53,6 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/iothread.h"
 #include "block/block_int.h"
-#include "qmp-commands.h"
 #include "block/trace.h"
 #include "sysemu/arch_init.h"
 #include "sysemu/qtest.h"
@@ -2117,6 +2118,9 @@ static void block_dirty_bitmap_clear_prepare(BlkActionState *common,
     if (bdrv_dirty_bitmap_frozen(state->bitmap)) {
         error_setg(errp, "Cannot modify a frozen bitmap");
         return;
+    } else if (bdrv_dirty_bitmap_qmp_locked(state->bitmap)) {
+        error_setg(errp, "Cannot modify a locked bitmap");
+        return;
     } else if (!bdrv_dirty_bitmap_enabled(state->bitmap)) {
         error_setg(errp, "Cannot clear a disabled bitmap");
         return;
@@ -2825,14 +2829,9 @@ void qmp_block_dirty_bitmap_add(const char *node, const char *name,
     if (!has_persistent) {
         persistent = false;
     }
-    if (!has_autoload) {
-        autoload = false;
-    }
 
-    if (has_autoload && !persistent) {
-        error_setg(errp, "Autoload flag must be used only for persistent "
-                         "bitmaps");
-        return;
+    if (has_autoload) {
+        warn_report("Autoload option is deprecated and its value is ignored");
     }
 
     if (persistent &&
@@ -2847,7 +2846,6 @@ void qmp_block_dirty_bitmap_add(const char *node, const char *name,
     }
 
     bdrv_dirty_bitmap_set_persistance(bitmap, persistent);
-    bdrv_dirty_bitmap_set_autoload(bitmap, autoload);
 }
 
 void qmp_block_dirty_bitmap_remove(const char *node, const char *name,
@@ -2865,6 +2863,11 @@ void qmp_block_dirty_bitmap_remove(const char *node, const char *name,
     if (bdrv_dirty_bitmap_frozen(bitmap)) {
         error_setg(errp,
                    "Bitmap '%s' is currently frozen and cannot be removed",
+                   name);
+        return;
+    } else if (bdrv_dirty_bitmap_qmp_locked(bitmap)) {
+        error_setg(errp,
+                   "Bitmap '%s' is currently locked and cannot be removed",
                    name);
         return;
     }
@@ -2899,6 +2902,11 @@ void qmp_block_dirty_bitmap_clear(const char *node, const char *name,
     if (bdrv_dirty_bitmap_frozen(bitmap)) {
         error_setg(errp,
                    "Bitmap '%s' is currently frozen and cannot be modified",
+                   name);
+        return;
+    } else if (bdrv_dirty_bitmap_qmp_locked(bitmap)) {
+        error_setg(errp,
+                   "Bitmap '%s' is currently locked and cannot be modified",
                    name);
         return;
     } else if (!bdrv_dirty_bitmap_enabled(bitmap)) {
@@ -3375,6 +3383,12 @@ static BlockJob *do_drive_backup(DriveBackup *backup, BlockJobTxn *txn,
             bdrv_unref(target_bs);
             goto out;
         }
+        if (bdrv_dirty_bitmap_qmp_locked(bmap)) {
+            error_setg(errp,
+                       "Bitmap '%s' is currently locked and cannot be used for "
+                       "backup", backup->bitmap);
+            goto out;
+        }
     }
 
     job = backup_job_create(backup->job_id, bs, target_bs, backup->speed,
@@ -3566,6 +3580,11 @@ void qmp_drive_mirror(DriveMirror *arg, Error **errp)
 
     bs = qmp_get_root_bs(arg->device, errp);
     if (!bs) {
+        return;
+    }
+
+    /* Early check to avoid creating target */
+    if (bdrv_op_is_blocked(bs, BLOCK_OP_TYPE_MIRROR_SOURCE, errp)) {
         return;
     }
 

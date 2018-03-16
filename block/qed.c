@@ -381,8 +381,9 @@ static void bdrv_qed_init_state(BlockDriverState *bs)
     qemu_co_queue_init(&s->allocating_write_reqs);
 }
 
-static int bdrv_qed_do_open(BlockDriverState *bs, QDict *options, int flags,
-                            Error **errp)
+/* Called with table_lock held.  */
+static int coroutine_fn bdrv_qed_do_open(BlockDriverState *bs, QDict *options,
+                                         int flags, Error **errp)
 {
     BDRVQEDState *s = bs->opaque;
     QEDHeader le_header;
@@ -513,9 +514,35 @@ out:
     return ret;
 }
 
+typedef struct QEDOpenCo {
+    BlockDriverState *bs;
+    QDict *options;
+    int flags;
+    Error **errp;
+    int ret;
+} QEDOpenCo;
+
+static void coroutine_fn bdrv_qed_open_entry(void *opaque)
+{
+    QEDOpenCo *qoc = opaque;
+    BDRVQEDState *s = qoc->bs->opaque;
+
+    qemu_co_mutex_lock(&s->table_lock);
+    qoc->ret = bdrv_qed_do_open(qoc->bs, qoc->options, qoc->flags, qoc->errp);
+    qemu_co_mutex_unlock(&s->table_lock);
+}
+
 static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
                          Error **errp)
 {
+    QEDOpenCo qoc = {
+        .bs = bs,
+        .options = options,
+        .flags = flags,
+        .errp = errp,
+        .ret = -EINPROGRESS
+    };
+
     bs->file = bdrv_open_child(NULL, options, "file", bs, &child_file,
                                false, errp);
     if (!bs->file) {
@@ -523,7 +550,14 @@ static int bdrv_qed_open(BlockDriverState *bs, QDict *options, int flags,
     }
 
     bdrv_qed_init_state(bs);
-    return bdrv_qed_do_open(bs, options, flags, errp);
+    if (qemu_in_coroutine()) {
+        bdrv_qed_open_entry(&qoc);
+    } else {
+        qemu_coroutine_enter(qemu_coroutine_create(bdrv_qed_open_entry, &qoc));
+        BDRV_POLL_WHILE(bs, qoc.ret == -EINPROGRESS);
+    }
+    BDRV_POLL_WHILE(bs, qoc.ret == -EINPROGRESS);
+    return qoc.ret;
 }
 
 static void bdrv_qed_refresh_limits(BlockDriverState *bs, Error **errp)
@@ -638,7 +672,9 @@ out:
     return ret;
 }
 
-static int bdrv_qed_create(const char *filename, QemuOpts *opts, Error **errp)
+static int coroutine_fn bdrv_qed_co_create_opts(const char *filename,
+                                                QemuOpts *opts,
+                                                Error **errp)
 {
     uint64_t image_size = 0;
     uint32_t cluster_size = QED_DEFAULT_CLUSTER_SIZE;
@@ -688,74 +724,46 @@ finish:
     return ret;
 }
 
-typedef struct {
-    BlockDriverState *bs;
-    Coroutine *co;
-    uint64_t pos;
-    int64_t status;
-    int *pnum;
-    BlockDriverState **file;
-} QEDIsAllocatedCB;
-
-/* Called with table_lock held.  */
-static void qed_is_allocated_cb(void *opaque, int ret, uint64_t offset, size_t len)
-{
-    QEDIsAllocatedCB *cb = opaque;
-    BDRVQEDState *s = cb->bs->opaque;
-    *cb->pnum = len / BDRV_SECTOR_SIZE;
-    switch (ret) {
-    case QED_CLUSTER_FOUND:
-        offset |= qed_offset_into_cluster(s, cb->pos);
-        cb->status = BDRV_BLOCK_DATA | BDRV_BLOCK_OFFSET_VALID | offset;
-        *cb->file = cb->bs->file->bs;
-        break;
-    case QED_CLUSTER_ZERO:
-        cb->status = BDRV_BLOCK_ZERO;
-        break;
-    case QED_CLUSTER_L2:
-    case QED_CLUSTER_L1:
-        cb->status = 0;
-        break;
-    default:
-        assert(ret < 0);
-        cb->status = ret;
-        break;
-    }
-
-    if (cb->co) {
-        aio_co_wake(cb->co);
-    }
-}
-
-static int64_t coroutine_fn bdrv_qed_co_get_block_status(BlockDriverState *bs,
-                                                 int64_t sector_num,
-                                                 int nb_sectors, int *pnum,
+static int coroutine_fn bdrv_qed_co_block_status(BlockDriverState *bs,
+                                                 bool want_zero,
+                                                 int64_t pos, int64_t bytes,
+                                                 int64_t *pnum, int64_t *map,
                                                  BlockDriverState **file)
 {
     BDRVQEDState *s = bs->opaque;
-    size_t len = (size_t)nb_sectors * BDRV_SECTOR_SIZE;
-    QEDIsAllocatedCB cb = {
-        .bs = bs,
-        .pos = (uint64_t)sector_num * BDRV_SECTOR_SIZE,
-        .status = BDRV_BLOCK_OFFSET_MASK,
-        .pnum = pnum,
-        .file = file,
-    };
+    size_t len = MIN(bytes, SIZE_MAX);
+    int status;
     QEDRequest request = { .l2_table = NULL };
     uint64_t offset;
     int ret;
 
     qemu_co_mutex_lock(&s->table_lock);
-    ret = qed_find_cluster(s, &request, cb.pos, &len, &offset);
-    qed_is_allocated_cb(&cb, ret, offset, len);
+    ret = qed_find_cluster(s, &request, pos, &len, &offset);
 
-    /* The callback was invoked immediately */
-    assert(cb.status != BDRV_BLOCK_OFFSET_MASK);
+    *pnum = len;
+    switch (ret) {
+    case QED_CLUSTER_FOUND:
+        *map = offset | qed_offset_into_cluster(s, pos);
+        status = BDRV_BLOCK_DATA | BDRV_BLOCK_OFFSET_VALID;
+        *file = bs->file->bs;
+        break;
+    case QED_CLUSTER_ZERO:
+        status = BDRV_BLOCK_ZERO;
+        break;
+    case QED_CLUSTER_L2:
+    case QED_CLUSTER_L1:
+        status = 0;
+        break;
+    default:
+        assert(ret < 0);
+        status = ret;
+        break;
+    }
 
     qed_unref_l2_cache_entry(request.l2_table);
     qemu_co_mutex_unlock(&s->table_lock);
 
-    return cb.status;
+    return status;
 }
 
 static BDRVQEDState *acb_to_s(QEDAIOCB *acb)
@@ -1513,7 +1521,8 @@ static int bdrv_qed_change_backing_file(BlockDriverState *bs,
     return ret;
 }
 
-static void bdrv_qed_invalidate_cache(BlockDriverState *bs, Error **errp)
+static void coroutine_fn bdrv_qed_co_invalidate_cache(BlockDriverState *bs,
+                                                      Error **errp)
 {
     BDRVQEDState *s = bs->opaque;
     Error *local_err = NULL;
@@ -1522,13 +1531,9 @@ static void bdrv_qed_invalidate_cache(BlockDriverState *bs, Error **errp)
     bdrv_qed_close(bs);
 
     bdrv_qed_init_state(bs);
-    if (qemu_in_coroutine()) {
-        qemu_co_mutex_lock(&s->table_lock);
-    }
+    qemu_co_mutex_lock(&s->table_lock);
     ret = bdrv_qed_do_open(bs, NULL, bs->open_flags, &local_err);
-    if (qemu_in_coroutine()) {
-        qemu_co_mutex_unlock(&s->table_lock);
-    }
+    qemu_co_mutex_unlock(&s->table_lock);
     if (local_err) {
         error_propagate(errp, local_err);
         error_prepend(errp, "Could not reopen qed layer: ");
@@ -1539,12 +1544,17 @@ static void bdrv_qed_invalidate_cache(BlockDriverState *bs, Error **errp)
     }
 }
 
-static int bdrv_qed_check(BlockDriverState *bs, BdrvCheckResult *result,
-                          BdrvCheckMode fix)
+static int bdrv_qed_co_check(BlockDriverState *bs, BdrvCheckResult *result,
+                             BdrvCheckMode fix)
 {
     BDRVQEDState *s = bs->opaque;
+    int ret;
 
-    return qed_check(s, result, !!fix);
+    qemu_co_mutex_lock(&s->table_lock);
+    ret = qed_check(s, result, !!fix);
+    qemu_co_mutex_unlock(&s->table_lock);
+
+    return ret;
 }
 
 static QemuOptsList qed_create_opts = {
@@ -1592,9 +1602,9 @@ static BlockDriver bdrv_qed = {
     .bdrv_close               = bdrv_qed_close,
     .bdrv_reopen_prepare      = bdrv_qed_reopen_prepare,
     .bdrv_child_perm          = bdrv_format_default_perms,
-    .bdrv_create              = bdrv_qed_create,
+    .bdrv_co_create_opts      = bdrv_qed_co_create_opts,
     .bdrv_has_zero_init       = bdrv_has_zero_init_1,
-    .bdrv_co_get_block_status = bdrv_qed_co_get_block_status,
+    .bdrv_co_block_status     = bdrv_qed_co_block_status,
     .bdrv_co_readv            = bdrv_qed_co_readv,
     .bdrv_co_writev           = bdrv_qed_co_writev,
     .bdrv_co_pwrite_zeroes    = bdrv_qed_co_pwrite_zeroes,
@@ -1603,8 +1613,8 @@ static BlockDriver bdrv_qed = {
     .bdrv_get_info            = bdrv_qed_get_info,
     .bdrv_refresh_limits      = bdrv_qed_refresh_limits,
     .bdrv_change_backing_file = bdrv_qed_change_backing_file,
-    .bdrv_invalidate_cache    = bdrv_qed_invalidate_cache,
-    .bdrv_check               = bdrv_qed_check,
+    .bdrv_co_invalidate_cache = bdrv_qed_co_invalidate_cache,
+    .bdrv_co_check            = bdrv_qed_co_check,
     .bdrv_detach_aio_context  = bdrv_qed_detach_aio_context,
     .bdrv_attach_aio_context  = bdrv_qed_attach_aio_context,
     .bdrv_co_drain_begin      = bdrv_qed_co_drain_begin,

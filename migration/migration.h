@@ -15,6 +15,7 @@
 #define QEMU_MIGRATION_H
 
 #include "qemu-common.h"
+#include "qapi/qapi-types-migration.h"
 #include "qemu/thread.h"
 #include "exec/cpu-common.h"
 #include "qemu/coroutine_int.h"
@@ -35,6 +36,8 @@ struct MigrationIncomingState {
     bool           have_fault_thread;
     QemuThread     fault_thread;
     QemuSemaphore  fault_thread_sem;
+    /* Set this when we want the fault thread to quit */
+    bool           fault_thread_quit;
 
     bool           have_listen_thread;
     QemuThread     listen_thread;
@@ -42,8 +45,8 @@ struct MigrationIncomingState {
 
     /* For the kernel to send us notifications */
     int       userfault_fd;
-    /* To tell the fault_thread to quit */
-    int       userfault_quit_fd;
+    /* To notify the fault_thread to wake, e.g., when need to quit */
+    int       userfault_event_fd;
     QEMUFile *to_src_file;
     QemuMutex rp_mutex;    /* We send replies from multiple threads */
     void     *postcopy_tmp_page;
@@ -191,7 +194,7 @@ void migrate_fd_error(MigrationState *s, const Error *error);
 
 void migrate_fd_connect(MigrationState *s, Error *error_in);
 
-MigrationState *migrate_init(void);
+void migrate_init(MigrationState *s);
 bool migration_is_blocked(Error **errp);
 /* True if outgoing migration has entered postcopy phase */
 bool migration_in_postcopy(void);
@@ -202,6 +205,7 @@ bool migrate_postcopy(void);
 bool migrate_release_ram(void);
 bool migrate_postcopy_ram(void);
 bool migrate_zero_blocks(void);
+bool migrate_dirty_bitmaps(void);
 
 bool migrate_auto_converge(void);
 bool migrate_use_multifd(void);
@@ -228,7 +232,10 @@ void migrate_send_rp_shut(MigrationIncomingState *mis,
                           uint32_t value);
 void migrate_send_rp_pong(MigrationIncomingState *mis,
                           uint32_t value);
-void migrate_send_rp_req_pages(MigrationIncomingState *mis, const char* rbname,
+int migrate_send_rp_req_pages(MigrationIncomingState *mis, const char* rbname,
                               ram_addr_t start, size_t len);
+
+void dirty_bitmap_mig_before_vm_start(void);
+void init_dirty_bitmap_incoming_migration(void);
 
 #endif

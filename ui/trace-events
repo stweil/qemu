@@ -2,6 +2,8 @@
 
 # ui/console.c
 console_gfx_new(void) ""
+console_gfx_reuse(int index) "%d"
+console_gfx_close(int index) "%d"
 console_putchar_csi(int esc_param0, int esc_param1, int ch, int nb_esc_params) "escape sequence CSI%d;%d%c, %d parameters"
 console_putchar_unhandled(int ch) "unhandled escape character '%c'"
 console_txt_new(int w, int h) "%dx%d"
@@ -75,10 +77,22 @@ qemu_spice_create_primary_surface(int qid, uint32_t sid, void *surface, int asyn
 qemu_spice_destroy_primary_surface(int qid, uint32_t sid, int async) "%d sid=%u async=%d"
 qemu_spice_wakeup(uint32_t qid) "%d"
 qemu_spice_create_update(uint32_t left, uint32_t right, uint32_t top, uint32_t bottom) "lr %d -> %d,  tb -> %d -> %d"
+qemu_spice_display_update(int qid, uint32_t x, uint32_t y, uint32_t w, uint32_t h) "%d +%d+%d %dx%d"
+qemu_spice_display_surface(int qid, uint32_t w, uint32_t h, int fast) "%d %dx%d, fast %d"
+qemu_spice_display_refresh(int qid, int notify) "%d notify %d"
+qemu_spice_ui_info(int qid, uint32_t width, uint32_t height) "%d %dx%d"
+
+qemu_spice_gl_surface(int qid, uint32_t w, uint32_t h, uint32_t fourcc) "%d %dx%d, fourcc 0x%x"
+qemu_spice_gl_scanout_disable(int qid) "%d"
+qemu_spice_gl_scanout_texture(int qid, uint32_t w, uint32_t h, uint32_t fourcc) "%d %dx%d, fourcc 0x%x"
+qemu_spice_gl_cursor(int qid, bool enabled, bool hotspot) "%d enabled %d, hotspot %d"
+qemu_spice_gl_forward_dmabuf(int qid, uint32_t width, uint32_t height) "%d %dx%d"
+qemu_spice_gl_render_dmabuf(int qid, uint32_t width, uint32_t height) "%d %dx%d"
+qemu_spice_gl_update(int qid, uint32_t x, uint32_t y, uint32_t w, uint32_t h) "%d +%d+%d %dx%d"
 
 # ui/keymaps.c
 keymap_parse(const char *file) "file %s"
-keymap_add(const char *type, int sym, int code, const char *line) "%-6s sym=0x%04x code=0x%04x (line: %s)"
+keymap_add(int sym, int code, const char *line) "sym=0x%04x code=0x%04x (line: %s)"
 keymap_unmapped(int sym) "sym=0x%04x"
 
 # ui/x_keymap.c

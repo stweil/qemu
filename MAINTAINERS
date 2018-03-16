@@ -127,7 +127,6 @@ Alpha
 M: Richard Henderson <rth@twiddle.net>
 S: Maintained
 F: target/alpha/
-F: hw/alpha/
 F: tests/tcg/alpha/
 F: disas/alpha.c
 
@@ -232,6 +231,17 @@ F: target/ppc/
 F: hw/ppc/
 F: include/hw/ppc/
 F: disas/ppc.c
+
+RISC-V
+M: Michael Clark <mjc@sifive.com>
+M: Palmer Dabbelt <palmer@sifive.com>
+M: Sagar Karandikar <sagark@eecs.berkeley.edu>
+M: Bastian Koppelmann <kbastian@mail.uni-paderborn.de>
+S: Maintained
+F: target/riscv/
+F: hw/riscv/
+F: include/hw/riscv/
+F: disas/riscv.c
 
 S390
 M: Richard Henderson <rth@twiddle.net>
@@ -386,6 +396,12 @@ M: Kamil Rytarowski <kamil@netbsd.org>
 S: Maintained
 K: ^Subject:.*(?i)NetBSD
 
+OPENBSD
+L: qemu-devel@nongnu.org
+M: Brad Smith <brad@comstyle.com>
+S: Maintained
+K: ^Subject:.*(?i)OpenBSD
+
 W32, W64
 L: qemu-devel@nongnu.org
 M: Stefan Weil <sw@weilnetz.de>
@@ -395,6 +411,12 @@ F: */*win32*
 F: include/*/*win32*
 X: qga/*win32*
 F: qemu.nsi
+
+Alpha Machines
+M: Richard Henderson <rth@twiddle.net>
+S: Maintained
+F: hw/alpha/
+F: hw/isa/smc37c669-superio.c
 
 ARM Machines
 ------------
@@ -550,7 +572,7 @@ F: hw/misc/arm_sysctl.c
 
 Xilinx Zynq
 M: Edgar E. Iglesias <edgar.iglesias@gmail.com>
-M: Alistair Francis <alistair.francis@xilinx.com>
+M: Alistair Francis <alistair@alistair23.me>
 L: qemu-arm@nongnu.org
 S: Maintained
 F: hw/*/xilinx_*
@@ -560,7 +582,7 @@ F: include/hw/misc/zynq*
 X: hw/ssi/xilinx_*
 
 Xilinx ZynqMP
-M: Alistair Francis <alistair.francis@xilinx.com>
+M: Alistair Francis <alistair@alistair23.me>
 M: Edgar E. Iglesias <edgar.iglesias@gmail.com>
 L: qemu-arm@nongnu.org
 S: Maintained
@@ -683,6 +705,8 @@ Fulong 2E
 M: Yongbok Kim <yongbok.kim@mips.com>
 S: Odd Fixes
 F: hw/mips/mips_fulong2e.c
+F: hw/isa/vt82c686.c
+F: include/hw/isa/vt82c686.h
 
 Boston
 M: Paul Burton <paul.burton@mips.com>
@@ -759,9 +783,10 @@ F: hw/ppc/prep_systemio.c
 F: hw/ppc/rs6000_mc.c
 F: hw/pci-host/prep.[hc]
 F: hw/isa/i82378.c
-F: hw/isa/pc87312.[hc]
+F: hw/isa/pc87312.c
 F: hw/dma/i82374.c
 F: hw/timer/m48t59-isa.c
+F: include/hw/isa/pc87312.h
 F: include/hw/timer/m48t59.h
 F: pc-bios/ppc_rom.bin
 
@@ -907,7 +932,7 @@ M: Michael S. Tsirkin <mst@redhat.com>
 M: Paolo Bonzini <pbonzini@redhat.com>
 S: Supported
 F: hw/char/debugcon.c
-F: hw/char/parallel.c
+F: hw/char/parallel*
 F: hw/char/serial*
 F: hw/dma/i8257*
 F: hw/i2c/pm_smbus.c
@@ -915,6 +940,7 @@ F: hw/input/pckbd.c
 F: hw/intc/apic*
 F: hw/intc/ioapic*
 F: hw/intc/i8259*
+F: hw/isa/isa-superio.c
 F: hw/misc/debugexit.c
 F: hw/misc/pc-testdev.c
 F: hw/timer/hpet*
@@ -922,8 +948,11 @@ F: hw/timer/i8254*
 F: hw/timer/mc146818rtc*
 F: hw/watchdog/wdt_ib700.c
 F: include/hw/display/vga.h
+F: include/hw/char/parallel.h
+F: include/hw/dma/i8257.h
 F: include/hw/i2c/pm_smbus.h
-F: include/hw/isa/i8257.h
+F: include/hw/input/i8042.h
+F: include/hw/isa/superio.h
 F: include/hw/timer/hpet.h
 F: include/hw/timer/i8254*
 F: include/hw/timer/mc146818rtc*
@@ -1069,7 +1098,7 @@ T: git git://github.com/bonzini/qemu.git scsi-next
 
 SSI
 M: Peter Crosthwaite <crosthwaite.peter@gmail.com>
-M: Alistair Francis <alistair.francis@xilinx.com>
+M: Alistair Francis <alistair@alistair23.me>
 S: Maintained
 F: hw/ssi/*
 F: hw/block/m25p80.c
@@ -1078,10 +1107,18 @@ X: hw/ssi/xilinx_*
 F: tests/m25p80-test.c
 
 Xilinx SPI
-M: Alistair Francis <alistair.francis@xilinx.com>
+M: Alistair Francis <alistair@alistair23.me>
 M: Peter Crosthwaite <crosthwaite.peter@gmail.com>
 S: Maintained
 F: hw/ssi/xilinx_*
+
+SD (Secure Card)
+M: Philippe Mathieu-Daudé <f4bug@amsat.org>
+S: Odd Fixes
+F: include/hw/sd/sd*
+F: hw/sd/core.c
+F: hw/sd/sd*
+F: tests/sd*
 
 USB
 M: Gerd Hoffmann <kraxel@redhat.com>
@@ -1248,7 +1285,7 @@ S: Maintained
 F: hw/net/eepro100.c
 
 Generic Loader
-M: Alistair Francis <alistair.francis@xilinx.com>
+M: Alistair Francis <alistair@alistair23.me>
 S: Maintained
 F: hw/core/generic-loader.c
 F: include/hw/core/generic-loader.h
@@ -1594,7 +1631,7 @@ F: tests/qmp-test.c
 T: git git://repo.or.cz/qemu/armbru.git qapi-next
 
 Register API
-M: Alistair Francis <alistair.francis@xilinx.com>
+M: Alistair Francis <alistair@alistair23.me>
 S: Maintained
 F: hw/core/register.c
 F: include/hw/register.h
@@ -1633,6 +1670,7 @@ F: include/hw/acpi/tpm.h
 F: include/sysemu/tpm*
 F: qapi/tpm.json
 F: backends/tpm.c
+F: tests/*tpm*
 T: git git://github.com/stefanberger/qemu-tpm.git tpm-next
 
 Checkpatch
@@ -2033,6 +2071,14 @@ F: replication*
 F: block/replication.c
 F: tests/test-replication.c
 F: docs/block-replication.txt
+
+PVRDMA
+M: Yuval Shaia <yuval.shaia@oracle.com>
+M: Marcel Apfelbaum <marcel@redhat.com>
+S: Maintained
+F: hw/rdma/*
+F: hw/rdma/vmw/*
+F: docs/pvrdma.txt
 
 Build and test automation
 -------------------------

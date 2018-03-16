@@ -253,9 +253,10 @@ ETEXI
 
     {
         .name       = "screendump",
-        .args_type  = "filename:F",
-        .params     = "filename",
-        .help       = "save screen into PPM image 'filename'",
+        .args_type  = "filename:F,device:s?,head:i?",
+        .params     = "filename [device [head]]",
+        .help       = "save screen from head 'head' of display device 'device' "
+                      "into PPM image 'filename'",
         .cmd        = hmp_screendump,
     },
 
@@ -1041,7 +1042,8 @@ ETEXI
         .params     = "",
         .help       = "Followup to a migration command to switch the migration"
                       " to postcopy mode. The postcopy-ram capability must "
-                      "be set before the original migration command.",
+                      "be set on both source and destination before the "
+                      "original migration command .",
         .cmd        = hmp_migrate_start_postcopy,
     },
 
@@ -1287,36 +1289,6 @@ STEXI
 @item pcie_aer_inject_error
 @findex pcie_aer_inject_error
 Inject PCIe AER error
-ETEXI
-
-    {
-        .name       = "host_net_add",
-        .args_type  = "device:s,opts:s?",
-        .params     = "tap|user|socket|vde|netmap|bridge|vhost-user|dump [options]",
-        .help       = "add host VLAN client (deprecated, use netdev_add instead)",
-        .cmd        = hmp_host_net_add,
-        .command_completion = host_net_add_completion,
-    },
-
-STEXI
-@item host_net_add
-@findex host_net_add
-Add host VLAN client. Deprecated, please use @code{netdev_add} instead.
-ETEXI
-
-    {
-        .name       = "host_net_remove",
-        .args_type  = "vlan_id:i,device:s",
-        .params     = "vlan_id name",
-        .help       = "remove host VLAN client (deprecated, use netdev_del instead)",
-        .cmd        = hmp_host_net_remove,
-        .command_completion = host_net_remove_completion,
-    },
-
-STEXI
-@item host_net_remove
-@findex host_net_remove
-Remove host VLAN client. Deprecated, please use @code{netdev_del} instead.
 ETEXI
 
     {

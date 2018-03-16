@@ -34,7 +34,6 @@
 #include "hw/loader.h"
 #include "qemu/error-report.h"
 #include "qemu/range.h"
-#include "qmp-commands.h"
 #include "trace.h"
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
@@ -42,6 +41,7 @@
 #include "hw/hotplug.h"
 #include "hw/boards.h"
 #include "qapi/error.h"
+#include "qapi/qapi-commands-misc.h"
 #include "qemu/cutils.h"
 
 //#define DEBUG_PCI
@@ -1815,71 +1815,48 @@ PciInfoList *qmp_query_pci(Error **errp)
     return head;
 }
 
-static const char * const pci_nic_models[] = {
-#if !defined(CONFIG_WIN32)
-    "atheros_wlan",
-#endif
-    "dp83816",
-    "e100",
-    "ne2k_pci",
-    "i82551",
-    "i82557a",
-    "i82557b",
-    "i82557c",
-    "i82558b",
-    "i82559c",
-    "i82559er",
-    "i82801",
-    "rtl8139",
-    "e1000",
-    "pcnet",
-    "tnetw1130",
-    "virtio",
-    "sungem",
-    NULL
-};
-
-static const char * const pci_nic_names[] = {
-#if !defined(CONFIG_WIN32)
-    "atheros_wlan",
-#endif
-    "dp83816",
-    "e100",
-    "ne2k_pci",
-    "i82551",
-    "i82557a",
-    "i82557b",
-    "i82557c",
-    "i82558b",
-    "i82559c",
-    "i82559er",
-    "i82801",
-    "rtl8139",
-    "e1000",
-    "pcnet",
-    "tnetw1130",
-    "virtio-net-pci",
-    "sungem",
-    NULL
-};
-
 /* Initialize a PCI NIC.  */
 PCIDevice *pci_nic_init_nofail(NICInfo *nd, PCIBus *rootbus,
                                const char *default_model,
                                const char *default_devaddr)
 {
     const char *devaddr = nd->devaddr ? nd->devaddr : default_devaddr;
+    GSList *list;
+    GPtrArray *pci_nic_models;
     PCIBus *bus;
     PCIDevice *pci_dev;
     DeviceState *dev;
     int devfn;
     int i;
 
-    if (qemu_show_nic_models(nd->model, pci_nic_models)) {
+    if (nd->model && !strcmp(nd->model, "virtio")) {
+        g_free(nd->model);
+        nd->model = g_strdup("virtio-net-pci");
+    }
+
+    list = object_class_get_list_sorted(TYPE_PCI_DEVICE, false);
+    pci_nic_models = g_ptr_array_new();
+    while (list) {
+        DeviceClass *dc = OBJECT_CLASS_CHECK(DeviceClass, list->data,
+                                             TYPE_DEVICE);
+        GSList *next;
+        if (test_bit(DEVICE_CATEGORY_NETWORK, dc->categories) &&
+            dc->user_creatable) {
+            const char *name = object_class_get_name(list->data);
+            g_ptr_array_add(pci_nic_models, (gpointer)name);
+        }
+        next = list->next;
+        g_slist_free_1(list);
+        list = next;
+    }
+    g_ptr_array_add(pci_nic_models, NULL);
+
+    if (qemu_show_nic_models(nd->model, (const char **)pci_nic_models->pdata)) {
         exit(0);
     }
 
-    i = qemu_find_nic_model(nd, pci_nic_models, default_model);
+    i = qemu_find_nic_model(nd, (const char **)pci_nic_models->pdata,
+                            default_model);
     if (i < 0) {
         exit(1);
     }
@@ -1887,15 +1864,15 @@ PCIDevice *pci_nic_init_nofail(NICInfo *nd, PCIBus *rootbus,
     bus = pci_get_bus_devfn(&devfn, rootbus, devaddr);
     if (!bus) {
         error_report("Invalid PCI device address %s for device %s",
-                     devaddr, pci_nic_names[i]);
+                     devaddr, nd->model);
         exit(1);
     }
 
-    pci_dev = pci_create(bus, devfn, pci_nic_names[i]);
+    pci_dev = pci_create(bus, devfn, nd->model);
     dev = &pci_dev->qdev;
     qdev_set_nic_properties(dev, nd);
     qdev_init_nofail(dev);
-
+    g_ptr_array_free(pci_nic_models, true);
     return pci_dev;
 }
 

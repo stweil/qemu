@@ -92,6 +92,7 @@ static bool has_msr_hv_stimer;
 static bool has_msr_hv_frequencies;
 static bool has_msr_xss;
 static bool has_msr_spec_ctrl;
+static bool has_msr_smi_count;
 
 static uint32_t has_architectural_pmu_version;
 static uint32_t num_architectural_pmu_gp_counters;
@@ -383,6 +384,9 @@ uint32_t kvm_arch_get_supported_cpuid(KVMState *s, uint32_t function,
         if (!kvm_irqchip_in_kernel()) {
             ret &= ~(1U << KVM_FEATURE_PV_UNHALT);
         }
+    } else if (function == KVM_CPUID_FEATURES && reg == R_EDX) {
+        ret |= KVM_HINTS_DEDICATED;
+        found = 1;
     }
 
     /* fallback for older kernels */
@@ -801,6 +805,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
         c = &cpuid_data.entries[cpuid_i++];
         c->function = KVM_CPUID_FEATURES | kvm_base;
         c->eax = env->features[FEAT_KVM];
+        c->edx = env->features[FEAT_KVM_HINTS];
     }
 
     cpu_x86_cpuid(env, 0, 0, &limit, &unused, &unused, &unused);
@@ -866,6 +871,29 @@ int kvm_arch_init_vcpu(CPUState *cs)
                 c = &cpuid_data.entries[cpuid_i++];
             }
             break;
+        case 0x14: {
+            uint32_t times;
+
+            c->function = i;
+            c->index = 0;
+            c->flags = KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
+            cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
+            times = c->eax;
+
+            for (j = 1; j <= times; ++j) {
+                if (cpuid_i == KVM_MAX_CPUID_ENTRIES) {
+                    fprintf(stderr, "cpuid_data is full, no space for "
+                                "cpuid(eax:0x14,ecx:0x%x)\n", j);
+                    abort();
+                }
+                c = &cpuid_data.entries[cpuid_i++];
+                c->function = i;
+                c->index = j;
+                c->flags = KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
+                cpu_x86_cpuid(env, i, j, &c->eax, &c->ebx, &c->ecx, &c->edx);
+            }
+            break;
+        }
         default:
             c->function = i;
             c->flags = 0;
@@ -1125,6 +1153,9 @@ static int kvm_get_supported_msrs(KVMState *s)
                     break;
                 case MSR_IA32_SMBASE:
                     has_msr_smbase = true;
+                    break;
+                case MSR_SMI_COUNT:
+                    has_msr_smi_count = true;
                     break;
                 case MSR_IA32_MISC_ENABLE:
                     has_msr_misc_enable = true;
@@ -1635,6 +1666,9 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
     if (has_msr_smbase) {
         kvm_msr_entry_add(cpu, MSR_IA32_SMBASE, env->smbase);
     }
+    if (has_msr_smi_count) {
+        kvm_msr_entry_add(cpu, MSR_SMI_COUNT, env->msr_smi_count);
+    }
     if (has_msr_bndcfgs) {
         kvm_msr_entry_add(cpu, MSR_IA32_BNDCFGS, env->msr_bndcfgs);
     }
@@ -1788,6 +1822,25 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
                 kvm_msr_entry_add(cpu, MSR_MTRRphysBase(i),
                                   env->mtrr_var[i].base);
                 kvm_msr_entry_add(cpu, MSR_MTRRphysMask(i), mask);
+            }
+        }
+        if (env->features[FEAT_7_0_EBX] & CPUID_7_0_EBX_INTEL_PT) {
+            int addr_num = kvm_arch_get_supported_cpuid(kvm_state,
+                                                    0x14, 1, R_EAX) & 0x7;
+
+            kvm_msr_entry_add(cpu, MSR_IA32_RTIT_CTL,
+                            env->msr_rtit_ctrl);
+            kvm_msr_entry_add(cpu, MSR_IA32_RTIT_STATUS,
+                            env->msr_rtit_status);
+            kvm_msr_entry_add(cpu, MSR_IA32_RTIT_OUTPUT_BASE,
+                            env->msr_rtit_output_base);
+            kvm_msr_entry_add(cpu, MSR_IA32_RTIT_OUTPUT_MASK,
+                            env->msr_rtit_output_mask);
+            kvm_msr_entry_add(cpu, MSR_IA32_RTIT_CR3_MATCH,
+                            env->msr_rtit_cr3_match);
+            for (i = 0; i < addr_num; i++) {
+                kvm_msr_entry_add(cpu, MSR_IA32_RTIT_ADDR0_A + i,
+                            env->msr_rtit_addrs[i]);
             }
         }
 
@@ -1981,6 +2034,9 @@ static int kvm_get_msrs(X86CPU *cpu)
     if (has_msr_smbase) {
         kvm_msr_entry_add(cpu, MSR_IA32_SMBASE, 0);
     }
+    if (has_msr_smi_count) {
+        kvm_msr_entry_add(cpu, MSR_SMI_COUNT, 0);
+    }
     if (has_msr_feature_control) {
         kvm_msr_entry_add(cpu, MSR_IA32_FEATURE_CONTROL, 0);
     }
@@ -2103,6 +2159,20 @@ static int kvm_get_msrs(X86CPU *cpu)
         }
     }
 
+    if (env->features[FEAT_7_0_EBX] & CPUID_7_0_EBX_INTEL_PT) {
+        int addr_num =
+            kvm_arch_get_supported_cpuid(kvm_state, 0x14, 1, R_EAX) & 0x7;
+
+        kvm_msr_entry_add(cpu, MSR_IA32_RTIT_CTL, 0);
+        kvm_msr_entry_add(cpu, MSR_IA32_RTIT_STATUS, 0);
+        kvm_msr_entry_add(cpu, MSR_IA32_RTIT_OUTPUT_BASE, 0);
+        kvm_msr_entry_add(cpu, MSR_IA32_RTIT_OUTPUT_MASK, 0);
+        kvm_msr_entry_add(cpu, MSR_IA32_RTIT_CR3_MATCH, 0);
+        for (i = 0; i < addr_num; i++) {
+            kvm_msr_entry_add(cpu, MSR_IA32_RTIT_ADDR0_A + i, 0);
+        }
+    }
+
     ret = kvm_vcpu_ioctl(CPU(cpu), KVM_GET_MSRS, cpu->kvm_msr_buf);
     if (ret < 0) {
         return ret;
@@ -2206,6 +2276,9 @@ static int kvm_get_msrs(X86CPU *cpu)
             break;
         case MSR_IA32_SMBASE:
             env->smbase = msrs[i].data;
+            break;
+        case MSR_SMI_COUNT:
+            env->msr_smi_count = msrs[i].data;
             break;
         case MSR_IA32_FEATURE_CONTROL:
             env->msr_ia32_feature_control = msrs[i].data;
@@ -2342,6 +2415,24 @@ static int kvm_get_msrs(X86CPU *cpu)
             break;
         case MSR_IA32_SPEC_CTRL:
             env->spec_ctrl = msrs[i].data;
+            break;
+        case MSR_IA32_RTIT_CTL:
+            env->msr_rtit_ctrl = msrs[i].data;
+            break;
+        case MSR_IA32_RTIT_STATUS:
+            env->msr_rtit_status = msrs[i].data;
+            break;
+        case MSR_IA32_RTIT_OUTPUT_BASE:
+            env->msr_rtit_output_base = msrs[i].data;
+            break;
+        case MSR_IA32_RTIT_OUTPUT_MASK:
+            env->msr_rtit_output_mask = msrs[i].data;
+            break;
+        case MSR_IA32_RTIT_CR3_MATCH:
+            env->msr_rtit_cr3_match = msrs[i].data;
+            break;
+        case MSR_IA32_RTIT_ADDR0_A ... MSR_IA32_RTIT_ADDR3_B:
+            env->msr_rtit_addrs[index - MSR_IA32_RTIT_ADDR0_A] = msrs[i].data;
             break;
         }
     }

@@ -27,7 +27,7 @@
 
 #include "qemu-version.h"
 #include "qapi/error.h"
-#include "qapi-visit.h"
+#include "qapi/qapi-visit-block-core.h"
 #include "qapi/qobject-output-visitor.h"
 #include "qapi/qmp/qjson.h"
 #include "qapi/qmp/qdict.h"
@@ -46,7 +46,7 @@
 #include "crypto/init.h"
 #include "trace/control.h"
 
-#define QEMU_IMG_VERSION "qemu-img version " QEMU_VERSION QEMU_PKGVERSION \
+#define QEMU_IMG_VERSION "qemu-img version " QEMU_FULL_VERSION \
                           "\n" QEMU_COPYRIGHT "\n"
 
 typedef struct img_cmd_t {
@@ -3469,7 +3469,7 @@ static int img_resize(int argc, char **argv)
         }
     }
     if (optind != argc - 1) {
-        error_exit("Expecting one image file name");
+        error_exit("Expecting image file name and size");
     }
     filename = argv[optind++];
 

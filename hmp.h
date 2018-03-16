@@ -132,9 +132,6 @@ void migrate_set_capability_completion(ReadLineState *rs, int nb_args,
                                        const char *str);
 void migrate_set_parameter_completion(ReadLineState *rs, int nb_args,
                                       const char *str);
-void host_net_add_completion(ReadLineState *rs, int nb_args, const char *str);
-void host_net_remove_completion(ReadLineState *rs, int nb_args,
-                                const char *str);
 void delvm_completion(ReadLineState *rs, int nb_args, const char *str);
 void loadvm_completion(ReadLineState *rs, int nb_args, const char *str);
 void hmp_rocker(Monitor *mon, const QDict *qdict);
@@ -146,5 +143,6 @@ void hmp_info_ramblock(Monitor *mon, const QDict *qdict);
 void hmp_hotpluggable_cpus(Monitor *mon, const QDict *qdict);
 void hmp_info_vm_generation_id(Monitor *mon, const QDict *qdict);
 void hmp_info_memory_size_summary(Monitor *mon, const QDict *qdict);
+void hmp_info_sev(Monitor *mon, const QDict *qdict);
 
 #endif

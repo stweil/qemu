@@ -14,10 +14,10 @@
 #include "net/vhost-user.h"
 #include "chardev/char-fe.h"
 #include "qapi/error.h"
+#include "qapi/qapi-commands-net.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
 #include "qemu/option.h"
-#include "qmp-commands.h"
 #include "trace.h"
 
 typedef struct VhostUserState {
@@ -109,6 +109,7 @@ static int vhost_user_start(int queues, NetClientState *ncs[], CharBackend *be)
 err:
     if (net) {
         vhost_net_cleanup(net);
+        g_free(net);
     }
     vhost_user_stop(i, ncs);
     return -1;

@@ -37,6 +37,7 @@
 #include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qapi/error.h"
+#include "qapi/qapi-commands-misc.h"
 #include "qemu/cutils.h"
 
 #include "ui/console.h"
@@ -52,7 +53,6 @@
 #include "trace.h"
 #include "ui/input.h"
 #include "sysemu/sysemu.h"
-#include "qmp-commands.h"
 #include "keymaps.h"
 #include "chardev/char.h"
 #include "qom/object.h"
@@ -230,6 +230,8 @@ struct GtkDisplayState {
 
     bool modifier_pressed[ARRAY_SIZE(modifier_keycode)];
     bool ignore_keys;
+
+    DisplayOptions *opts;
 };
 
 typedef struct VCChardev {
@@ -240,6 +242,8 @@ typedef struct VCChardev {
 
 #define TYPE_CHARDEV_VC "chardev-vc"
 #define VC_CHARDEV(obj) OBJECT_CHECK(VCChardev, (obj), TYPE_CHARDEV_VC)
+
+bool gtk_use_gl_area;
 
 static void gd_grab_pointer(VirtualConsole *vc, const char *reason);
 static void gd_ungrab_pointer(GtkDisplayState *s);
@@ -451,7 +455,7 @@ static void gd_update_full_redraw(VirtualConsole *vc)
     int ww, wh;
     gdk_drawable_get_size(gtk_widget_get_window(area), &ww, &wh);
 #if defined(CONFIG_GTK_GL)
-    if (vc->gfx.gls) {
+    if (vc->gfx.gls && gtk_use_gl_area) {
         gtk_gl_area_queue_render(GTK_GL_AREA(vc->gfx.drawing_area));
         return;
     }
@@ -723,7 +727,7 @@ static const DisplayChangeListenerOps dcl_gl_area_ops = {
     .dpy_gl_update           = gd_gl_area_scanout_flush,
 };
 
-#else
+#endif /* CONFIG_GTK_GL */
 
 static const DisplayChangeListenerOps dcl_egl_ops = {
     .dpy_name             = "gtk-egl",
@@ -740,10 +744,13 @@ static const DisplayChangeListenerOps dcl_egl_ops = {
     .dpy_gl_ctx_get_current  = qemu_egl_get_current_context,
     .dpy_gl_scanout_disable  = gd_egl_scanout_disable,
     .dpy_gl_scanout_texture  = gd_egl_scanout_texture,
+    .dpy_gl_scanout_dmabuf   = gd_egl_scanout_dmabuf,
+    .dpy_gl_cursor_dmabuf    = gd_egl_cursor_dmabuf,
+    .dpy_gl_cursor_position  = gd_egl_cursor_position,
+    .dpy_gl_release_dmabuf   = gd_egl_release_dmabuf,
     .dpy_gl_update           = gd_egl_scanout_flush,
 };
 
-#endif /* CONFIG_GTK_GL */
 #endif /* CONFIG_OPENGL */
 
 /** QEMU Events **/
@@ -778,9 +785,14 @@ static gboolean gd_window_close(GtkWidget *widget, GdkEvent *event,
                                 void *opaque)
 {
     GtkDisplayState *s = opaque;
+    bool allow_close = true;
     int i;
 
-    if (!no_quit) {
+    if (s->opts->has_window_close && !s->opts->window_close) {
+        allow_close = false;
+    }
+
+    if (allow_close) {
         for (i = 0; i < s->nb_vcs; i++) {
             if (s->vc[i].type != GD_VC_GFX) {
                 continue;
@@ -837,13 +849,13 @@ static gboolean gd_draw_event(GtkWidget *widget, cairo_t *cr, void *opaque)
 
 #if defined(CONFIG_OPENGL)
     if (vc->gfx.gls) {
-#if defined(CONFIG_GTK_GL)
-        /* invoke render callback please */
-        return FALSE;
-#else
-        gd_egl_draw(vc);
-        return TRUE;
-#endif
+        if (gtk_use_gl_area) {
+            /* invoke render callback please */
+            return FALSE;
+        } else {
+            gd_egl_draw(vc);
+            return TRUE;
+        }
     }
 #endif
 
@@ -1945,8 +1957,8 @@ static GSList *gd_vc_vte_init(GtkDisplayState *s, VirtualConsole *vc,
     scrollbar = gtk_vscrollbar_new(vadjustment);
 #endif
 
-    gtk_box_pack_start(GTK_BOX(box), vc->vte.terminal, TRUE, TRUE, 0);
-    gtk_box_pack_start(GTK_BOX(box), scrollbar, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(box), scrollbar, FALSE, FALSE, 0);
+    gtk_box_pack_end(GTK_BOX(box), vc->vte.terminal, TRUE, TRUE, 0);
 
     vc->vte.box = box;
     vc->vte.scrollbar = scrollbar;
@@ -1986,7 +1998,7 @@ static void gd_connect_vc_gfx_signals(VirtualConsole *vc)
     g_signal_connect(vc->gfx.drawing_area, "draw",
                      G_CALLBACK(gd_draw_event), vc);
 #if defined(CONFIG_GTK_GL)
-    if (display_opengl) {
+    if (gtk_use_gl_area) {
         /* wire up GtkGlArea events */
         g_signal_connect(vc->gfx.drawing_area, "render",
                          G_CALLBACK(gd_render_event), vc);
@@ -2109,26 +2121,29 @@ static GSList *gd_vc_gfx_init(GtkDisplayState *s, VirtualConsole *vc,
 #if defined(CONFIG_OPENGL)
     if (display_opengl) {
 #if defined(CONFIG_GTK_GL)
-        vc->gfx.drawing_area = gtk_gl_area_new();
-        vc->gfx.dcl.ops = &dcl_gl_area_ops;
-#else
-        vc->gfx.drawing_area = gtk_drawing_area_new();
-        /*
-         * gtk_widget_set_double_buffered() was deprecated in 3.14.
-         * It is required for opengl rendering on X11 though.  A
-         * proper replacement (native opengl support) is only
-         * available in 3.16+.  Silence the warning if possible.
-         */
+        if (gtk_use_gl_area) {
+            vc->gfx.drawing_area = gtk_gl_area_new();
+            vc->gfx.dcl.ops = &dcl_gl_area_ops;
+        } else
+#endif /* CONFIG_GTK_GL */
+        {
+            vc->gfx.drawing_area = gtk_drawing_area_new();
+            /*
+             * gtk_widget_set_double_buffered() was deprecated in 3.14.
+             * It is required for opengl rendering on X11 though.  A
+             * proper replacement (native opengl support) is only
+             * available in 3.16+.  Silence the warning if possible.
+             */
 #ifdef CONFIG_PRAGMA_DIAGNOSTIC_AVAILABLE
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
-        gtk_widget_set_double_buffered(vc->gfx.drawing_area, FALSE);
+            gtk_widget_set_double_buffered(vc->gfx.drawing_area, FALSE);
 #ifdef CONFIG_PRAGMA_DIAGNOSTIC_AVAILABLE
 #pragma GCC diagnostic pop
 #endif
-        vc->gfx.dcl.ops = &dcl_egl_ops;
-#endif /* CONFIG_GTK_GL */
+            vc->gfx.dcl.ops = &dcl_egl_ops;
+        }
     } else
 #endif
     {
@@ -2290,7 +2305,7 @@ static void gd_create_menus(GtkDisplayState *s)
 
 static gboolean gtkinit;
 
-void gtk_display_init(DisplayState *ds, bool full_screen, bool grab_on_hover)
+static void gtk_display_init(DisplayState *ds, DisplayOptions *opts)
 {
     VirtualConsole *vc;
 
@@ -2302,6 +2317,8 @@ void gtk_display_init(DisplayState *ds, bool full_screen, bool grab_on_hover)
         fprintf(stderr, "gtk initialization failed\n");
         exit(1);
     }
+    assert(opts->type == DISPLAY_TYPE_GTK);
+    s->opts = opts;
 
 #if !GTK_CHECK_VERSION(3, 0, 0)
     g_printerr("Running QEMU with GTK 2.x is deprecated, and will be removed\n"
@@ -2388,15 +2405,17 @@ void gtk_display_init(DisplayState *ds, bool full_screen, bool grab_on_hover)
                              vc && vc->type == GD_VC_VTE);
 #endif
 
-    if (full_screen) {
+    if (opts->has_full_screen &&
+        opts->full_screen) {
         gtk_menu_item_activate(GTK_MENU_ITEM(s->full_screen_item));
     }
-    if (grab_on_hover) {
+    if (opts->u.gtk.has_grab_on_hover &&
+        opts->u.gtk.grab_on_hover) {
         gtk_menu_item_activate(GTK_MENU_ITEM(s->grab_on_hover_item));
     }
 }
 
-void early_gtk_display_init(int opengl)
+static void early_gtk_display_init(DisplayOptions *opts)
 {
     /* The QEMU code relies on the assumption that it's always run in
      * the C locale. Therefore it is not prepared to deal with
@@ -2422,22 +2441,19 @@ void early_gtk_display_init(int opengl)
         return;
     }
 
-    switch (opengl) {
-    case -1: /* default */
-    case 0:  /* off */
-        break;
-    case 1: /* on */
+    assert(opts->type == DISPLAY_TYPE_GTK);
+    if (opts->has_gl && opts->gl) {
 #if defined(CONFIG_OPENGL)
-#if defined(CONFIG_GTK_GL)
-        gtk_gl_area_init();
-#else
-        gtk_egl_init();
+#if defined(CONFIG_GTK_GL) && defined(GDK_WINDOWING_WAYLAND)
+        if (GDK_IS_WAYLAND_DISPLAY(gdk_display_get_default())) {
+            gtk_use_gl_area = true;
+            gtk_gl_area_init();
+        }
 #endif
+        {
+            gtk_egl_init();
+        }
 #endif
-        break;
-    default:
-        g_assert_not_reached();
-        break;
     }
 
     keycode_map = gd_get_keymap(&keycode_maplen);
@@ -2446,3 +2462,16 @@ void early_gtk_display_init(int opengl)
     type_register(&char_gd_vc_type_info);
 #endif
 }
+
+static QemuDisplay qemu_display_gtk = {
+    .type       = DISPLAY_TYPE_GTK,
+    .early_init = early_gtk_display_init,
+    .init       = gtk_display_init,
+};
+
+static void register_gtk(void)
+{
+    qemu_display_register(&qemu_display_gtk);
+}
+
+type_init(register_gtk);

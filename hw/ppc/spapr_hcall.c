@@ -731,11 +731,21 @@ static target_ulong h_resize_hpt_commit(PowerPCCPU *cpu,
         return H_AUTHORITY;
     }
 
+    if (!spapr->htab_shift) {
+        /* Radix guest, no HPT */
+        return H_NOT_AVAILABLE;
+    }
+
     trace_spapr_h_resize_hpt_commit(flags, shift);
 
     rc = kvmppc_resize_hpt_commit(cpu, flags, shift);
     if (rc != -ENOSYS) {
-        return resize_hpt_convert_rc(rc);
+        rc = resize_hpt_convert_rc(rc);
+        if (rc == H_SUCCESS) {
+            /* Need to set the new htab_shift in the machine state */
+            spapr->htab_shift = shift;
+        }
+        return rc;
     }
 
     if (flags != 0) {
@@ -1695,7 +1705,10 @@ static target_ulong h_get_cpu_characteristics(PowerPCCPU *cpu,
     }
 
     switch (safe_indirect_branch) {
-    case SPAPR_CAP_FIXED:
+    case SPAPR_CAP_FIXED_CCD:
+        characteristics |= H_CPU_CHAR_CACHE_COUNT_DIS;
+        break;
+    case SPAPR_CAP_FIXED_IBS:
         characteristics |= H_CPU_CHAR_BCCTRL_SERIALISED;
         break;
     default: /* broken */

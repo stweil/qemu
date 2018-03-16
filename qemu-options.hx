@@ -43,7 +43,8 @@ DEF("machine", HAS_ARG, QEMU_OPTION_machine, \
     "                suppress-vmdesc=on|off disables self-describing migration (default=off)\n"
     "                nvdimm=on|off controls NVDIMM support (default=off)\n"
     "                enforce-config-section=on|off enforce configuration section migration (default=off)\n"
-    "                s390-squash-mcss=on|off (deprecated) controls support for squashing into default css (default=off)\n",
+    "                s390-squash-mcss=on|off (deprecated) controls support for squashing into default css (default=off)\n"
+    "                memory-encryption=@var{} memory encryption object to use (default=none)\n",
     QEMU_ARCH_ALL)
 STEXI
 @item -machine [type=]@var{name}[,prop=@var{value}[,...]]
@@ -110,6 +111,8 @@ code to send configuration section even if the machine-type sets the
 @option{migration.send-configuration} property to @var{off}.
 NOTE: this parameter is deprecated. Please use @option{-global}
 @option{migration.send-configuration}=@var{on|off} instead.
+@item memory-encryption=@var{}
+Memory encryption object to use. The default is none.
 @end table
 ETEXI
 
@@ -462,16 +465,13 @@ modprobe i810_audio clocking=48000
 ETEXI
 
 DEF("balloon", HAS_ARG, QEMU_OPTION_balloon,
-    "-balloon none   disable balloon device\n"
     "-balloon virtio[,addr=str]\n"
-    "                enable virtio balloon device (default)\n", QEMU_ARCH_ALL)
+    "                enable virtio balloon device (deprecated)\n", QEMU_ARCH_ALL)
 STEXI
-@item -balloon none
-@findex -balloon
-Disable balloon device.
 @item -balloon virtio[,addr=@var{addr}]
-Enable virtio balloon device (default), optionally with PCI address
-@var{addr}.
+@findex -balloon
+Enable virtio balloon device, optionally with PCI address @var{addr}. This
+option is deprecated, use @option{--device virtio-balloon} instead.
 ETEXI
 
 DEF("device", HAS_ARG, QEMU_OPTION_device,
@@ -1998,19 +1998,40 @@ DEF("netdev", HAS_ARG, QEMU_OPTION_netdev,
     "                VALE port (created on the fly) called 'name' ('nmname' is name of the \n"
     "                netmap device, defaults to '/dev/netmap')\n"
 #endif
+#ifdef CONFIG_POSIX
     "-netdev vhost-user,id=str,chardev=dev[,vhostforce=on|off]\n"
     "                configure a vhost-user network, backed by a chardev 'dev'\n"
+#endif
     "-netdev hubport,id=str,hubid=n[,netdev=nd]\n"
     "                configure a hub port on QEMU VLAN 'n'\n", QEMU_ARCH_ALL)
+DEF("nic", HAS_ARG, QEMU_OPTION_nic,
+    "--nic [tap|bridge|"
+#ifdef CONFIG_SLIRP
+    "user|"
+#endif
+#ifdef __linux__
+    "l2tpv3|"
+#endif
+#ifdef CONFIG_VDE
+    "vde|"
+#endif
+#ifdef CONFIG_NETMAP
+    "netmap|"
+#endif
+#ifdef CONFIG_POSIX
+    "vhost-user|"
+#endif
+    "socket][,option][,...][mac=macaddr]\n"
+    "                initialize an on-board / default host NIC (using MAC address\n"
+    "                macaddr) and connect it to the given host network backend\n"
+    "--nic none      use it alone to have zero network devices (the default is to\n"
+    "                provided a 'user' network connection)\n",
+    QEMU_ARCH_ALL)
 DEF("net", HAS_ARG, QEMU_OPTION_net,
     "-net nic[,vlan=n][,netdev=nd][,macaddr=mac][,model=type][,name=str][,addr=str][,vectors=v]\n"
     "                configure or create an on-board (or machine default) NIC and\n"
     "                connect it either to VLAN 'n' or the netdev 'nd' (for pluggable\n"
     "                NICs please use '-device devtype,netdev=nd' instead)\n"
-    "-net dump[,vlan=n][,file=f][,len=n]\n"
-    "                dump traffic on vlan 'n' to file 'f' (max n bytes per packet)\n"
-    "-net none       use it alone to have zero network devices. If no -net option\n"
-    "                is provided, the default is '-net nic -net user'\n"
     "-net ["
 #ifdef CONFIG_SLIRP
     "user|"
@@ -2456,16 +2477,17 @@ qemu -m 512 -object memory-backend-file,id=mem,size=512M,mem-path=/hugetlbfs,sha
      -device virtio-net-pci,netdev=net0
 @end example
 
-@item -net dump[,vlan=@var{n}][,file=@var{file}][,len=@var{len}]
-Dump network traffic on VLAN @var{n} to file @var{file} (@file{qemu-vlan0.pcap} by default).
-At most @var{len} bytes (64k by default) per packet are stored. The file format is
-libpcap, so it can be analyzed with tools such as tcpdump or Wireshark.
-Note: For devices created with '-netdev', use '-object filter-dump,...' instead.
+@item --nic [tap|bridge|user|l2tpv3|vde|netmap|vhost-user|socket][,...][,mac=macaddr]
 
-@item -net none
-Indicate that no network devices should be configured. It is used to
-override the default configuration (@option{-net nic -net user}) which
-is activated if no @option{-net} options are provided.
+This option is a shortcut for setting both, the on-board (default) guest NIC
+hardware and the host network backend in one go. The host backend options are
+the same as with the corresponding @option{--netdev} option. The guest NIC
+hardware MAC address can be set with @option{mac=@var{macaddr}}.
+
+@item --nic none
+Indicate that no network devices should be configured. It is used to override
+the default configuration (default NIC with @option{--net user} backend) which
+is activated if no other networking options are provided.
 ETEXI
 
 STEXI
@@ -3987,6 +4009,14 @@ The @option{share} boolean option determines whether the memory
 region is marked as private to QEMU, or shared. The latter allows
 a co-operating external process to access the QEMU memory region.
 
+The @option{share} is also required for pvrdma devices due to
+limitations in the RDMA API provided by Linux.
+
+Setting share=on might affect the ability to configure NUMA
+bindings for the memory backend under some circumstances, see
+Documentation/vm/numa_memory_policy.txt on the Linux kernel
+source tree for additional details.
+
 Setting the @option{discard-data} boolean option to @var{on}
 indicates that file contents can be destroyed when QEMU exits,
 to avoid unnecessarily flushing data to the backing file.  Note
@@ -4029,7 +4059,7 @@ requires an alignment different than the default one used by QEMU, eg
 the device DAX /dev/dax0.0 requires 2M alignment rather than 4K. In
 such cases, users can specify the required alignment via this option.
 
-@item -object memory-backend-ram,id=@var{id},merge=@var{on|off},dump=@var{on|off},prealloc=@var{on|off},size=@var{size},host-nodes=@var{host-nodes},policy=@var{default|preferred|bind|interleave}
+@item -object memory-backend-ram,id=@var{id},merge=@var{on|off},dump=@var{on|off},share=@var{on|off},prealloc=@var{on|off},size=@var{size},host-nodes=@var{host-nodes},policy=@var{default|preferred|bind|interleave}
 
 Creates a memory backend object, which can be used to back the guest RAM.
 Memory backend objects offer more control than the @option{-m} option that is
@@ -4237,6 +4267,27 @@ which specify the queue number of cryptodev backend, the default of
    [...]
 @end example
 
+@item -object cryptodev-vhost-user,id=@var{id},chardev=@var{chardevid}[,queues=@var{queues}]
+
+Creates a vhost-user cryptodev backend, backed by a chardev @var{chardevid}.
+The @var{id} parameter is a unique ID that will be used to reference this
+cryptodev backend from the @option{virtio-crypto} device.
+The chardev should be a unix domain socket backed one. The vhost-user uses
+a specifically defined protocol to pass vhost ioctl replacement messages
+to an application on the other end of the socket.
+The @var{queues} parameter is optional, which specify the queue number
+of cryptodev backend for multiqueue vhost-user, the default of @var{queues} is 1.
+
+@example
+
+ # qemu-system-x86_64 \
+   [...] \
+       -chardev socket,id=chardev0,path=/path/to/socket \
+       -object cryptodev-vhost-user,id=cryptodev0,chardev=chardev0 \
+       -device virtio-crypto-pci,id=crypto0,cryptodev=cryptodev0 \
+   [...]
+@end example
+
 @item -object secret,id=@var{id},data=@var{string},format=@var{raw|base64}[,keyid=@var{secretid},iv=@var{string}]
 @item -object secret,id=@var{id},file=@var{filename},format=@var{raw|base64}[,keyid=@var{secretid},iv=@var{string}]
 
@@ -4314,6 +4365,50 @@ contents of @code{iv.b64} to the second secret
          data=$SECRET,iv=$(<iv.b64)
 @end example
 
+@item -object sev-guest,id=@var{id},cbitpos=@var{cbitpos},reduced-phys-bits=@var{val},[sev-device=@var{string},policy=@var{policy},handle=@var{handle},dh-cert-file=@var{file},session-file=@var{file}]
+
+Create a Secure Encrypted Virtualization (SEV) guest object, which can be used
+to provide the guest memory encryption support on AMD processors.
+
+When memory encryption is enabled, one of the physical address bit (aka the
+C-bit) is utilized to mark if a memory page is protected. The @option{cbitpos}
+is used to provide the C-bit position. The C-bit position is Host family dependent
+hence user must provide this value. On EPYC, the value should be 47.
+
+When memory encryption is enabled, we loose certain bits in physical address space.
+The @option{reduced-phys-bits} is used to provide the number of bits we loose in
+physical address space. Similar to C-bit, the value is Host family dependent.
+On EPYC, the value should be 5.
+
+The @option{sev-device} provides the device file to use for communicating with
+the SEV firmware running inside AMD Secure Processor. The default device is
+'/dev/sev'. If hardware supports memory encryption then /dev/sev devices are
+created by CCP driver.
+
+The @option{policy} provides the guest policy to be enforced by the SEV firmware
+and restrict what configuration and operational commands can be performed on this
+guest by the hypervisor. The policy should be provided by the guest owner and is
+bound to the guest and cannot be changed throughout the lifetime of the guest.
+The default is 0.
+
+If guest @option{policy} allows sharing the key with another SEV guest then
+@option{handle} can be use to provide handle of the guest from which to share
+the key.
+
+The @option{dh-cert-file} and @option{session-file} provides the guest owner's
+Public Diffie-Hillman key defined in SEV spec. The PDH and session parameters
+are used for establishing a cryptographic session with the guest owner to
+negotiate keys used for attestation. The file must be encoded in base64.
+
+e.g to launch a SEV guest
+@example
+ # $QEMU \
+     ......
+     -object sev-guest,id=sev0,cbitpos=47,reduced-phys-bits=5 \
+     -machine ...,memory-encryption=sev0
+     .....
+
+@end example
 @end table
 
 ETEXI

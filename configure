@@ -343,8 +343,9 @@ attr=""
 libattr=""
 xfs=""
 tcg="yes"
-
+membarrier=""
 vhost_net="no"
+vhost_crypto="no"
 vhost_scsi="no"
 vhost_vsock="no"
 vhost_user=""
@@ -784,6 +785,7 @@ OpenBSD)
   audio_drv_list="sdl"
   audio_possible_drivers="sdl"
   HOST_VARIANT_DIR="openbsd"
+  supported_os="yes"
 ;;
 Darwin)
   bsd="yes"
@@ -836,6 +838,7 @@ Linux)
   linux_user="yes"
   kvm="yes"
   vhost_net="yes"
+  vhost_crypto="yes"
   vhost_scsi="yes"
   vhost_vsock="yes"
   QEMU_INCLUDES="-I\$(SRC_PATH)/linux-headers -I$(pwd)/linux-headers $QEMU_INCLUDES"
@@ -1185,9 +1188,13 @@ for opt do
   ;;
   --enable-attr) attr="yes"
   ;;
+  --disable-membarrier) membarrier="no"
+  ;;
+  --enable-membarrier) membarrier="yes"
+  ;;
   --disable-blobs) blobs="no"
   ;;
-  --with-pkgversion=*) pkgversion=" ($optarg)"
+  --with-pkgversion=*) pkgversion="$optarg"
   ;;
   --with-coroutine=*) coroutine="$optarg"
   ;;
@@ -1208,6 +1215,14 @@ for opt do
   --disable-vhost-net) vhost_net="no"
   ;;
   --enable-vhost-net) vhost_net="yes"
+  ;;
+  --disable-vhost-crypto) vhost_crypto="no"
+  ;;
+  --enable-vhost-crypto)
+      vhost_crypto="yes"
+      if test "$mingw32" = "yes"; then
+          error_exit "vhost-crypto isn't available on win32"
+      fi
   ;;
   --disable-vhost-scsi) vhost_scsi="no"
   ;;
@@ -1593,19 +1608,21 @@ disabled with --disable-FEATURE, default is enabled if available:
   xen-pci-passthrough
   brlapi          BrlAPI (Braile)
   curl            curl connectivity
+  membarrier      membarrier system call (for Linux 4.14+ or Windows)
   fdt             fdt device tree
   bluez           bluez stack connectivity
   kvm             KVM acceleration support
   hax             HAX acceleration support
   hvf             Hypervisor.framework acceleration support
   whpx            Windows Hypervisor Platform acceleration support
-  rdma            RDMA-based migration support
+  rdma            Enable RDMA-based migration and PVRDMA support
   vde             support for vde network
   netmap          support for netmap network
   linux-aio       Linux AIO support
   cap-ng          libcap-ng support
   attr            attr and xattr support
   vhost-net       vhost-net acceleration support
+  vhost-crypto    vhost-crypto acceleration support
   spice           spice
   rbd             rados block device (rbd)
   libiscsi        iscsi support
@@ -1707,6 +1724,7 @@ gcc_flags="-Wno-missing-include-dirs -Wempty-body -Wnested-externs $gcc_flags"
 gcc_flags="-Wendif-labels -Wno-shift-negative-value $gcc_flags"
 gcc_flags="-Wno-initializer-overrides -Wexpansion-to-defined $gcc_flags"
 gcc_flags="-Wno-string-plus-int $gcc_flags"
+gcc_flags="-Wno-error=address-of-packed-member $gcc_flags"
 # Note that we do not add -Werror to gcc_flags here, because that would
 # enable it for all configure tests. If a configure test failed due
 # to -Werror this would just silently disable some features,
@@ -2487,20 +2505,20 @@ fi
 if test "$whpx" != "no" ; then
     cat > $TMPC << EOF
 #include <windows.h>
-#include <winhvplatform.h>
-#include <winhvemulation.h>
+#include <WinHvPlatform.h>
+#include <WinHvEmulation.h>
 int main(void) {
     WHV_CAPABILITY whpx_cap;
     WHvGetCapability(WHvCapabilityCodeFeatures, &whpx_cap, sizeof(whpx_cap));
     return 0;
 }
 EOF
-    if compile_prog "" "-lwinhvplatform -lwinhvemulation" ; then
-        libs_softmmu="$libs_softmmu -lwinhvplatform -lwinhvemulation"
+    if compile_prog "" "-lWinHvPlatform -lWinHvEmulation" ; then
+        libs_softmmu="$libs_softmmu -lWinHvPlatform -lWinHvEmulation"
         whpx="yes"
     else
         if test "$whpx" = "yes"; then
-            feature_not_found "winhvplatform" "winhvemulation is not installed"
+            feature_not_found "WinHvPlatform" "WinHvEmulation is not installed"
         fi
         whpx="no"
     fi
@@ -2521,9 +2539,8 @@ fi
 
 ##########################################
 # X11 probe
-x11_cflags=
-x11_libs=-lX11
 if $pkg_config --exists "x11"; then
+    have_x11=yes
     x11_cflags=$($pkg_config --cflags x11)
     x11_libs=$($pkg_config --libs x11)
 fi
@@ -2556,10 +2573,10 @@ if test "$gtk" != "no"; then
         gtk_libs=$($pkg_config --libs $gtkpackage)
         gtk_version=$($pkg_config --modversion $gtkpackage)
         if $pkg_config --exists "$gtkx11package >= $gtkversion"; then
+            need_x11=yes
             gtk_cflags="$gtk_cflags $x11_cflags"
             gtk_libs="$gtk_libs $x11_libs"
         fi
-        libs_softmmu="$gtk_libs $libs_softmmu"
         gtk="yes"
     elif test "$gtk" = "yes"; then
         feature_not_found "gtk" "Install gtk3-devel"
@@ -2809,7 +2826,6 @@ if test "$vte" != "no"; then
         vte_cflags=$($pkg_config --cflags $vtepackage)
         vte_libs=$($pkg_config --libs $vtepackage)
         vteversion=$($pkg_config --modversion $vtepackage)
-        libs_softmmu="$vte_libs $libs_softmmu"
         vte="yes"
     elif test "$vte" = "yes"; then
         if test "$gtkabi" = "3.0"; then
@@ -2877,6 +2893,7 @@ if test "$sdl" != "no" ; then
 int main( void ) { return SDL_Init (SDL_INIT_VIDEO); }
 EOF
   sdl_cflags=$($sdlconfig --cflags 2>/dev/null)
+  sdl_cflags="$sdl_cflags -Wno-undef"  # workaround 2.0.8 bug
   if test "$static" = "yes" ; then
     if $pkg_config $sdlname --exists; then
       sdl_libs=$($pkg_config $sdlname --static --libs 2>/dev/null)
@@ -2924,6 +2941,7 @@ if test "$sdl" = "yes" ; then
 int main(void) { return 0; }
 EOF
   if compile_prog "$sdl_cflags $x11_cflags" "$sdl_libs $x11_libs" ; then
+    need_x11=yes
     sdl_cflags="$sdl_cflags $x11_cflags"
     sdl_libs="$sdl_libs $x11_libs"
   fi
@@ -2936,15 +2954,16 @@ if test "$rdma" != "no" ; then
 #include <rdma/rdma_cma.h>
 int main(void) { return 0; }
 EOF
-  rdma_libs="-lrdmacm -libverbs"
+  rdma_libs="-lrdmacm -libverbs -libumad"
   if compile_prog "" "$rdma_libs" ; then
     rdma="yes"
+    libs_softmmu="$libs_softmmu $rdma_libs"
   else
     if test "$rdma" = "yes" ; then
         error_exit \
-            " OpenFabrics librdmacm/libibverbs not present." \
+            " OpenFabrics librdmacm/libibverbs/libibumad not present." \
             " Your options:" \
-            "  (1) Fast: Install infiniband packages from your distro." \
+            "  (1) Fast: Install infiniband packages (devel) from your distro." \
             "  (2) Cleanest: Install libraries from www.openfabrics.org" \
             "  (3) Also: Install softiwarp if you don't have RDMA hardware"
     fi
@@ -3287,8 +3306,6 @@ EOF
       unset IFS
       if compile_prog "$curses_inc" "$curses_lib" ; then
         curses_found=yes
-        QEMU_CFLAGS="$curses_inc $QEMU_CFLAGS"
-        libs_softmmu="$curses_lib $libs_softmmu"
         break
       fi
     done
@@ -3361,7 +3378,7 @@ else
 fi
 glib_modules=gthread-2.0
 if test "$modules" = yes; then
-    glib_modules="$glib_modules gmodule-2.0"
+    glib_modules="$glib_modules gmodule-export-2.0"
 fi
 
 # This workaround is required due to a bug in pkg-config file for glib as it
@@ -3807,9 +3824,9 @@ libs_softmmu="$libs_softmmu $fdt_libs"
 
 if test "$opengl" != "no" ; then
   opengl_pkgs="epoxy libdrm gbm"
-  if $pkg_config $opengl_pkgs x11; then
-    opengl_cflags="$($pkg_config --cflags $opengl_pkgs) $x11_cflags"
-    opengl_libs="$($pkg_config --libs $opengl_pkgs) $x11_libs"
+  if $pkg_config $opengl_pkgs; then
+    opengl_cflags="$($pkg_config --cflags $opengl_pkgs)"
+    opengl_libs="$($pkg_config --libs $opengl_pkgs)"
     opengl=yes
     if test "$gtk" = "yes" && $pkg_config --exists "$gtkpackage >= 3.16"; then
         gtk_gl="yes"
@@ -4907,7 +4924,6 @@ fi
 pragma_disable_unused_but_set=no
 cat > $TMPC << EOF
 #pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
 #pragma GCC diagnostic pop
 
@@ -5183,6 +5199,37 @@ if compile_prog "" "" ; then
 fi
 
 ##########################################
+# check for usable membarrier system call
+if test "$membarrier" = "yes"; then
+    have_membarrier=no
+    if test "$mingw32" = "yes" ; then
+        have_membarrier=yes
+    elif test "$linux" = "yes" ; then
+        cat > $TMPC << EOF
+    #include <linux/membarrier.h>
+    #include <sys/syscall.h>
+    #include <unistd.h>
+    #include <stdlib.h>
+    int main(void) {
+        syscall(__NR_membarrier, MEMBARRIER_CMD_QUERY, 0);
+        syscall(__NR_membarrier, MEMBARRIER_CMD_SHARED, 0);
+	exit(0);
+    }
+EOF
+        if compile_prog "" "" ; then
+            have_membarrier=yes
+        fi
+    fi
+    if test "$have_membarrier" = "no"; then
+      feature_not_found "membarrier" "membarrier system call not available"
+    fi
+else
+    # Do not enable it by default even for Mingw32, because it doesn't
+    # work on Wine.
+    membarrier=no
+fi
+
+##########################################
 # check if rtnetlink.h exists and is useful
 have_rtnetlink=no
 cat > $TMPC << EOF
@@ -5361,25 +5408,27 @@ fi
 ##########################################
 # checks for sanitizers
 
-# we could use a simple skeleton for flags checks, but this also
-# detect the static linking issue of ubsan, see also:
-# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84285
-cat > $TMPC << EOF
-#include <stdint.h>
-int main(void) {
-  return INT32_MIN / -1;
-}
-EOF
-
 have_asan=no
 have_ubsan=no
 have_asan_iface_h=no
 have_asan_iface_fiber=no
 
 if test "$sanitizers" = "yes" ; then
+  write_c_skeleton
   if compile_prog "$CPU_CFLAGS -Werror -fsanitize=address" ""; then
       have_asan=yes
   fi
+
+  # we could use a simple skeleton for flags checks, but this also
+  # detect the static linking issue of ubsan, see also:
+  # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=84285
+  cat > $TMPC << EOF
+#include <stdlib.h>
+int main(void) {
+    void *tmp = malloc(10);
+    return *(int *)(tmp + 2);
+}
+EOF
   if compile_prog "$CPU_CFLAGS -Werror -fsanitize=undefined" ""; then
       have_ubsan=yes
   fi
@@ -5411,19 +5460,8 @@ if test "$gcov" = "yes" ; then
   LDFLAGS="-fprofile-arcs -ftest-coverage $LDFLAGS"
 elif test "$fortify_source" = "yes" ; then
   CFLAGS="-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 $CFLAGS"
-elif test "$debug" = "yes"; then
-  if compile_prog "-Og" ""; then
-      CFLAGS="-Og $CFLAGS"
-  elif compile_prog "-O1" ""; then
-      CFLAGS="-O1 $CFLAGS"
-  fi
-  # Workaround GCC false-positive Wuninitialized bugs with Og or O1:
-  # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=24639
-  if cc_has_warning_flag "-Wno-maybe-uninitialized"; then
-      CFLAGS="-Wno-maybe-uninitialized $CFLAGS"
-  fi
-else
-    CFLAGS="-O2 $CFLAGS"
+elif test "$debug" = "no"; then
+  CFLAGS="-O2 $CFLAGS"
 fi
 
 if test "$have_asan" = "yes"; then
@@ -5824,6 +5862,7 @@ fi
 echo "malloc trim support $malloc_trim"
 echo "RDMA support      $rdma"
 echo "fdt support       $fdt"
+echo "membarrier        $membarrier"
 echo "preadv support    $preadv"
 echo "fdatasync         $fdatasync"
 echo "madvise           $madvise"
@@ -5831,6 +5870,7 @@ echo "posix_madvise     $posix_madvise"
 echo "posix_memalign    $posix_memalign"
 echo "libcap-ng support $cap_ng"
 echo "vhost-net support $vhost_net"
+echo "vhost-crypto support $vhost_crypto"
 echo "vhost-scsi support $vhost_scsi"
 echo "vhost-vsock support $vhost_vsock"
 echo "vhost-user support $vhost_user"
@@ -6033,8 +6073,13 @@ if test "$cap_ng" = "yes" ; then
 fi
 echo "CONFIG_AUDIO_DRIVERS=$audio_drv_list" >> $config_host_mak
 for drv in $audio_drv_list; do
-    def=CONFIG_$(echo $drv | LC_ALL=C tr '[a-z]' '[A-Z]')
-    echo "$def=y" >> $config_host_mak
+    def=CONFIG_AUDIO_$(echo $drv | LC_ALL=C tr '[a-z]' '[A-Z]')
+    case "$drv" in
+	alsa | oss | pa | sdl)
+	    echo "$def=m" >> $config_host_mak ;;
+	*)
+	    echo "$def=y" >> $config_host_mak ;;
+    esac
 done
 echo "ALSA_LIBS=$alsa_libs" >> $config_host_mak
 echo "PULSE_LIBS=$pulse_libs" >> $config_host_mak
@@ -6088,8 +6133,13 @@ if test "$modules" = "yes"; then
   echo "CONFIG_STAMP=_$( (echo $qemu_version; echo $pkgversion; cat $0) | $shacmd - | cut -f1 -d\ )" >> $config_host_mak
   echo "CONFIG_MODULES=y" >> $config_host_mak
 fi
+if test "$have_x11" = "yes" -a "$need_x11" = "yes"; then
+  echo "CONFIG_X11=y" >> $config_host_mak
+  echo "X11_CFLAGS=$x11_cflags" >> $config_host_mak
+  echo "X11_LIBS=$x11_libs" >> $config_host_mak
+fi
 if test "$sdl" = "yes" ; then
-  echo "CONFIG_SDL=y" >> $config_host_mak
+  echo "CONFIG_SDL=m" >> $config_host_mak
   echo "CONFIG_SDLABI=$sdlabi" >> $config_host_mak
   echo "SDL_CFLAGS=$sdl_cflags" >> $config_host_mak
   echo "SDL_LIBS=$sdl_libs" >> $config_host_mak
@@ -6098,7 +6148,9 @@ if test "$cocoa" = "yes" ; then
   echo "CONFIG_COCOA=y" >> $config_host_mak
 fi
 if test "$curses" = "yes" ; then
-  echo "CONFIG_CURSES=y" >> $config_host_mak
+  echo "CONFIG_CURSES=m" >> $config_host_mak
+  echo "CURSES_CFLAGS=$curses_inc" >> $config_host_mak
+  echo "CURSES_LIBS=$curses_lib" >> $config_host_mak
 fi
 if test "$pipe2" = "yes" ; then
   echo "CONFIG_PIPE2=y" >> $config_host_mak
@@ -6195,7 +6247,7 @@ if test "$glib_subprocess" = "yes" ; then
   echo "CONFIG_HAS_GLIB_SUBPROCESS_TESTS=y" >> $config_host_mak
 fi
 if test "$gtk" = "yes" ; then
-  echo "CONFIG_GTK=y" >> $config_host_mak
+  echo "CONFIG_GTK=m" >> $config_host_mak
   echo "CONFIG_GTKABI=$gtkabi" >> $config_host_mak
   echo "GTK_CFLAGS=$gtk_cflags" >> $config_host_mak
   echo "GTK_LIBS=$gtk_libs" >> $config_host_mak
@@ -6246,6 +6298,7 @@ fi
 if test "$vte" = "yes" ; then
   echo "CONFIG_VTE=y" >> $config_host_mak
   echo "VTE_CFLAGS=$vte_cflags" >> $config_host_mak
+  echo "VTE_LIBS=$vte_libs" >> $config_host_mak
 fi
 if test "$virglrenderer" = "yes" ; then
   echo "CONFIG_VIRGL=y" >> $config_host_mak
@@ -6280,6 +6333,9 @@ fi
 if test "$vhost_net" = "yes" -a "$vhost_user" = "yes"; then
   echo "CONFIG_VHOST_NET_USED=y" >> $config_host_mak
 fi
+if test "$vhost_crypto" = "yes" ; then
+  echo "CONFIG_VHOST_CRYPTO=y" >> $config_host_mak
+fi
 if test "$vhost_vsock" = "yes" ; then
   echo "CONFIG_VHOST_VSOCK=y" >> $config_host_mak
 fi
@@ -6297,6 +6353,9 @@ if test "$preadv" = "yes" ; then
 fi
 if test "$fdt" = "yes" ; then
   echo "CONFIG_FDT=y" >> $config_host_mak
+fi
+if test "$membarrier" = "yes" ; then
+  echo "CONFIG_MEMBARRIER=y" >> $config_host_mak
 fi
 if test "$signalfd" = "yes" ; then
   echo "CONFIG_SIGNALFD=y" >> $config_host_mak
@@ -6850,6 +6909,16 @@ case "$target_name" in
     echo "TARGET_ABI32=y" >> $config_target_mak
     gdb_xml_files="power64-core.xml power-fpu.xml power-altivec.xml power-spe.xml power-vsx.xml"
   ;;
+  riscv32)
+    TARGET_BASE_ARCH=riscv
+    TARGET_ABI_DIR=riscv
+    mttcg=yes
+  ;;
+  riscv64)
+    TARGET_BASE_ARCH=riscv
+    TARGET_ABI_DIR=riscv
+    mttcg=yes
+  ;;
   sh4|sh4eb)
     TARGET_ARCH=sh4
     bflt="yes"
@@ -7019,6 +7088,9 @@ for i in $ARCH $TARGET_BASE_ARCH ; do
   ppc*)
     disas_config "PPC"
   ;;
+  riscv)
+    disas_config "RISCV"
+  ;;
   s390*)
     disas_config "S390"
   ;;
@@ -7102,7 +7174,6 @@ DIRS="tests tests/tcg tests/tcg/cris tests/tcg/lm32 tests/libqos tests/qapi-sche
 DIRS="$DIRS docs docs/interop fsdev scsi"
 DIRS="$DIRS pc-bios/optionrom pc-bios/spapr-rtas pc-bios/s390-ccw"
 DIRS="$DIRS roms/seabios roms/vgabios"
-DIRS="$DIRS qapi-generated"
 FILES="Makefile tests/tcg/Makefile qdict-test-data.txt"
 FILES="$FILES tests/tcg/cris/Makefile tests/tcg/cris/.gdbinit"
 FILES="$FILES tests/tcg/lm32/Makefile tests/tcg/xtensa/Makefile po/Makefile"

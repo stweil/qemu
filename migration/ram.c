@@ -29,7 +29,6 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include <zlib.h>
-#include "qapi-event.h"
 #include "qemu/cutils.h"
 #include "qemu/bitops.h"
 #include "qemu/bitmap.h"
@@ -44,6 +43,7 @@
 #include "migration/page_cache.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
+#include "qapi/qapi-events-migration.h"
 #include "qapi/qmp/qerror.h"
 #include "trace.h"
 #include "exec/ram_addr.h"
@@ -1602,11 +1602,13 @@ static void xbzrle_load_cleanup(void)
 
 static void ram_state_cleanup(RAMState **rsp)
 {
-    migration_page_queue_free(*rsp);
-    qemu_mutex_destroy(&(*rsp)->bitmap_mutex);
-    qemu_mutex_destroy(&(*rsp)->src_page_req_mutex);
-    g_free(*rsp);
-    *rsp = NULL;
+    if (*rsp) {
+        migration_page_queue_free(*rsp);
+        qemu_mutex_destroy(&(*rsp)->bitmap_mutex);
+        qemu_mutex_destroy(&(*rsp)->src_page_req_mutex);
+        g_free(*rsp);
+        *rsp = NULL;
+    }
 }
 
 static void xbzrle_cleanup(void)
@@ -2256,6 +2258,13 @@ static int ram_save_iterate(QEMUFile *f, void *opaque)
     int64_t t0;
     int done = 0;
 
+    if (blk_mig_bulk_active()) {
+        /* Avoid transferring ram during bulk phase of block migration as
+         * the bulk phase will usually take a long time and transferring
+         * ram updates during that time is pointless. */
+        goto out;
+    }
+
     rcu_read_lock();
     if (ram_list.version != rs->last_version) {
         ram_state_reset(rs);
@@ -2302,6 +2311,7 @@ static int ram_save_iterate(QEMUFile *f, void *opaque)
      */
     ram_control_after_iterate(f, RAM_CONTROL_ROUND);
 
+out:
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
     ram_counters.transferred += 8;
 
@@ -2360,8 +2370,9 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
 }
 
 static void ram_save_pending(QEMUFile *f, void *opaque, uint64_t max_size,
-                             uint64_t *non_postcopiable_pending,
-                             uint64_t *postcopiable_pending)
+                             uint64_t *res_precopy_only,
+                             uint64_t *res_compatible,
+                             uint64_t *res_postcopy_only)
 {
     RAMState **temp = opaque;
     RAMState *rs = *temp;
@@ -2381,9 +2392,9 @@ static void ram_save_pending(QEMUFile *f, void *opaque, uint64_t max_size,
 
     if (migrate_postcopy_ram()) {
         /* We can do postcopy, and all the data is postcopiable */
-        *postcopiable_pending += remaining_size;
+        *res_compatible += remaining_size;
     } else {
-        *non_postcopiable_pending += remaining_size;
+        *res_precopy_only += remaining_size;
     }
 }
 
@@ -2698,6 +2709,16 @@ static int ram_load_postcopy(QEMUFile *f)
         uint8_t ch;
 
         addr = qemu_get_be64(f);
+
+        /*
+         * If qemu file error, we should stop here, and then "addr"
+         * may be invalid
+         */
+        ret = qemu_file_get_error(f);
+        if (ret) {
+            break;
+        }
+
         flags = addr & ~TARGET_PAGE_MASK;
         addr &= TARGET_PAGE_MASK;
 
@@ -2778,9 +2799,15 @@ static int ram_load_postcopy(QEMUFile *f)
             error_report("Unknown combination of migration flags: %#x"
                          " (postcopy mode)", flags);
             ret = -EINVAL;
+            break;
         }
 
-        if (place_needed) {
+        /* Detect for any possible file errors */
+        if (!ret && qemu_file_get_error(f)) {
+            ret = qemu_file_get_error(f);
+        }
+
+        if (!ret && place_needed) {
             /* This gets called at the last target page in the host page */
             void *place_dest = host + TARGET_PAGE_SIZE - block->page_size;
 
@@ -2791,9 +2818,6 @@ static int ram_load_postcopy(QEMUFile *f)
                 ret = postcopy_place_page(mis, place_dest,
                                           place_source, block);
             }
-        }
-        if (!ret) {
-            ret = qemu_file_get_error(f);
         }
     }
 

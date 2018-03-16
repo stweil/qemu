@@ -28,7 +28,6 @@
 #include "qemu-common.h"
 #include "exec/cpu-defs.h"
 #include "cpu-qom.h"
-#include "fpu/softfloat.h"
 
 #define OS_BYTE     0
 #define OS_WORD     1
@@ -428,6 +427,7 @@ typedef enum {
 /* Quotient */
 
 #define FPSR_QT_MASK  0x00ff0000
+#define FPSR_QT_SHIFT 16
 
 /* Floating-Point Control Register */
 /* Rounding mode */
@@ -492,6 +492,7 @@ enum m68k_features {
     M68K_FEATURE_RTD,
     M68K_FEATURE_CHK2,
     M68K_FEATURE_M68040, /* instructions specific to MC68040 */
+    M68K_FEATURE_MOVEP,
 };
 
 static inline int m68k_feature(CPUM68KState *env, int feature)

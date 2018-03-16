@@ -69,9 +69,9 @@
 
 #if defined(TARGET_I386) || defined(TARGET_ARM) || defined(TARGET_SH4) \
     || defined(TARGET_M68K) || defined(TARGET_CRIS) \
-    || defined(TARGET_UNICORE32) || defined(TARGET_S390X) \
+    || defined(TARGET_S390X) \
     || defined(TARGET_OPENRISC) || defined(TARGET_TILEGX) \
-    || defined(TARGET_NIOS2)
+    || defined(TARGET_NIOS2) || defined(TARGET_RISCV)
 
 #define TARGET_IOC_SIZEBITS	14
 #define TARGET_IOC_DIRBITS	2
@@ -352,19 +352,6 @@ typedef struct {
         int     val[2];
 } kernel_fsid_t;
 
-struct kernel_statfs {
-	int f_type;
-	int f_bsize;
-	int f_blocks;
-	int f_bfree;
-	int f_bavail;
-	int f_files;
-	int f_ffree;
-        kernel_fsid_t f_fsid;
-	int f_namelen;
-	int f_spare[6];
-};
-
 struct target_dirent {
         abi_long        d_ino;
         abi_long        d_off;
@@ -433,9 +420,10 @@ int do_sigaction(int sig, const struct target_sigaction *act,
 #if defined(TARGET_I386) || defined(TARGET_ARM) || defined(TARGET_SPARC) \
     || defined(TARGET_PPC) || defined(TARGET_MIPS) || defined(TARGET_SH4) \
     || defined(TARGET_M68K) || defined(TARGET_ALPHA) || defined(TARGET_CRIS) \
-    || defined(TARGET_MICROBLAZE) || defined(TARGET_UNICORE32) \
+    || defined(TARGET_MICROBLAZE) \
     || defined(TARGET_S390X) || defined(TARGET_OPENRISC) \
-    || defined(TARGET_TILEGX) || defined(TARGET_HPPA) || defined(TARGET_NIOS2)
+    || defined(TARGET_TILEGX) || defined(TARGET_HPPA) || defined(TARGET_NIOS2) \
+    || defined(TARGET_RISCV)
 
 #if defined(TARGET_SPARC)
 #define TARGET_SA_NOCLDSTOP    8u
@@ -1408,7 +1396,7 @@ struct target_winsize {
 
 #if (defined(TARGET_I386) && defined(TARGET_ABI32)) \
     || (defined(TARGET_ARM) && defined(TARGET_ABI32)) \
-    || defined(TARGET_CRIS) || defined(TARGET_UNICORE32)
+    || defined(TARGET_CRIS)
 struct target_stat {
 	unsigned short st_dev;
 	unsigned short __pad1;
@@ -2093,7 +2081,7 @@ struct target_stat {
     unsigned int __unused[2];
 };
 #elif defined(TARGET_OPENRISC) || defined(TARGET_TILEGX) || \
-      defined(TARGET_NIOS2)
+      defined(TARGET_NIOS2) || defined(TARGET_RISCV)
 
 /* These are the asm-generic versions of the stat and stat64 structures */
 
@@ -2120,6 +2108,7 @@ struct target_stat {
     unsigned int __unused5;
 };
 
+#if !defined(TARGET_RISCV64)
 #define TARGET_HAS_STRUCT_STAT64
 struct target_stat64 {
     uint64_t st_dev;
@@ -2143,6 +2132,7 @@ struct target_stat64 {
     unsigned int __unused4;
     unsigned int __unused5;
 };
+#endif
 
 #elif defined(TARGET_HPPA)
 
@@ -2223,7 +2213,8 @@ struct target_statfs {
 	/* Linux specials */
 	target_fsid_t		f_fsid;
 	int32_t			f_namelen;
-	int32_t			f_spare[6];
+	int32_t			f_flags;
+	int32_t			f_spare[5];
 };
 #else
 struct target_statfs {
@@ -2239,7 +2230,8 @@ struct target_statfs {
 	/* Linux specials */
 	target_fsid_t		f_fsid;
 	abi_long		f_namelen;
-	abi_long		f_spare[6];
+	abi_long		f_flags;
+	abi_long		f_spare[5];
 };
 #endif
 
@@ -2255,11 +2247,12 @@ struct target_statfs64 {
 	uint64_t	f_bavail;
 	target_fsid_t	f_fsid;
 	uint32_t	f_namelen;
-	uint32_t	f_spare[6];
+	uint32_t	f_flags;
+	uint32_t	f_spare[5];
 };
 #elif (defined(TARGET_PPC64) || defined(TARGET_X86_64) || \
-       defined(TARGET_SPARC64) || defined(TARGET_AARCH64)) && \
-       !defined(TARGET_ABI32)
+       defined(TARGET_SPARC64) || defined(TARGET_AARCH64) || \
+       defined(TARGET_RISCV)) && !defined(TARGET_ABI32)
 struct target_statfs {
 	abi_long f_type;
 	abi_long f_bsize;
@@ -2271,7 +2264,8 @@ struct target_statfs {
 	target_fsid_t f_fsid;
 	abi_long f_namelen;
 	abi_long f_frsize;
-	abi_long f_spare[5];
+	abi_long f_flags;
+	abi_long f_spare[4];
 };
 
 struct target_statfs64 {
@@ -2285,7 +2279,8 @@ struct target_statfs64 {
 	target_fsid_t f_fsid;
 	abi_long f_namelen;
 	abi_long f_frsize;
-	abi_long f_spare[5];
+	abi_long f_flags;
+	abi_long f_spare[4];
 };
 #elif defined(TARGET_S390X)
 struct target_statfs {
@@ -2299,7 +2294,9 @@ struct target_statfs {
     kernel_fsid_t f_fsid;
     int32_t  f_namelen;
     int32_t  f_frsize;
-    int32_t  f_spare[5];
+    int32_t  f_flags;
+    int32_t  f_spare[4];
+
 };
 
 struct target_statfs64 {
@@ -2313,7 +2310,8 @@ struct target_statfs64 {
     kernel_fsid_t f_fsid;
     int32_t  f_namelen;
     int32_t  f_frsize;
-    int32_t  f_spare[5];
+    int32_t  f_flags;
+    int32_t  f_spare[4];
 };
 #else
 struct target_statfs {
@@ -2327,7 +2325,8 @@ struct target_statfs {
 	target_fsid_t f_fsid;
 	uint32_t f_namelen;
 	uint32_t f_frsize;
-	uint32_t f_spare[5];
+	uint32_t f_flags;
+	uint32_t f_spare[4];
 };
 
 struct target_statfs64 {
@@ -2341,7 +2340,8 @@ struct target_statfs64 {
 	target_fsid_t f_fsid;
         uint32_t f_namelen;
 	uint32_t f_frsize;
-	uint32_t f_spare[5];
+	uint32_t f_flags;
+	uint32_t f_spare[4];
 };
 #endif
 
