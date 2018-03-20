@@ -3883,13 +3883,13 @@ static void ar7_common_init(MachineState *machine,
     }
 
     /* Initialize CPU. */
-    if (machine->cpu_model == NULL) {
+    if (machine->cpu_type == NULL) {
 #ifdef MIPS_HAS_MIPS64
 # error AR7 has a 32 bit CPU
 #endif
-        machine->cpu_model = "4KEcR1";
+        machine->cpu_type = MIPS_CPU_TYPE_NAME("4KEcR1");
     }
-    cpu = MIPS_CPU(cpu_generic_init(TYPE_MIPS_CPU, machine->cpu_model));
+    cpu = MIPS_CPU(cpu_create(machine->cpu_type));
     env = &cpu->env;
 
     qemu_register_reset(main_cpu_reset, env);

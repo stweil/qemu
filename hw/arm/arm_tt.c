@@ -953,10 +953,12 @@ static void tt_init(MachineState *machine)
 #endif
     unsigned i;
 
+#if 0
     if (machine->cpu_model && strcmp(machine->cpu_model, "arm920t")) {
         fprintf(stderr, "only working with cpu arm920t\n");
         exit(1);
     }
+#endif
 
     /* Allocate storage for board state. */
     s = g_new0(TTState, 1);
