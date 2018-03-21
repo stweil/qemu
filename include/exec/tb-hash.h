@@ -41,10 +41,9 @@ static inline unsigned int tb_jmp_cache_hash_page(target_ulong pc)
 
 static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 {
-    target_ulong tmp;
-    tmp = pc ^ (pc >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS));
-    return (((tmp >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS)) & TB_JMP_PAGE_MASK)
-           | (tmp & TB_JMP_ADDR_MASK));
+    pc = pc ^ (pc >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS));
+    return (((pc >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS)) & TB_JMP_PAGE_MASK)
+           | (pc & TB_JMP_ADDR_MASK));
 }
 
 #else
