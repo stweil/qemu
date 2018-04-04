@@ -2450,6 +2450,11 @@ static int mon_init_func(void *opaque, QemuOpts *opts, Error **errp)
     if (qemu_opt_get_bool(opts, "pretty", 0))
         flags |= MONITOR_USE_PRETTY;
 
+    /* OOB is off by default */
+    if (qemu_opt_get_bool(opts, "x-oob", 0)) {
+        flags |= MONITOR_USE_OOB;
+    }
+
     chardev = qemu_opt_get(opts, "chardev");
     chr = qemu_chr_find(chardev);
     if (chr == NULL) {
@@ -4776,6 +4781,8 @@ int main(int argc, char **argv)
     os_setup_post();
 
     main_loop();
+
+    gdbserver_cleanup();
 
     /* No more vcpu or device emulation activity beyond this point */
     vm_shutdown();

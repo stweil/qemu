@@ -80,11 +80,8 @@ static void test_qmp_protocol(void)
     QDict *resp, *q, *ret;
     QList *capabilities;
     QTestState *qts;
-    const QListEntry *entry;
-    QString *qstr;
-    int i;
 
-    qts = qtest_init_without_qmp_handshake(common_args);
+    qts = qtest_init_without_qmp_handshake(false, common_args);
 
     /* Test greeting */
     resp = qtest_qmp_receive(qts);
@@ -92,12 +89,7 @@ static void test_qmp_protocol(void)
     g_assert(q);
     test_version(qdict_get(q, "version"));
     capabilities = qdict_get_qlist(q, "capabilities");
-    g_assert(capabilities);
-    entry = qlist_first(capabilities);
-    g_assert(entry);
-    qstr = qobject_to(QString, entry->value);
-    g_assert(qstr);
-    g_assert_cmpstr(qstring_get_str(qstr), ==, "oob");
+    g_assert(capabilities && qlist_empty(capabilities));
     QDECREF(resp);
 
     /* Test valid command before handshake */
@@ -140,53 +132,46 @@ static void test_qmp_protocol(void)
     g_assert_cmpint(qdict_get_int(resp, "id"), ==, 2);
     QDECREF(resp);
 
-    /*
-     * Test command batching.  In current test OOB is not enabled, we
-     * should be able to run as many commands in batch as we like.
-     * Using 16 (>8, which is OOB queue length) to make sure OOB won't
-     * break existing clients.  Note: this test does not control the
-     * scheduling of QEMU's QMP command processing threads so it may
-     * not really trigger batching inside QEMU.  This is just a
-     * best-effort test.
-     */
-    for (i = 0; i < 16; i++) {
-        qtest_async_qmp(qts, "{ 'execute': 'query-version' }");
-    }
-    /* Verify the replies to make sure no command is dropped. */
-    for (i = 0; i < 16; i++) {
-        resp = qtest_qmp_receive(qts);
-        /* It should never be dropped.  Each of them should be a reply. */
-        g_assert(qdict_haskey(resp, "return"));
-        g_assert(!qdict_haskey(resp, "event"));
-        QDECREF(resp);
-    }
-
     qtest_quit(qts);
 }
 
 /* Tests for Out-Of-Band support. */
 static void test_qmp_oob(void)
 {
-    QDict *resp;
+    QTestState *qts;
+    QDict *resp, *q;
     int acks = 0;
+    const QListEntry *entry;
+    QList *capabilities;
+    QString *qstr;
     const char *cmd_id;
 
-    global_qtest = qtest_init_without_qmp_handshake(common_args);
+    qts = qtest_init_without_qmp_handshake(true, common_args);
 
-    /* Ignore the greeting message. */
-    resp = qmp_receive();
-    g_assert(qdict_get_qdict(resp, "QMP"));
+    /* Check the greeting message. */
+    resp = qtest_qmp_receive(qts);
+    q = qdict_get_qdict(resp, "QMP");
+    g_assert(q);
+    capabilities = qdict_get_qlist(q, "capabilities");
+    g_assert(capabilities && !qlist_empty(capabilities));
+    entry = qlist_first(capabilities);
+    g_assert(entry);
+    qstr = qobject_to(QString, entry->value);
+    g_assert(qstr);
+    g_assert_cmpstr(qstring_get_str(qstr), ==, "oob");
     QDECREF(resp);
 
     /* Try a fake capability, it should fail. */
-    resp = qmp("{ 'execute': 'qmp_capabilities', "
-               "  'arguments': { 'enable': [ 'cap-does-not-exist' ] } }");
+    resp = qtest_qmp(qts,
+                     "{ 'execute': 'qmp_capabilities', "
+                     "  'arguments': { 'enable': [ 'cap-does-not-exist' ] } }");
     g_assert(qdict_haskey(resp, "error"));
     QDECREF(resp);
 
     /* Now, enable OOB in current QMP session, it should succeed. */
-    resp = qmp("{ 'execute': 'qmp_capabilities', "
-               "  'arguments': { 'enable': [ 'oob' ] } }");
+    resp = qtest_qmp(qts,
+                     "{ 'execute': 'qmp_capabilities', "
+                     "  'arguments': { 'enable': [ 'oob' ] } }");
     g_assert(qdict_haskey(resp, "return"));
     QDECREF(resp);
 
@@ -194,8 +179,9 @@ static void test_qmp_oob(void)
      * Try any command that does not support OOB but with OOB flag. We
      * should get failure.
      */
-    resp = qmp("{ 'execute': 'query-cpus',"
-               "  'control': { 'run-oob': true } }");
+    resp = qtest_qmp(qts,
+                     "{ 'execute': 'query-cpus',"
+                     "  'control': { 'run-oob': true } }");
     g_assert(qdict_haskey(resp, "error"));
     QDECREF(resp);
 
@@ -206,17 +192,19 @@ static void test_qmp_oob(void)
      * that thread processing.  Finally we should receive replies from
      * both commands.
      */
-    qmp_async("{ 'execute': 'x-oob-test',"
-              "  'arguments': { 'lock': true }, "
-              "  'id': 'lock-cmd'}");
-    qmp_async("{ 'execute': 'x-oob-test', "
-              "  'arguments': { 'lock': false }, "
-              "  'control': { 'run-oob': true }, "
-              "  'id': 'unlock-cmd' }");
+    qtest_async_qmp(qts,
+                    "{ 'execute': 'x-oob-test',"
+                    "  'arguments': { 'lock': true }, "
+                    "  'id': 'lock-cmd'}");
+    qtest_async_qmp(qts,
+                    "{ 'execute': 'x-oob-test', "
+                    "  'arguments': { 'lock': false }, "
+                    "  'control': { 'run-oob': true }, "
+                    "  'id': 'unlock-cmd' }");
 
     /* Ignore all events.  Wait for 2 acks */
     while (acks < 2) {
-        resp = qmp_receive();
+        resp = qtest_qmp_receive(qts);
         cmd_id = qdict_get_str(resp, "id");
         if (!g_strcmp0(cmd_id, "lock-cmd") ||
             !g_strcmp0(cmd_id, "unlock-cmd")) {
@@ -225,7 +213,7 @@ static void test_qmp_oob(void)
         QDECREF(resp);
     }
 
-    qtest_end();
+    qtest_quit(qts);
 }
 
 static int query_error_class(const char *cmd)
