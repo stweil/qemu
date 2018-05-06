@@ -1,7 +1,7 @@
 /*
  * Tiny Code Interpreter for QEMU
  *
- * Copyright (c) 2009, 2011, 2016 Stefan Weil
+ * Copyright (c) 2009-2018 Stefan Weil
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -156,121 +156,136 @@ static uint64_t tci_uint64(uint32_t high, uint32_t low)
 }
 #endif
 
+/* Advance bytecode pointer to next entry. */
+static void tci_skip(tcg_insn_unit **tb_ptr, size_t size)
+{
+    *tb_ptr +=
+        (size + TCG_TARGET_INSN_UNIT_SIZE - 1) / TCG_TARGET_INSN_UNIT_SIZE;
+}
+
 /* Read constant (native size) from bytecode. */
-static tcg_target_ulong tci_read_i(uint8_t **tb_ptr)
+static tcg_target_ulong tci_read_i(tcg_insn_unit **tb_ptr)
 {
     tcg_target_ulong value = *(tcg_target_ulong *)(*tb_ptr);
-    *tb_ptr += sizeof(value);
+    tci_skip(tb_ptr, sizeof(value));
+    return value;
+}
+
+/* Read unsigned constant (8 bit) from bytecode. */
+static uint8_t tci_read_i8(tcg_insn_unit **tb_ptr)
+{
+    uint8_t value = *(uint8_t *)(*tb_ptr);
+    tci_skip(tb_ptr, sizeof(value));
     return value;
 }
 
 /* Read unsigned constant (32 bit) from bytecode. */
-static uint32_t tci_read_i32(uint8_t **tb_ptr)
+static uint32_t tci_read_i32(tcg_insn_unit **tb_ptr)
 {
     uint32_t value = *(uint32_t *)(*tb_ptr);
-    *tb_ptr += sizeof(value);
+    tci_skip(tb_ptr, sizeof(value));
     return value;
 }
 
 /* Read signed constant (32 bit) from bytecode. */
-static int32_t tci_read_s32(uint8_t **tb_ptr)
+static int32_t tci_read_s32(tcg_insn_unit **tb_ptr)
 {
     int32_t value = *(int32_t *)(*tb_ptr);
-    *tb_ptr += sizeof(value);
+    tci_skip(tb_ptr, sizeof(value));
     return value;
 }
 
 #if TCG_TARGET_REG_BITS == 64
 /* Read constant (64 bit) from bytecode. */
-static uint64_t tci_read_i64(uint8_t **tb_ptr)
+static uint64_t tci_read_i64(tcg_insn_unit **tb_ptr)
 {
     uint64_t value = *(uint64_t *)(*tb_ptr);
-    *tb_ptr += sizeof(value);
+    tci_skip(tb_ptr, sizeof(value));
     return value;
 }
 #endif
 
 /* Read indexed register (native size) from bytecode. */
 static tcg_target_ulong
-tci_read_r(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+tci_read_r(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     tcg_target_ulong value = tci_read_reg(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 
 /* Read indexed register (8 bit) from bytecode. */
-static uint8_t tci_read_r8(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint8_t tci_read_r8(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint8_t value = tci_read_reg8(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 
 #if TCG_TARGET_HAS_ext8s_i32 || TCG_TARGET_HAS_ext8s_i64
 /* Read indexed register (8 bit signed) from bytecode. */
-static int8_t tci_read_r8s(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static int8_t tci_read_r8s(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     int8_t value = tci_read_reg8s(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 #endif
 
 /* Read indexed register (16 bit) from bytecode. */
-static uint16_t tci_read_r16(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint16_t tci_read_r16(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint16_t value = tci_read_reg16(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 
 #if TCG_TARGET_HAS_ext16s_i32 || TCG_TARGET_HAS_ext16s_i64
 /* Read indexed register (16 bit signed) from bytecode. */
-static int16_t tci_read_r16s(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static int16_t tci_read_r16s(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     int16_t value = tci_read_reg16s(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 #endif
 
 /* Read indexed register (32 bit) from bytecode. */
-static uint32_t tci_read_r32(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint32_t tci_read_r32(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint32_t value = tci_read_reg32(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 
 #if TCG_TARGET_REG_BITS == 32
 /* Read two indexed registers (2 * 32 bit) from bytecode. */
-static uint64_t tci_read_r64(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint64_t tci_read_r64(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint32_t low = tci_read_r32(regs, tb_ptr);
     return tci_uint64(tci_read_r32(regs, tb_ptr), low);
 }
 #elif TCG_TARGET_REG_BITS == 64
 /* Read indexed register (32 bit signed) from bytecode. */
-static int32_t tci_read_r32s(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static int32_t tci_read_r32s(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     int32_t value = tci_read_reg32s(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 
 /* Read indexed register (64 bit) from bytecode. */
-static uint64_t tci_read_r64(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint64_t tci_read_r64(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint64_t value = tci_read_reg64(regs, **tb_ptr);
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     return value;
 }
 #endif
 
 /* Read indexed register(s) with target address from bytecode. */
 static target_ulong
-tci_read_ulong(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+tci_read_ulong(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     target_ulong taddr = tci_read_r(regs, tb_ptr);
 #if TARGET_LONG_BITS > TCG_TARGET_REG_BITS
@@ -281,11 +296,11 @@ tci_read_ulong(const tcg_target_ulong *regs, uint8_t **tb_ptr)
 
 /* Read indexed register or constant (native size) from bytecode. */
 static tcg_target_ulong
-tci_read_ri(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+tci_read_ri(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     tcg_target_ulong value;
     TCGReg r = **tb_ptr;
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     if (r == TCG_CONST) {
         value = tci_read_i(tb_ptr);
     } else {
@@ -295,11 +310,11 @@ tci_read_ri(const tcg_target_ulong *regs, uint8_t **tb_ptr)
 }
 
 /* Read indexed register or constant (32 bit) from bytecode. */
-static uint32_t tci_read_ri32(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint32_t tci_read_ri32(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint32_t value;
     TCGReg r = **tb_ptr;
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     if (r == TCG_CONST) {
         value = tci_read_i32(tb_ptr);
     } else {
@@ -310,18 +325,18 @@ static uint32_t tci_read_ri32(const tcg_target_ulong *regs, uint8_t **tb_ptr)
 
 #if TCG_TARGET_REG_BITS == 32
 /* Read two indexed registers or constants (2 * 32 bit) from bytecode. */
-static uint64_t tci_read_ri64(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint64_t tci_read_ri64(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint32_t low = tci_read_ri32(regs, tb_ptr);
     return tci_uint64(tci_read_ri32(regs, tb_ptr), low);
 }
 #elif TCG_TARGET_REG_BITS == 64
 /* Read indexed register or constant (64 bit) from bytecode. */
-static uint64_t tci_read_ri64(const tcg_target_ulong *regs, uint8_t **tb_ptr)
+static uint64_t tci_read_ri64(const tcg_target_ulong *regs, tcg_insn_unit **tb_ptr)
 {
     uint64_t value;
     TCGReg r = **tb_ptr;
-    *tb_ptr += 1;
+    tci_skip(tb_ptr, 1);
     if (r == TCG_CONST) {
         value = tci_read_i64(tb_ptr);
     } else {
@@ -331,7 +346,7 @@ static uint64_t tci_read_ri64(const tcg_target_ulong *regs, uint8_t **tb_ptr)
 }
 #endif
 
-static tcg_target_ulong tci_read_label(uint8_t **tb_ptr)
+static tcg_target_ulong tci_read_label(tcg_insn_unit **tb_ptr)
 {
     tcg_target_ulong label = tci_read_i(tb_ptr);
     tci_assert(label != 0);
@@ -469,7 +484,7 @@ static bool tci_compare64(uint64_t u0, uint64_t u1, TCGCond condition)
 #endif
 
 /* Interpret pseudo code in tb. */
-uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
+uintptr_t tcg_qemu_tb_exec(CPUArchState *env, tcg_insn_unit *tb_ptr)
 {
     tcg_target_ulong regs[TCG_TARGET_NB_REGS];
     long tcg_temps[CPU_TEMP_BUF_NLONGS];
@@ -481,10 +496,17 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
     tci_assert(tb_ptr);
 
     for (;;) {
-        TCGOpcode opc = tb_ptr[0];
+#if defined(GETPC)
+        tci_tb_ptr = (uintptr_t)tb_ptr;
+#endif
+
+        tcg_insn_unit *old_code_ptr = tb_ptr;
+        TCGOpcode opc = tci_read_i8(&tb_ptr);
 #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
-        uint8_t op_size = tb_ptr[1];
-        uint8_t *old_code_ptr = tb_ptr;
+        uint8_t op_size = tci_read_i8(&tb_ptr);
+#else
+        /* Skip size entry. */
+        tb_ptr++;
 #endif
         tcg_target_ulong t0;
         tcg_target_ulong t1;
@@ -500,13 +522,6 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         uint64_t v64;
 #endif
         TCGMemOpIdx oi;
-
-#if defined(GETPC)
-        tci_tb_ptr = (uintptr_t)tb_ptr;
-#endif
-
-        /* Skip opcode and size entry. */
-        tb_ptr += 2;
 
         switch (opc) {
         case INDEX_op_call:
@@ -539,39 +554,39 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         case INDEX_op_br:
             label = tci_read_label(&tb_ptr);
             tci_assert(tb_ptr == old_code_ptr + op_size);
-            tb_ptr = (uint8_t *)label;
+            tb_ptr = (tcg_insn_unit *)label;
             continue;
         case INDEX_op_setcond_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
-            condition = *tb_ptr++;
+            condition = tci_read_i8(&tb_ptr);
             tci_write_reg32(regs, t0, tci_compare32(t1, t2, condition));
             break;
 #if TCG_TARGET_REG_BITS == 32
         case INDEX_op_setcond2_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             tmp64 = tci_read_r64(regs, &tb_ptr);
             v64 = tci_read_ri64(regs, &tb_ptr);
-            condition = *tb_ptr++;
+            condition = tci_read_i8(&tb_ptr);
             tci_write_reg32(regs, t0, tci_compare64(tmp64, v64, condition));
             break;
 #elif TCG_TARGET_REG_BITS == 64
         case INDEX_op_setcond_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
-            condition = *tb_ptr++;
+            condition = tci_read_i8(&tb_ptr);
             tci_write_reg64(regs, t0, tci_compare64(t1, t2, condition));
             break;
 #endif
         case INDEX_op_mov_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1);
             break;
         case INDEX_op_movi_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_i32(&tb_ptr);
             tci_write_reg32(regs, t0, t1);
             break;
@@ -579,7 +594,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Load/store operations (32 bit). */
 
         case INDEX_op_ld8u_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r(regs, &tb_ptr);
             t2 = tci_read_s32(&tb_ptr);
             tci_write_reg8(regs, t0, *(uint8_t *)(t1 + t2));
@@ -592,7 +607,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             TODO();
             break;
         case INDEX_op_ld_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r(regs, &tb_ptr);
             t2 = tci_read_s32(&tb_ptr);
             tci_write_reg32(regs, t0, *(uint32_t *)(t1 + t2));
@@ -620,44 +635,44 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Arithmetic operations (32 bit). */
 
         case INDEX_op_add_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 + t2);
             break;
         case INDEX_op_sub_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 - t2);
             break;
         case INDEX_op_mul_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 * t2);
             break;
 #if TCG_TARGET_HAS_div_i32
         case INDEX_op_div_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, (int32_t)t1 / (int32_t)t2);
             break;
         case INDEX_op_divu_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 / t2);
             break;
         case INDEX_op_rem_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, (int32_t)t1 % (int32_t)t2);
             break;
         case INDEX_op_remu_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 % t2);
@@ -669,19 +684,19 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             break;
 #endif
         case INDEX_op_and_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 & t2);
             break;
         case INDEX_op_or_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 | t2);
             break;
         case INDEX_op_xor_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 ^ t2);
@@ -690,32 +705,32 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Shift/rotate operations (32 bit). */
 
         case INDEX_op_shl_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 << (t2 & 31));
             break;
         case INDEX_op_shr_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1 >> (t2 & 31));
             break;
         case INDEX_op_sar_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, ((int32_t)t1 >> (t2 & 31)));
             break;
 #if TCG_TARGET_HAS_rot_i32
         case INDEX_op_rotl_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, rol32(t1, t2 & 31));
             break;
         case INDEX_op_rotr_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
             t2 = tci_read_ri32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, ror32(t1, t2 & 31));
@@ -723,11 +738,11 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
 #endif
 #if TCG_TARGET_HAS_deposit_i32
         case INDEX_op_deposit_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             t2 = tci_read_r32(regs, &tb_ptr);
-            tmp16 = *tb_ptr++;
-            tmp8 = *tb_ptr++;
+            tmp16 = tci_read_i8(&tb_ptr);
+            tmp8 = tci_read_i8(&tb_ptr);
             tmp32 = (((1 << tmp8) - 1) << tmp16);
             tci_write_reg32(regs, t0, (t1 & ~tmp32) | ((t2 << tmp16) & tmp32));
             break;
@@ -735,25 +750,25 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         case INDEX_op_brcond_i32:
             t0 = tci_read_r32(regs, &tb_ptr);
             t1 = tci_read_ri32(regs, &tb_ptr);
-            condition = *tb_ptr++;
+            condition = tci_read_i8(&tb_ptr);
             label = tci_read_label(&tb_ptr);
             if (tci_compare32(t0, t1, condition)) {
                 tci_assert(tb_ptr == old_code_ptr + op_size);
-                tb_ptr = (uint8_t *)label;
+                tb_ptr = (tcg_insn_unit *)label;
                 continue;
             }
             break;
 #if TCG_TARGET_REG_BITS == 32
         case INDEX_op_add2_i32:
-            t0 = *tb_ptr++;
-            t1 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
+            t1 = tci_read_i8(&tb_ptr);
             tmp64 = tci_read_r64(regs, &tb_ptr);
             tmp64 += tci_read_r64(regs, &tb_ptr);
             tci_write_reg64(regs, t1, t0, tmp64);
             break;
         case INDEX_op_sub2_i32:
-            t0 = *tb_ptr++;
-            t1 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
+            t1 = tci_read_i8(&tb_ptr);
             tmp64 = tci_read_r64(regs, &tb_ptr);
             tmp64 -= tci_read_r64(regs, &tb_ptr);
             tci_write_reg64(regs, t1, t0, tmp64);
@@ -761,17 +776,17 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         case INDEX_op_brcond2_i32:
             tmp64 = tci_read_r64(regs, &tb_ptr);
             v64 = tci_read_ri64(regs, &tb_ptr);
-            condition = *tb_ptr++;
+            condition = tci_read_i8(&tb_ptr);
             label = tci_read_label(&tb_ptr);
             if (tci_compare64(tmp64, v64, condition)) {
                 tci_assert(tb_ptr == old_code_ptr + op_size);
-                tb_ptr = (uint8_t *)label;
+                tb_ptr = (tcg_insn_unit *)label;
                 continue;
             }
             break;
         case INDEX_op_mulu2_i32:
-            t0 = *tb_ptr++;
-            t1 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
+            t1 = tci_read_i8(&tb_ptr);
             t2 = tci_read_r32(regs, &tb_ptr);
             tmp64 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg64(regs, t1, t0, t2 * tmp64);
@@ -779,68 +794,68 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
 #endif /* TCG_TARGET_REG_BITS == 32 */
 #if TCG_TARGET_HAS_ext8s_i32
         case INDEX_op_ext8s_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r8s(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_ext16s_i32
         case INDEX_op_ext16s_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r16s(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_ext8u_i32
         case INDEX_op_ext8u_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r8(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_ext16u_i32
         case INDEX_op_ext16u_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r16(regs, &tb_ptr);
             tci_write_reg32(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_bswap16_i32
         case INDEX_op_bswap16_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r16(regs, &tb_ptr);
             tci_write_reg32(regs, t0, bswap16(t1));
             break;
 #endif
 #if TCG_TARGET_HAS_bswap32_i32
         case INDEX_op_bswap32_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, bswap32(t1));
             break;
 #endif
 #if TCG_TARGET_HAS_not_i32
         case INDEX_op_not_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, ~t1);
             break;
 #endif
 #if TCG_TARGET_HAS_neg_i32
         case INDEX_op_neg_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg32(regs, t0, -t1);
             break;
 #endif
 #if TCG_TARGET_REG_BITS == 64
         case INDEX_op_mov_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
         case INDEX_op_movi_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_i64(&tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
@@ -848,7 +863,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Load/store operations (64 bit). */
 
         case INDEX_op_ld8u_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r(regs, &tb_ptr);
             t2 = tci_read_s32(&tb_ptr);
             tci_write_reg8(regs, t0, *(uint8_t *)(t1 + t2));
@@ -859,19 +874,19 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             TODO();
             break;
         case INDEX_op_ld32u_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r(regs, &tb_ptr);
             t2 = tci_read_s32(&tb_ptr);
             tci_write_reg32(regs, t0, *(uint32_t *)(t1 + t2));
             break;
         case INDEX_op_ld32s_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r(regs, &tb_ptr);
             t2 = tci_read_s32(&tb_ptr);
             tci_write_reg32s(regs, t0, *(int32_t *)(t1 + t2));
             break;
         case INDEX_op_ld_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r(regs, &tb_ptr);
             t2 = tci_read_s32(&tb_ptr);
             tci_write_reg64(regs, t0, *(uint64_t *)(t1 + t2));
@@ -905,19 +920,19 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Arithmetic operations (64 bit). */
 
         case INDEX_op_add_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 + t2);
             break;
         case INDEX_op_sub_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 - t2);
             break;
         case INDEX_op_mul_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 * t2);
@@ -936,19 +951,19 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             break;
 #endif
         case INDEX_op_and_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 & t2);
             break;
         case INDEX_op_or_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 | t2);
             break;
         case INDEX_op_xor_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 ^ t2);
@@ -957,32 +972,32 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Shift/rotate operations (64 bit). */
 
         case INDEX_op_shl_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 << (t2 & 63));
             break;
         case INDEX_op_shr_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1 >> (t2 & 63));
             break;
         case INDEX_op_sar_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, ((int64_t)t1 >> (t2 & 63)));
             break;
 #if TCG_TARGET_HAS_rot_i64
         case INDEX_op_rotl_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, rol64(t1, t2 & 63));
             break;
         case INDEX_op_rotr_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
             t2 = tci_read_ri64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, ror64(t1, t2 & 63));
@@ -990,11 +1005,11 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
 #endif
 #if TCG_TARGET_HAS_deposit_i64
         case INDEX_op_deposit_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r64(regs, &tb_ptr);
             t2 = tci_read_r64(regs, &tb_ptr);
-            tmp16 = *tb_ptr++;
-            tmp8 = *tb_ptr++;
+            tmp16 = tci_read_i8(&tb_ptr);
+            tmp8 = tci_read_i8(&tb_ptr);
             tmp64 = (((1ULL << tmp8) - 1) << tmp16);
             tci_write_reg64(regs, t0, (t1 & ~tmp64) | ((t2 << tmp16) & tmp64));
             break;
@@ -1002,38 +1017,38 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         case INDEX_op_brcond_i64:
             t0 = tci_read_r64(regs, &tb_ptr);
             t1 = tci_read_ri64(regs, &tb_ptr);
-            condition = *tb_ptr++;
+            condition = tci_read_i8(&tb_ptr);
             label = tci_read_label(&tb_ptr);
             if (tci_compare64(t0, t1, condition)) {
                 tci_assert(tb_ptr == old_code_ptr + op_size);
-                tb_ptr = (uint8_t *)label;
+                tb_ptr = (tcg_insn_unit *)label;
                 continue;
             }
             break;
 #if TCG_TARGET_HAS_ext8u_i64
         case INDEX_op_ext8u_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r8(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_ext8s_i64
         case INDEX_op_ext8s_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r8s(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_ext16s_i64
         case INDEX_op_ext16s_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r16s(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
 #endif
 #if TCG_TARGET_HAS_ext16u_i64
         case INDEX_op_ext16u_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r16(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
@@ -1042,7 +1057,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         case INDEX_op_ext32s_i64:
 #endif
         case INDEX_op_ext_i32_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32s(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
@@ -1050,41 +1065,41 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
         case INDEX_op_ext32u_i64:
 #endif
         case INDEX_op_extu_i32_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg64(regs, t0, t1);
             break;
 #if TCG_TARGET_HAS_bswap16_i64
         case INDEX_op_bswap16_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r16(regs, &tb_ptr);
             tci_write_reg64(regs, t0, bswap16(t1));
             break;
 #endif
 #if TCG_TARGET_HAS_bswap32_i64
         case INDEX_op_bswap32_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r32(regs, &tb_ptr);
             tci_write_reg64(regs, t0, bswap32(t1));
             break;
 #endif
 #if TCG_TARGET_HAS_bswap64_i64
         case INDEX_op_bswap64_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, bswap64(t1));
             break;
 #endif
 #if TCG_TARGET_HAS_not_i64
         case INDEX_op_not_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, ~t1);
             break;
 #endif
 #if TCG_TARGET_HAS_neg_i64
         case INDEX_op_neg_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             t1 = tci_read_r64(regs, &tb_ptr);
             tci_write_reg64(regs, t0, -t1);
             break;
@@ -1101,12 +1116,12 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             /* Jump address is aligned */
             tb_ptr = QEMU_ALIGN_PTR_UP(tb_ptr, 4);
             t0 = atomic_read((int32_t *)tb_ptr);
-            tb_ptr += sizeof(int32_t);
+            tci_skip(&tb_ptr, sizeof(int32_t));
             tci_assert(tb_ptr == old_code_ptr + op_size);
             tb_ptr += (int32_t)t0;
             continue;
         case INDEX_op_qemu_ld_i32:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             taddr = tci_read_ulong(regs, &tb_ptr);
             oi = tci_read_i(&tb_ptr);
             switch (get_memop(oi) & (MO_BSWAP | MO_SSIZE)) {
@@ -1140,9 +1155,9 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr)
             tci_write_reg(regs, t0, tmp32);
             break;
         case INDEX_op_qemu_ld_i64:
-            t0 = *tb_ptr++;
+            t0 = tci_read_i8(&tb_ptr);
             if (TCG_TARGET_REG_BITS == 32) {
-                t1 = *tb_ptr++;
+                t1 = tci_read_i8(&tb_ptr);
             }
             taddr = tci_read_ulong(regs, &tb_ptr);
             oi = tci_read_i(&tb_ptr);

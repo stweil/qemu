@@ -1,7 +1,7 @@
 /*
  * Tiny Code Generator for QEMU
  *
- * Copyright (c) 2009, 2011 Stefan Weil
+ * Copyright (c) 2009-2018 Stefan Weil
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -487,7 +487,7 @@ static void tci_out_label(TCGContext *s, TCGLabel *label)
 static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg1,
                        intptr_t arg2)
 {
-    uint8_t *old_code_ptr = s->code_ptr;
+    tcg_insn_unit *old_code_ptr = s->code_ptr;
     if (type == TCG_TYPE_I32) {
         tcg_out_op_t(s, INDEX_op_ld_i32);
         tcg_out_r(s, ret);
@@ -510,7 +510,7 @@ static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg1,
 
 static void tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
 {
-    uint8_t *old_code_ptr = s->code_ptr;
+    tcg_insn_unit *old_code_ptr = s->code_ptr;
     tcg_debug_assert(ret != arg);
 #if TCG_TARGET_REG_BITS == 32
     tcg_out_op_t(s, INDEX_op_mov_i32);
@@ -525,7 +525,7 @@ static void tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg)
 static void tcg_out_movi(TCGContext *s, TCGType type,
                          TCGReg t0, tcg_target_long arg)
 {
-    uint8_t *old_code_ptr = s->code_ptr;
+    tcg_insn_unit *old_code_ptr = s->code_ptr;
     uint32_t arg32 = arg;
     if (type == TCG_TYPE_I32 || arg == arg32) {
         tcg_out_op_t(s, INDEX_op_movi_i32);
@@ -546,7 +546,7 @@ static void tcg_out_movi(TCGContext *s, TCGType type,
 
 static inline void tcg_out_call(TCGContext *s, tcg_insn_unit *arg)
 {
-    uint8_t *old_code_ptr = s->code_ptr;
+    tcg_insn_unit *old_code_ptr = s->code_ptr;
     tcg_out_op_t(s, INDEX_op_call);
     tcg_out_ri(s, 1, (uintptr_t)arg);
     old_code_ptr[1] = s->code_ptr - old_code_ptr;
@@ -555,7 +555,7 @@ static inline void tcg_out_call(TCGContext *s, tcg_insn_unit *arg)
 static void tcg_out_op(TCGContext *s, TCGOpcode opc, const TCGArg *args,
                        const int *const_args)
 {
-    uint8_t *old_code_ptr = s->code_ptr;
+    tcg_insn_unit *old_code_ptr = s->code_ptr;
 
     tcg_out_op_t(s, opc);
 
@@ -825,7 +825,7 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc, const TCGArg *args,
 static void tcg_out_st(TCGContext *s, TCGType type, TCGReg arg, TCGReg arg1,
                        intptr_t arg2)
 {
-    uint8_t *old_code_ptr = s->code_ptr;
+    tcg_insn_unit *old_code_ptr = s->code_ptr;
     if (type == TCG_TYPE_I32) {
         tcg_out_op_t(s, INDEX_op_st_i32);
         tcg_out_r(s, arg);
