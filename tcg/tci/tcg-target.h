@@ -41,7 +41,11 @@
 #define TCG_TARGET_H
 
 #define TCG_TARGET_INTERPRETER 1
-#define TCG_TARGET_INSN_UNIT_SIZE 1
+#if defined(__sparc__)
+# define TCG_TARGET_INSN_UNIT_SIZE 4
+#else
+# define TCG_TARGET_INSN_UNIT_SIZE 1
+#endif
 #define TCG_TARGET_TLB_DISPLACEMENT_BITS 32
 
 #if UINTPTR_MAX == UINT32_MAX
