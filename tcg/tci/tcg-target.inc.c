@@ -400,6 +400,13 @@ static const char *target_parse_constraint(TCGArgConstraint *ct,
     return ct_str;
 }
 
+#if TCG_TARGET_INSN_UNIT_SIZE == 4
+static void tcg_out8(TCGContext *s, uint8_t v)
+{
+    tcg_out32(s, v);
+}
+#endif
+
 #if defined(CONFIG_DEBUG_TCG_INTERPRETER)
 /* Show current bytecode. Used by tcg interpreter. */
 void tci_disas(uint8_t opc)
