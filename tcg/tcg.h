@@ -1245,7 +1245,7 @@ static inline unsigned get_mmuidx(TCGMemOpIdx oi)
 #define TB_EXIT_REQUESTED 3
 
 #ifdef HAVE_TCG_QEMU_TB_EXEC
-uintptr_t tcg_qemu_tb_exec(CPUArchState *env, uint8_t *tb_ptr);
+uintptr_t tcg_qemu_tb_exec(CPUArchState *env, tcg_insn_unit *tb_ptr);
 #else
 # define tcg_qemu_tb_exec(env, tb_ptr) \
     ((uintptr_t (*)(void *, void *))tcg_ctx->code_gen_prologue)(env, tb_ptr)
