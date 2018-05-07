@@ -59,5 +59,5 @@ int print_insn_tci(bfd_vma addr, disassemble_info *info)
                            def->name, nb_oargs, nb_iargs, nb_cargs);
     }
 
-    return length;
+    return length * sizeof(tcg_insn_unit);
 }
