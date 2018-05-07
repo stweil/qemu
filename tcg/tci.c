@@ -166,6 +166,7 @@ static void tci_skip(tcg_insn_unit **tb_ptr, size_t size)
 /* Read constant (native size) from bytecode. */
 static tcg_target_ulong tci_read_i(tcg_insn_unit **tb_ptr)
 {
+    TCG_TARGET_ALIGN(*tb_ptr, 8);
     tcg_target_ulong value = *(tcg_target_ulong *)(*tb_ptr);
     tci_skip(tb_ptr, sizeof(value));
     return value;
@@ -199,6 +200,7 @@ static int32_t tci_read_s32(tcg_insn_unit **tb_ptr)
 /* Read constant (64 bit) from bytecode. */
 static uint64_t tci_read_i64(tcg_insn_unit **tb_ptr)
 {
+    TCG_TARGET_ALIGN(*tb_ptr, 8);
     uint64_t value = *(uint64_t *)(*tb_ptr);
     tci_skip(tb_ptr, sizeof(value));
     return value;
@@ -504,7 +506,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, tcg_insn_unit *tb_ptr)
         TCGOpcode opc = tci_read_i8(&tb_ptr);
 #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
         uint8_t op_size = tci_read_i8(&tb_ptr);
-        // printf("opc: 0x%04x %s\n", opc, tcg_op_defs[opc].name);
+        printf("opc: 0x%04x %s\n", opc, tcg_op_defs[opc].name);
 #else
         /* Skip size entry. */
         tb_ptr++;

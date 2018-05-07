@@ -423,6 +423,7 @@ static void tcg_out_i(TCGContext *s, tcg_target_ulong v)
     if (TCG_TARGET_REG_BITS == 32) {
         tcg_out32(s, v);
     } else {
+        TCG_TARGET_ALIGN(s->code_ptr, sizeof(v));
         tcg_out64(s, v);
     }
 }
@@ -472,6 +473,7 @@ static void tcg_out_ri64(TCGContext *s, int const_arg, TCGArg arg)
     if (const_arg) {
         tcg_debug_assert(const_arg == 1);
         tcg_out8(s, TCG_CONST);
+        TCG_TARGET_ALIGN(s->code_ptr, sizeof(arg));
         tcg_out64(s, arg);
     } else {
         tcg_out_r(s, arg);
@@ -543,6 +545,7 @@ static void tcg_out_movi(TCGContext *s, TCGType type,
 #if TCG_TARGET_REG_BITS == 64
         tcg_out_op_t(s, INDEX_op_movi_i64);
         tcg_out_r(s, t0);
+        TCG_TARGET_ALIGN(s->code_ptr, sizeof(arg));
         tcg_out64(s, arg);
 #else
         TODO();
@@ -568,6 +571,7 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc, const TCGArg *args,
 
     switch (opc) {
     case INDEX_op_exit_tb:
+        TCG_TARGET_ALIGN(s->code_ptr, sizeof(args[0]));
         tcg_out64(s, args[0]);
         break;
     case INDEX_op_goto_tb:
