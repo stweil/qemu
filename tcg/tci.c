@@ -504,6 +504,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, tcg_insn_unit *tb_ptr)
         TCGOpcode opc = tci_read_i8(&tb_ptr);
 #if defined(CONFIG_DEBUG_TCG) && !defined(NDEBUG)
         uint8_t op_size = tci_read_i8(&tb_ptr);
+        // printf("opc: 0x%04x %s\n", opc, tcg_op_defs[opc].name);
 #else
         /* Skip size entry. */
         tb_ptr++;
@@ -1118,7 +1119,7 @@ uintptr_t tcg_qemu_tb_exec(CPUArchState *env, tcg_insn_unit *tb_ptr)
             t0 = atomic_read((int32_t *)tb_ptr);
             tci_skip(&tb_ptr, sizeof(int32_t));
             tci_assert(tb_ptr == old_code_ptr + op_size);
-            tb_ptr += (int32_t)t0;
+            tb_ptr += (int32_t)t0 / TCG_TARGET_INSN_UNIT_SIZE;
             continue;
         case INDEX_op_qemu_ld_i32:
             t0 = tci_read_i8(&tb_ptr);
