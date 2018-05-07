@@ -22,28 +22,30 @@
 #include "disas/bfd.h"
 #include "tcg/tcg.h"
 
-/* Disassemble TCI bytecode. */
+/* Disassemble TCI code. */
 int print_insn_tci(bfd_vma addr, disassemble_info *info)
 {
-    int length;
-    uint8_t byte;
+    tcg_insn_unit instr;
+    tcg_insn_unit length;
     int status;
     TCGOpcode op;
 
-    status = info->read_memory_func(addr, &byte, 1, info);
+    status =
+        info->read_memory_func(addr, (uint8_t *)&instr, sizeof(instr), info);
     if (status != 0) {
         info->memory_error_func(status, addr, info);
         return -1;
     }
-    op = byte;
+    op = instr;
 
-    addr++;
-    status = info->read_memory_func(addr, &byte, 1, info);
+    addr += sizeof(instr);
+
+    status =
+        info->read_memory_func(addr, (uint8_t *)&length, sizeof(length), info);
     if (status != 0) {
         info->memory_error_func(status, addr, info);
         return -1;
     }
-    length = byte;
 
     if (op >= tcg_op_defs_max) {
         info->fprintf_func(info->stream, "illegal opcode %d", op);
