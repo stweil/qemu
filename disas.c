@@ -558,9 +558,11 @@ void disas(FILE *out, void *code, unsigned long size)
     for (pc = (uintptr_t)code; size > 0; pc += count, size -= count) {
         fprintf(out, "0x%08" PRIxPTR ":  ", pc);
         count = print_insn(pc, &s.info);
-	fprintf(out, "\n");
-	if (count < 0)
-	    break;
+        fprintf(out, "\n");
+        if (count <= 0) {
+            assert(count != 0);
+            break;
+        }
     }
 }
 
