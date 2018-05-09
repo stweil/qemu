@@ -488,6 +488,7 @@ static void tci_out_label(TCGContext *s, TCGLabel *label)
         tcg_out_i(s, label->u.value);
         tcg_debug_assert(label->u.value);
     } else {
+        TCG_TARGET_ALIGN(s->code_ptr, sizeof(tcg_target_ulong));
         tcg_out_reloc(s, s->code_ptr, sizeof(tcg_target_ulong), label, 0);
         s->code_ptr += sizeof(tcg_target_ulong) / TCG_TARGET_INSN_UNIT_SIZE;
     }
