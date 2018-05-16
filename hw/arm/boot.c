@@ -307,6 +307,12 @@ static void set_kernel_args(const struct arm_boot_info *info, AddressSpace *as)
         WRITE_WORD(p, info->initrd_start);
         WRITE_WORD(p, initrd_size);
     }
+    if (info->atag_revision) {
+        /* ATAG REVISION. */
+        WRITE_WORD(p, 3);
+        WRITE_WORD(p, 0x54410007);
+        WRITE_WORD(p, info->atag_revision);
+    }
     if (info->kernel_cmdline && *info->kernel_cmdline) {
         /* ATAG_CMDLINE */
         int cmdline_size;
@@ -1015,6 +1021,8 @@ void arm_load_kernel(ARMCPU *cpu, struct arm_boot_info *info)
         MIN(info->ram_size / 2, 128 * 1024 * 1024);
 
     /* Assume that raw images are linux kernels, and ELF images are not.  */
+    /* If the filename contains 'vmlinux', assume ELF images are linux, too. */
+    is_linux = (strstr(info->kernel_filename, "vmlinux") != NULL);
     kernel_size = arm_load_elf(info, &elf_entry, &elf_low_addr,
                                &elf_high_addr, elf_machine, as);
     if (kernel_size > 0 && have_dtb(info)) {
@@ -1042,6 +1050,9 @@ void arm_load_kernel(ARMCPU *cpu, struct arm_boot_info *info)
         kernel_size = load_aarch64_image(info->kernel_filename,
                                          info->loader_start, &entry, as);
         is_linux = 1;
+    } else if (entry == info->loader_start) {
+        /* Don't map bootloader memory if it conflicts with the kernel image. */
+        /* TODO */
     } else if (kernel_size < 0) {
         /* 32-bit ARM */
         entry = info->loader_start + KERNEL_LOAD_ADDR;
