@@ -39,7 +39,7 @@
 #include "qapi/qobject-input-visitor.h"
 #include "hw/boards.h"
 #include "qom/object_interfaces.h"
-#include "hw/mem/pc-dimm.h"
+#include "hw/mem/memory-device.h"
 #include "hw/acpi/acpi_dev_interface.h"
 
 NameInfo *qmp_query_name(Error **errp)
@@ -710,7 +710,7 @@ void qmp_object_add(const char *type, const char *id,
             error_setg(errp, QERR_INVALID_PARAMETER_TYPE, "props", "dict");
             return;
         }
-        QINCREF(pdict);
+        qobject_ref(pdict);
     } else {
         pdict = qdict_new();
     }
@@ -721,7 +721,7 @@ void qmp_object_add(const char *type, const char *id,
     if (obj) {
         object_unref(obj);
     }
-    QDECREF(pdict);
+    qobject_unref(pdict);
 }
 
 void qmp_object_del(const char *id, Error **errp)
@@ -731,7 +731,7 @@ void qmp_object_del(const char *id, Error **errp)
 
 MemoryDeviceInfoList *qmp_query_memory_devices(Error **errp)
 {
-    return qmp_pc_dimm_device_list();
+    return qmp_memory_device_list();
 }
 
 ACPIOSTInfoList *qmp_query_acpi_ospm_status(Error **errp)

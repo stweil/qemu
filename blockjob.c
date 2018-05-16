@@ -359,6 +359,11 @@ static bool block_job_started(BlockJob *job)
     return job->co;
 }
 
+const BlockJobDriver *block_job_driver(BlockJob *job)
+{
+    return job->driver;
+}
+
 /**
  * All jobs must allow a pause point before entering their job proper. This
  * ensures that jobs can be paused prior to being started, then resumed later.
@@ -659,21 +664,17 @@ static bool block_job_timer_pending(BlockJob *job)
 
 void block_job_set_speed(BlockJob *job, int64_t speed, Error **errp)
 {
-    Error *local_err = NULL;
     int64_t old_speed = job->speed;
 
-    if (!job->driver->set_speed) {
-        error_setg(errp, QERR_UNSUPPORTED);
-        return;
-    }
     if (block_job_apply_verb(job, BLOCK_JOB_VERB_SET_SPEED, errp)) {
         return;
     }
-    job->driver->set_speed(job, speed, &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
+    if (speed < 0) {
+        error_setg(errp, QERR_INVALID_PARAMETER, "speed");
         return;
     }
+
+    ratelimit_set_speed(&job->limit, speed, BLOCK_JOB_SLICE_TIME);
 
     job->speed = speed;
     if (speed && speed <= old_speed) {
@@ -682,6 +683,15 @@ void block_job_set_speed(BlockJob *job, int64_t speed, Error **errp)
 
     /* kick only if a timer is pending */
     block_job_enter_cond(job, block_job_timer_pending);
+}
+
+int64_t block_job_ratelimit_get_delay(BlockJob *job, uint64_t n)
+{
+    if (!job->speed) {
+        return 0;
+    }
+
+    return ratelimit_calculate_delay(&job->limit, n);
 }
 
 void block_job_complete(BlockJob *job, Error **errp)
@@ -702,7 +712,7 @@ void block_job_complete(BlockJob *job, Error **errp)
 
 void block_job_finalize(BlockJob *job, Error **errp)
 {
-    assert(job && job->id && job->txn);
+    assert(job && job->id);
     if (block_job_apply_verb(job, BLOCK_JOB_VERB_FINALIZE, errp)) {
         return;
     }
@@ -810,6 +820,16 @@ int block_job_complete_sync(BlockJob *job, Error **errp)
     return block_job_finish_sync(job, &block_job_complete, errp);
 }
 
+void block_job_progress_update(BlockJob *job, uint64_t done)
+{
+    job->offset += done;
+}
+
+void block_job_progress_set_remaining(BlockJob *job, uint64_t remaining)
+{
+    job->len = job->offset + remaining;
+}
+
 BlockJobInfo *block_job_query(BlockJob *job, Error **errp)
 {
     BlockJobInfo *info;
@@ -831,6 +851,8 @@ BlockJobInfo *block_job_query(BlockJob *job, Error **errp)
     info->status    = job->status;
     info->auto_finalize = job->auto_finalize;
     info->auto_dismiss  = job->auto_dismiss;
+    info->has_error = job->ret != 0;
+    info->error     = job->ret ? g_strdup(strerror(-job->ret)) : NULL;
     return info;
 }
 
@@ -988,19 +1010,6 @@ void *block_job_create(const char *job_id, const BlockJobDriver *driver,
     return job;
 }
 
-void block_job_pause_all(void)
-{
-    BlockJob *job = NULL;
-    while ((job = block_job_next(job))) {
-        AioContext *aio_context = blk_get_aio_context(job->blk);
-
-        aio_context_acquire(aio_context);
-        block_job_ref(job);
-        block_job_pause(job);
-        aio_context_release(aio_context);
-    }
-}
-
 void block_job_early_fail(BlockJob *job)
 {
     assert(job->status == BLOCK_JOB_STATUS_CREATED);
@@ -1075,20 +1084,6 @@ void coroutine_fn block_job_pause_point(BlockJob *job)
 
     if (job->driver->resume) {
         job->driver->resume(job);
-    }
-}
-
-void block_job_resume_all(void)
-{
-    BlockJob *job, *next;
-
-    QLIST_FOREACH_SAFE(job, &block_jobs, job_list, next) {
-        AioContext *aio_context = blk_get_aio_context(job->blk);
-
-        aio_context_acquire(aio_context);
-        block_job_resume(job);
-        block_job_unref(job);
-        aio_context_release(aio_context);
     }
 }
 

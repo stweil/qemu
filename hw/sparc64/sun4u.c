@@ -295,10 +295,10 @@ static void ebus_realize(PCIDevice *pci_dev, Error **errp)
     i = 0;
     if (s->console_serial_base) {
         serial_mm_init(pci_address_space(pci_dev), s->console_serial_base,
-                       0, NULL, 115200, serial_hds[i], DEVICE_BIG_ENDIAN);
+                       0, NULL, 115200, serial_hd(i), DEVICE_BIG_ENDIAN);
         i++;
     }
-    serial_hds_isa_init(s->isa_bus, i, MAX_SERIAL_PORTS);
+    serial_hds_isa_init(s->isa_bus, i, MAX_ISA_SERIAL_PORTS);
 
     /* Parallel ports */
     parallel_hds_isa_init(s->isa_bus, MAX_PARALLEL_PORTS);

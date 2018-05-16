@@ -26,6 +26,7 @@
 const unsigned start_address = 1024 * 1024;
 const unsigned end_address = 100 * 1024 * 1024;
 bool got_stop;
+static bool uffd_feature_thread_id;
 
 #if defined(__linux__)
 #include <sys/syscall.h>
@@ -55,6 +56,7 @@ static bool ufd_version_check(void)
         g_test_message("Skipping test: UFFDIO_API failed");
         return false;
     }
+    uffd_feature_thread_id = api_struct.features & UFFD_FEATURE_THREAD_ID;
 
     ioctl_mask = (__u64)1 << _UFFDIO_REGISTER |
                  (__u64)1 << _UFFDIO_UNREGISTER;
@@ -193,7 +195,7 @@ static QDict *wait_command(QTestState *who, const char *command)
         if (!strcmp(event_string, "STOP")) {
             got_stop = true;
         }
-        QDECREF(response);
+        qobject_unref(response);
         response = qtest_qmp_receive(who);
     }
     return response;
@@ -219,8 +221,18 @@ static uint64_t get_migration_pass(QTestState *who)
         rsp_ram = qdict_get_qdict(rsp_return, "ram");
         result = qdict_get_try_int(rsp_ram, "dirty-sync-count", 0);
     }
-    QDECREF(rsp);
+    qobject_unref(rsp);
     return result;
+}
+
+static void read_blocktime(QTestState *who)
+{
+    QDict *rsp, *rsp_return;
+
+    rsp = wait_command(who, "{ 'execute': 'query-migrate' }");
+    rsp_return = qdict_get_qdict(rsp, "return");
+    g_assert(qdict_haskey(rsp_return, "postcopy-blocktime"));
+    qobject_unref(rsp);
 }
 
 static void wait_for_migration_complete(QTestState *who)
@@ -235,7 +247,7 @@ static void wait_for_migration_complete(QTestState *who)
         status = qdict_get_str(rsp_return, "status");
         completed = strcmp(status, "completed") == 0;
         g_assert_cmpstr(status, !=,  "failed");
-        QDECREF(rsp);
+        qobject_unref(rsp);
         if (completed) {
             return;
         }
@@ -322,7 +334,7 @@ static void migrate_check_parameter(QTestState *who, const char *parameter,
                              qdict_get_try_int(rsp_return,  parameter, -1));
     g_assert_cmpstr(result, ==, value);
     g_free(result);
-    QDECREF(rsp);
+    qobject_unref(rsp);
 }
 
 static void migrate_set_parameter(QTestState *who, const char *parameter,
@@ -337,7 +349,7 @@ static void migrate_set_parameter(QTestState *who, const char *parameter,
     rsp = qtest_qmp(who, cmd);
     g_free(cmd);
     g_assert(qdict_haskey(rsp, "return"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
     migrate_check_parameter(who, parameter, value);
 }
 
@@ -355,7 +367,7 @@ static void migrate_set_capability(QTestState *who, const char *capability,
     rsp = qtest_qmp(who, cmd);
     g_free(cmd);
     g_assert(qdict_haskey(rsp, "return"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
 }
 
 static void migrate(QTestState *who, const char *uri)
@@ -369,7 +381,7 @@ static void migrate(QTestState *who, const char *uri)
     rsp = qtest_qmp(who, cmd);
     g_free(cmd);
     g_assert(qdict_haskey(rsp, "return"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
 }
 
 static void migrate_start_postcopy(QTestState *who)
@@ -378,7 +390,7 @@ static void migrate_start_postcopy(QTestState *who)
 
     rsp = wait_command(who, "{ 'execute': 'migrate-start-postcopy' }");
     g_assert(qdict_haskey(rsp, "return"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
 }
 
 static void test_migrate_start(QTestState **from, QTestState **to,
@@ -491,7 +503,7 @@ static void deprecated_set_downtime(QTestState *who, const double value)
     rsp = qtest_qmp(who, cmd);
     g_free(cmd);
     g_assert(qdict_haskey(rsp, "return"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
     result_int = value * 1000L;
     expected = g_strdup_printf("%" PRId64, result_int);
     migrate_check_parameter(who, "downtime-limit", expected);
@@ -508,7 +520,7 @@ static void deprecated_set_speed(QTestState *who, const char *value)
     rsp = qtest_qmp(who, cmd);
     g_free(cmd);
     g_assert(qdict_haskey(rsp, "return"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
     migrate_check_parameter(who, "max-bandwidth", value);
 }
 
@@ -533,6 +545,7 @@ static void test_migrate(void)
 
     migrate_set_capability(from, "postcopy-ram", "true");
     migrate_set_capability(to, "postcopy-ram", "true");
+    migrate_set_capability(to, "postcopy-blocktime", "true");
 
     /* We want to pick a speed slow enough that the test completes
      * quickly, but that it doesn't complete precopy even on a slow
@@ -559,6 +572,9 @@ static void test_migrate(void)
     wait_for_serial("dest_serial");
     wait_for_migration_complete(from);
 
+    if (uffd_feature_thread_id) {
+        read_blocktime(to);
+    }
     g_free(uri);
 
     test_migrate_end(from, to, true);
@@ -581,7 +597,7 @@ static void test_baddest(void)
 
         g_assert(!strcmp(status, "setup") || !(strcmp(status, "failed")));
         failed = !strcmp(status, "failed");
-        QDECREF(rsp);
+        qobject_unref(rsp);
     } while (!failed);
 
     /* Is the machine currently running? */
@@ -590,7 +606,7 @@ static void test_baddest(void)
     rsp_return = qdict_get_qdict(rsp, "return");
     g_assert(qdict_haskey(rsp_return, "running"));
     g_assert(qdict_get_bool(rsp_return, "running"));
-    QDECREF(rsp);
+    qobject_unref(rsp);
 
     test_migrate_end(from, to, false);
 }
