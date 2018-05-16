@@ -136,6 +136,10 @@ Section "${PRODUCT} (required)"
     File /r "${BINDIR}\share"
 !endif
 
+    SetOutPath "$INSTDIR\lib\gdk-pixbuf-2.0\2.10.0"
+    FileOpen $0 "loaders.cache" w
+    FileClose $0
+
 !ifdef W64
     SetRegView 64
 !endif
