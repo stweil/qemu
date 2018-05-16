@@ -29,9 +29,6 @@
 #include "qemu/help_option.h"
 #include "cpu.h"
 #include "exec/exec-all.h"
-#if defined(CONFIG_USER_ONLY) && defined(TARGET_X86_64)
-#include "vsyscall.h"
-#endif
 #include "tcg.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
@@ -50,7 +47,7 @@ static envlist_t *envlist;
 static const char *cpu_model;
 static const char *cpu_type;
 unsigned long mmap_min_addr;
-uintptr_t guest_base;
+unsigned long guest_base;
 int have_guest_base;
 
 #define EXCP_DUMP(env, fmt, ...)                                        \
@@ -97,7 +94,7 @@ do {                                                                    \
 #if HOST_LONG_BITS == 64 && TARGET_VIRT_ADDR_SPACE_BITS <= 32
 unsigned long reserved_va = MAX_RESERVED_VA;
 #else
-uintptr_t reserved_va;
+unsigned long reserved_va;
 #endif
 
 static void usage(int exitcode);
@@ -230,10 +227,6 @@ void cpu_loop(CPUX86State *env)
     abi_ulong pc;
     abi_ulong ret;
     target_siginfo_t info;
-#ifdef TARGET_X86_64
-    int syscall_num;
-    uint64_t val;
-#endif
 
     for(;;) {
         cpu_exec_start(cs);
@@ -276,44 +269,6 @@ void cpu_loop(CPUX86State *env)
             } else if (ret != -TARGET_QEMU_ESIGRETURN) {
                 env->regs[R_EAX] = ret;
             }
-            break;
-#endif
-#ifdef TARGET_X86_64
-        case EXCP_VSYSCALL:
-            switch (env->eip) {
-            case TARGET_VSYSCALL_ADDR(__NR_vgettimeofday):
-                syscall_num = __NR_gettimeofday;
-                break;
-            case TARGET_VSYSCALL_ADDR(__NR_vtime):
-#ifdef __NR_time
-                syscall_num = __NR_time;
-#else
-                /* XXX: not yet implemented (arm eabi host) */
-                cpu_abort(cs, "Unimplemented vsyscall vtime");
-#endif
-                break;
-            case TARGET_VSYSCALL_ADDR(__NR_vgetcpu):
-                /* XXX: not yet implemented */
-                cpu_abort(cs, "Unimplemented vsyscall vgetcpu");
-                break;
-            default:
-                cpu_abort(cs,
-                          "Invalid vsyscall to address " TARGET_FMT_lx "\n",
-                          env->eip);
-            }
-            env->regs[R_EAX] = do_syscall(env,
-                                          syscall_num,
-                                          env->regs[R_EDI],
-                                          env->regs[R_ESI],
-                                          env->regs[R_EDX],
-                                          env->regs[10],
-                                          env->regs[8],
-                                          env->regs[9],
-                                          0, 0);
-            /* simulate a ret */
-            get_user_u64(val, env->regs[R_ESP]);
-            env->eip = val;
-            env->regs[R_ESP] += 8;
             break;
 #endif
         case EXCP0B_NOSEG:
@@ -2721,7 +2676,7 @@ void cpu_loop(CPUCRISState *env)
     CPUState *cs = CPU(cris_env_get_cpu(env));
     int trapnr, ret;
     target_siginfo_t info;
-
+    
     while (1) {
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
@@ -2791,7 +2746,7 @@ void cpu_loop(CPUMBState *env)
     CPUState *cs = CPU(mb_env_get_cpu(env));
     int trapnr, ret;
     target_siginfo_t info;
-
+    
     while (1) {
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
@@ -4302,10 +4257,7 @@ static void handle_arg_cpu(const char *arg)
     if (cpu_model == NULL || is_help_option(cpu_model)) {
         /* XXX: implement xxx_cpu_list for targets that still miss it */
 #if defined(cpu_list)
-        cpu_list(stdout, &fprintf); /* deprecated */
-#else
-        /* TODO: add cpu selection for alpha, microblaze, unicore32, s390x. */
-        printf("Target ignores cpu selection\n");
+        cpu_list(stdout, &fprintf);
 #endif
         exit(EXIT_FAILURE);
     }
@@ -4430,7 +4382,7 @@ static const struct qemu_argument arg_table[] = {
     {NULL, NULL, false, NULL, NULL, NULL}
 };
 
-static void QEMU_NORETURN usage(int exitcode)
+static void usage(int exitcode)
 {
     const struct qemu_argument *arginfo;
     int maxarglen;
@@ -4573,7 +4525,7 @@ static int parse_args(int argc, char **argv)
     return optind;
 }
 
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
     struct target_pt_regs regs1, *regs = &regs1;
     struct image_info info1, *info = &info1;
@@ -4757,7 +4709,7 @@ int main(int argc, char **argv)
     g_free(target_environ);
 
     if (qemu_loglevel_mask(CPU_LOG_PAGE)) {
-        qemu_log("guest_base  0x%" PRIxPTR "\n", guest_base);
+        qemu_log("guest_base  0x%lx\n", guest_base);
         log_page_dump();
 
         qemu_log("start_brk   0x" TARGET_ABI_FMT_lx "\n", info->start_brk);
@@ -5006,23 +4958,23 @@ int main(int argc, char **argv)
         env->regs[12] = regs->r12;
         env->regs[13] = regs->r13;
         env->regs[14] = regs->r14;
-        env->regs[15] = regs->r15;
-        env->regs[16] = regs->r16;
-        env->regs[17] = regs->r17;
-        env->regs[18] = regs->r18;
-        env->regs[19] = regs->r19;
-        env->regs[20] = regs->r20;
-        env->regs[21] = regs->r21;
-        env->regs[22] = regs->r22;
-        env->regs[23] = regs->r23;
-        env->regs[24] = regs->r24;
-        env->regs[25] = regs->r25;
-        env->regs[26] = regs->r26;
-        env->regs[27] = regs->r27;
-        env->regs[28] = regs->r28;
-        env->regs[29] = regs->r29;
-        env->regs[30] = regs->r30;
-        env->regs[31] = regs->r31;
+        env->regs[15] = regs->r15;	    
+        env->regs[16] = regs->r16;	    
+        env->regs[17] = regs->r17;	    
+        env->regs[18] = regs->r18;	    
+        env->regs[19] = regs->r19;	    
+        env->regs[20] = regs->r20;	    
+        env->regs[21] = regs->r21;	    
+        env->regs[22] = regs->r22;	    
+        env->regs[23] = regs->r23;	    
+        env->regs[24] = regs->r24;	    
+        env->regs[25] = regs->r25;	    
+        env->regs[26] = regs->r26;	    
+        env->regs[27] = regs->r27;	    
+        env->regs[28] = regs->r28;	    
+        env->regs[29] = regs->r29;	    
+        env->regs[30] = regs->r30;	    
+        env->regs[31] = regs->r31;	    
         env->sregs[SR_PC] = regs->pc;
     }
 #elif defined(TARGET_MIPS)
@@ -5132,7 +5084,7 @@ int main(int argc, char **argv)
 	    env->regs[12] = regs->r12;
 	    env->regs[13] = regs->r13;
 	    env->regs[14] = info->start_stack;
-	    env->regs[15] = regs->acr;
+	    env->regs[15] = regs->acr;	    
 	    env->pc = regs->erp;
     }
 #elif defined(TARGET_S390X)
