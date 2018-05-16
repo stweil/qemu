@@ -243,6 +243,7 @@ Section "Uninstall"
     Delete "$INSTDIR\qemu-system-*.exe"
     Delete "$INSTDIR\qemu-doc.html"
     RMDir /r "$INSTDIR\keymaps"
+    RMDir /r "$INSTDIR\lib"
     RMDir /r "$INSTDIR\share"
     ; Remove generated files
     Delete "$INSTDIR\stderr.txt"
