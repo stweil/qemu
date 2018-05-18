@@ -561,7 +561,7 @@ static void fsl_imx7_class_init(ObjectClass *oc, void *data)
 
     dc->realize = fsl_imx7_realize;
 
-    /* Reason: Uses serial_hds and nd_table in realize() directly */
+    /* Reason: Uses serial_hd and nd_table in realize() directly */
     dc->user_creatable = false;
     dc->desc = "i.MX7 SOC";
 }

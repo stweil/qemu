@@ -101,7 +101,7 @@ static void digic_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
 
     dc->realize = digic_realize;
-    /* Reason: Uses serial_hds in the realize function --> not usable twice */
+    /* Reason: Uses serial_hd in the realize function --> not usable twice */
     dc->user_creatable = false;
 }
 

@@ -442,12 +442,17 @@ static void stcb_init(MachineState *machine)
     stcb = g_malloc0(sizeof(STCBState));
 
     /* Make sure all serial ports are associated with a device. */
-    for (i = 0; i < MAX_SERIAL_PORTS; i++) {
-        if (!serial_hds[i]) {
+    for (i = 0; i < serial_max_hds(); i++) {
+#if 1
+        assert(serial_hd(i));
+#else
+        /* TODO: This code no longer works. Remove or replace. */
+        if (!serial_hd(i)) {
             char label[32];
             snprintf(label, sizeof(label), "serial%d", i);
-            serial_hds[i] = qemu_chr_new(label, "vc:80Cx24C");
+            serial_hd(i) = qemu_chr_new(label, "vc:80Cx24C");
         }
+#endif
     }
 
     /* initialise SOC */
@@ -541,8 +546,8 @@ static void stcb_init(MachineState *machine)
     i8259 = i8259_init(s3c24xx_get_eirq(stcb->soc->gpio, 4));
     isa_bus_irqs(i8259);
     /*isa_dev =*/ isa_create_simple("i8042");
-    serial_isa_init(0, serial_hds[0]);
-    serial_isa_init(1, serial_hds[1]);
+    serial_isa_init(0, serial_hd(0));
+    serial_isa_init(1, serial_hd(1));
 #endif
 }
 

@@ -64,7 +64,7 @@
 #include "hw/pci/pci.h"
 
 #include "chardev/char.h"        /* qemu_chr_fe_printf */
-#include "sysemu/sysemu.h"      /* serial_hds */
+#include "sysemu/sysemu.h"      /* serial_hd */
 #include "qemu/timer.h"         /* QEMU_CLOCK_VIRTUAL */
 
 #include "sysemu/block-backend.h" /* blk_getlength */
@@ -3348,14 +3348,19 @@ static void ar7_serial_init(CPUMIPSState * env)
      * we need it for full hardware emulation.
      */
     unsigned uart_index;
-    if (serial_hds[1] == 0) {
-        serial_hds[1] = qemu_chr_new("serial1", "vc:80Cx24C");
+#if 1
+    assert(serial_hd(1));
+#else
+    if (serial_hd(1) == NULL) {
+        /* TODO: This code no longer works. Remove or replace. */
+        serial_hd(1) = qemu_chr_new("serial1", "vc:80Cx24C");
     }
+#endif
     for (uart_index = 0; uart_index < 2; uart_index++) {
         ar7->serial[uart_index] = serial_mm_init(get_system_memory(),
             uart_base[uart_index], 2,
             AR7_PRIMARY_IRQ(uart_interrupt[uart_index]), io_frequency,
-            serial_hds[uart_index], DEVICE_NATIVE_ENDIAN);
+            serial_hd(uart_index), DEVICE_NATIVE_ENDIAN);
         serial_set_frequency(ar7->serial[uart_index], io_frequency / 16);
     }
 

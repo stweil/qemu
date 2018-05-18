@@ -118,7 +118,7 @@ static void aw_a10_class_init(ObjectClass *oc, void *data)
     DeviceClass *dc = DEVICE_CLASS(oc);
 
     dc->realize = aw_a10_realize;
-    /* Reason: Uses serial_hds and nd_table in realize function */
+    /* Reason: Uses serial_hd and nd_table in realize function */
     dc->user_creatable = false;
 }
 

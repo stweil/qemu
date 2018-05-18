@@ -313,7 +313,7 @@ static void aspeed_soc_class_init(ObjectClass *oc, void *data)
 
     sc->info = (AspeedSoCInfo *) data;
     dc->realize = aspeed_soc_realize;
-    /* Reason: Uses serial_hds and nd_table in realize() directly */
+    /* Reason: Uses serial_hd and nd_table in realize() directly */
     dc->user_creatable = false;
 }
 

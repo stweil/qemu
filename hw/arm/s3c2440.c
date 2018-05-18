@@ -417,9 +417,9 @@ s3c2440_init(int sdram_size)
     s->timers = s3c24xx_timers_init(s, CPU_S3C2440_TIMERS_BASE, 0, 12000000);
 
     /* Serial port controllers */
-    s->uart[0] = s3c24xx_serial_init(s, serial_hds[0], CPU_S3C2440_SERIAL0_BASE, 32);
-    s->uart[1] = s3c24xx_serial_init(s, serial_hds[1], CPU_S3C2440_SERIAL1_BASE, 35);
-    s->uart[2] = s3c24xx_serial_init(s, serial_hds[2], CPU_S3C2440_SERIAL2_BASE, 38);
+    s->uart[0] = s3c24xx_serial_init(s, serial_hd(0), CPU_S3C2440_SERIAL0_BASE, 32);
+    s->uart[1] = s3c24xx_serial_init(s, serial_hd(1), CPU_S3C2440_SERIAL1_BASE, 35);
+    s->uart[2] = s3c24xx_serial_init(s, serial_hd(2), CPU_S3C2440_SERIAL2_BASE, 38);
 
     /* Real time clock */
     s->rtc = s3c24xx_rtc_init(CPU_S3C2440_RTC_BASE);

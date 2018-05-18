@@ -963,12 +963,18 @@ static void tt_init(MachineState *machine)
     /* Allocate storage for board state. */
     s = g_new0(TTState, 1);
 
-    for (i = 0; i < 3; i++) {
-        if (serial_hds[i] == NULL) {
+    for (i = 0; i < serial_max_hds(); i++) {
+#if 1
+        assert(i < 3);
+        assert(serial_hd(i));
+#else
+        /* TODO: This code no longer works. Remove or replace. */
+        if (serial_hd(i) == NULL) {
             char name[32];
             snprintf(name, sizeof(name), "serial%u", i);
-            serial_hds[i] = qemu_chr_new(name, "vc:80Cx24C");
+            serial_hd(i) = qemu_chr_new(name, "vc:80Cx24C");
         }
+#endif
     }
 
     /* Initialise SOC. */
