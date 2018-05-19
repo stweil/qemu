@@ -36,6 +36,8 @@
 
 #define TODO() logout("%s:%u: missing\n", __FILE__, __LINE__)
 
+#define MiB (1024 * 1024)
+
 /*
 Base Address of Special Registers
 Address    Module

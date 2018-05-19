@@ -88,6 +88,9 @@
 #define CONFIG_TITAN
 #endif
 
+#define KiB 1024
+#define MiB (KiB * KiB)
+
 #define MIPS_EXCEPTION_OFFSET   8
 #define NUM_PRIMARY_IRQS        40
 #define NUM_SECONDARY_IRQS      32

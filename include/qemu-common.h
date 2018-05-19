@@ -25,9 +25,6 @@
     "See <https://qemu.org/contribute/report-a-bug> for how to report bugs.\n" \
     "More information on the QEMU project at <https://qemu.org>."
 
-#define KiB     1024
-#define MiB     (KiB * KiB)
-
 /* Trace unassigned memory or i/o accesses. */
 extern bool trace_unassigned;
 

@@ -38,6 +38,8 @@
 
 #define BIOS_FILENAME "able.bin"
 
+#define MiB (1024 * 1024)
+
 #define S3C24XX_DBF(format, ...) (void)0
 
 typedef struct {
