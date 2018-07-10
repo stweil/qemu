@@ -18,7 +18,6 @@
  */
 #include "qemu/osdep.h"
 #include "qemu.h"
-#include "target_signal.h"
 #include "signal-common.h"
 #include "linux-user/trace.h"
 
@@ -204,7 +203,7 @@ give_sigsegv:
 long do_sigreturn(CPUNios2State *env)
 {
     trace_user_do_sigreturn(env, 0);
-    fprintf(stderr, "do_sigreturn: not implemented\n");
+    qemu_log_mask(LOG_UNIMP, "do_sigreturn: not implemented\n");
     return -TARGET_ENOSYS;
 }
 

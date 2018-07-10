@@ -37,7 +37,8 @@
 #
 ##
 { 'command': 'qmp_capabilities',
-  'data': { '*enable': [ 'QMPCapability' ] } }
+  'data': { '*enable': [ 'QMPCapability' ] },
+  'allow-preconfig': true }
 
 ##
 # @QMPCapability:
@@ -45,7 +46,7 @@
 # Enumeration of capabilities to be advertised during initial client
 # connection, used for agreeing on particular QMP extension behaviors.
 #
-# @oob:   QMP ability to support Out-Of-Band requests.
+# @oob:   QMP ability to support out-of-band requests.
 #         (Please refer to qmp-spec.txt for more information on OOB)
 #
 # Since: 2.12
@@ -116,7 +117,8 @@
 #    }
 #
 ##
-{ 'command': 'query-version', 'returns': 'VersionInfo' }
+{ 'command': 'query-version', 'returns': 'VersionInfo',
+  'allow-preconfig': true }
 
 ##
 # @CommandInfo:
@@ -155,7 +157,8 @@
 # Note: This example has been shortened as the real response is too long.
 #
 ##
-{ 'command': 'query-commands', 'returns': ['CommandInfo'] }
+{ 'command': 'query-commands', 'returns': ['CommandInfo'],
+  'allow-preconfig': true }
 
 ##
 # @LostTickPolicy:
@@ -239,7 +242,7 @@
 # <- { "return": { "name": "qemu-name" } }
 #
 ##
-{ 'command': 'query-name', 'returns': 'NameInfo' }
+{ 'command': 'query-name', 'returns': 'NameInfo', 'allow-preconfig': true }
 
 ##
 # @KvmInfo:
@@ -299,7 +302,7 @@
 # <- { "return": { "UUID": "550e8400-e29b-41d4-a716-446655440000" } }
 #
 ##
-{ 'command': 'query-uuid', 'returns': 'UuidInfo' }
+{ 'command': 'query-uuid', 'returns': 'UuidInfo', 'allow-preconfig': true }
 
 ##
 # @EventInfo:
@@ -393,8 +396,7 @@
             'mips': 'CpuInfoMIPS',
             'tricore': 'CpuInfoTricore',
             's390': 'CpuInfoS390',
-            'riscv': 'CpuInfoRISCV',
-            'other': 'CpuInfoOther' } }
+            'riscv': 'CpuInfoRISCV' } }
 
 ##
 # @CpuInfoX86:
@@ -463,16 +465,6 @@
 # Since 2.12
 ##
 { 'struct': 'CpuInfoRISCV', 'data': { 'pc': 'int' } }
-
-##
-# @CpuInfoOther:
-#
-# No additional information is available about the virtual CPU
-#
-# Since: 2.6
-#
-##
-{ 'struct': 'CpuInfoOther', 'data': { } }
 
 ##
 # @CpuS390State:
@@ -558,11 +550,11 @@
 # @props: properties describing to which node/socket/core/thread
 #         virtual CPU belongs to, provided if supported by board
 #
-# @arch: base architecture of the cpu; deprecated since 2.13.0 in favor
+# @arch: base architecture of the cpu; deprecated since 3.0.0 in favor
 #        of @target
 #
 # @target: the QEMU system emulation target, which determines which
-#          additional fields will be listed (since 2.13)
+#          additional fields will be listed (since 3.0)
 #
 # Since: 2.12
 #
@@ -575,38 +567,7 @@
                       'arch'         : 'CpuInfoArch',
                       'target'       : 'SysEmuTarget' },
   'discriminator' : 'target',
-  'data'          : { 'aarch64'      : 'CpuInfoOther',
-                      'alpha'        : 'CpuInfoOther',
-                      'arm'          : 'CpuInfoOther',
-                      'cris'         : 'CpuInfoOther',
-                      'hppa'         : 'CpuInfoOther',
-                      'i386'         : 'CpuInfoOther',
-                      'lm32'         : 'CpuInfoOther',
-                      'm68k'         : 'CpuInfoOther',
-                      'microblaze'   : 'CpuInfoOther',
-                      'microblazeel' : 'CpuInfoOther',
-                      'mips'         : 'CpuInfoOther',
-                      'mips64'       : 'CpuInfoOther',
-                      'mips64el'     : 'CpuInfoOther',
-                      'mipsel'       : 'CpuInfoOther',
-                      'moxie'        : 'CpuInfoOther',
-                      'nios2'        : 'CpuInfoOther',
-                      'or1k'         : 'CpuInfoOther',
-                      'ppc'          : 'CpuInfoOther',
-                      'ppc64'        : 'CpuInfoOther',
-                      'ppcemb'       : 'CpuInfoOther',
-                      'riscv32'      : 'CpuInfoOther',
-                      'riscv64'      : 'CpuInfoOther',
-                      's390x'        : 'CpuInfoS390',
-                      'sh4'          : 'CpuInfoOther',
-                      'sh4eb'        : 'CpuInfoOther',
-                      'sparc'        : 'CpuInfoOther',
-                      'sparc64'      : 'CpuInfoOther',
-                      'tricore'      : 'CpuInfoOther',
-                      'unicore32'    : 'CpuInfoOther',
-                      'x86_64'       : 'CpuInfoOther',
-                      'xtensa'       : 'CpuInfoOther',
-                      'xtensaeb'     : 'CpuInfoOther' } }
+  'data'          : { 's390x'        : 'CpuInfoS390' } }
 
 ##
 # @query-cpus-fast:
@@ -708,7 +669,8 @@
 #    }
 #
 ##
-{ 'command': 'query-iothreads', 'returns': ['IOThreadInfo'] }
+{ 'command': 'query-iothreads', 'returns': ['IOThreadInfo'],
+  'allow-preconfig': true }
 
 ##
 # @BalloonInfo:
@@ -1243,6 +1205,29 @@
 { 'command': 'cont' }
 
 ##
+# @exit-preconfig:
+#
+# Exit from "preconfig" state
+#
+# This command makes QEMU exit the preconfig state and proceed with
+# VM initialization using configuration data provided on the command line
+# and via the QMP monitor during the preconfig state. The command is only
+# available during the preconfig state (i.e. when the --preconfig command
+# line option was in use).
+#
+# Since 3.0
+#
+# Returns: nothing
+#
+# Example:
+#
+# -> { "execute": "exit-preconfig" }
+# <- { "return": {} }
+#
+##
+{ 'command': 'exit-preconfig', 'allow-preconfig': true }
+
+##
 # @system_wakeup:
 #
 # Wakeup guest from suspend.  Does nothing in case the guest isn't suspended.
@@ -1383,7 +1368,8 @@
 ##
 { 'command': 'qom-list',
   'data': { 'path': 'str' },
-  'returns': [ 'ObjectPropertyInfo' ] }
+  'returns': [ 'ObjectPropertyInfo' ],
+  'allow-preconfig': true }
 
 ##
 # @qom-get:
@@ -1419,7 +1405,8 @@
 ##
 { 'command': 'qom-get',
   'data': { 'path': 'str', 'property': 'str' },
-  'returns': 'any' }
+  'returns': 'any',
+  'allow-preconfig': true }
 
 ##
 # @qom-set:
@@ -1436,7 +1423,8 @@
 # Since: 1.2
 ##
 { 'command': 'qom-set',
-  'data': { 'path': 'str', 'property': 'str', 'value': 'any' } }
+  'data': { 'path': 'str', 'property': 'str', 'value': 'any' },
+  'allow-preconfig': true }
 
 ##
 # @change:
@@ -1518,7 +1506,8 @@
 ##
 { 'command': 'qom-list-types',
   'data': { '*implements': 'str', '*abstract': 'bool' },
-  'returns': [ 'ObjectTypeInfo' ] }
+  'returns': [ 'ObjectTypeInfo' ],
+  'allow-preconfig': true }
 
 ##
 # @device-list-properties:
@@ -1528,6 +1517,10 @@
 # @typename: the type name of a device
 #
 # Returns: a list of ObjectPropertyInfo describing a devices properties
+#
+# Note: objects can create properties at runtime, for example to describe
+# links between different devices and/or objects. These properties
+# are not included in the output of this command.
 #
 # Since: 1.2
 ##
@@ -1542,13 +1535,18 @@
 #
 # @typename: the type name of an object
 #
+# Note: objects can create properties at runtime, for example to describe
+# links between different devices and/or objects. These properties
+# are not included in the output of this command.
+#
 # Returns: a list of ObjectPropertyInfo describing object properties
 #
 # Since: 2.12
 ##
 { 'command': 'qom-list-properties',
   'data': { 'typename': 'str'},
-  'returns': [ 'ObjectPropertyInfo' ] }
+  'returns': [ 'ObjectPropertyInfo' ],
+  'allow-preconfig': true }
 
 ##
 # @xen-set-global-dirty-log:
@@ -1679,10 +1677,13 @@
 #
 # @kdump-snappy: kdump-compressed format with snappy-compressed
 #
+# @win-dmp: Windows full crashdump format,
+#           can be used instead of ELF converting (since 2.13)
+#
 # Since: 2.0
 ##
 { 'enum': 'DumpGuestMemoryFormat',
-  'data': [ 'elf', 'kdump-zlib', 'kdump-lzo', 'kdump-snappy' ] }
+  'data': [ 'elf', 'kdump-zlib', 'kdump-lzo', 'kdump-snappy', 'win-dmp' ] }
 
 ##
 # @dump-guest-memory:
@@ -2648,7 +2649,8 @@
 #
 ##
 {'command': 'query-command-line-options', 'data': { '*option': 'str' },
- 'returns': ['CommandLineOptionInfo'] }
+ 'returns': ['CommandLineOptionInfo'],
+ 'allow-preconfig': true }
 
 ##
 # @X86CPURegister32:
@@ -2868,7 +2870,7 @@
 #    }
 #
 ##
-{ 'command': 'query-memdev', 'returns': ['Memdev'] }
+{ 'command': 'query-memdev', 'returns': ['Memdev'], 'allow-preconfig': true }
 
 ##
 # @PCDIMMDeviceInfo:
@@ -3259,7 +3261,8 @@
 #    ]}
 #
 ##
-{ 'command': 'query-hotpluggable-cpus', 'returns': ['HotpluggableCPU'] }
+{ 'command': 'query-hotpluggable-cpus', 'returns': ['HotpluggableCPU'],
+             'allow-preconfig': true }
 
 ##
 # @GuidInfo:
@@ -3451,6 +3454,9 @@
 # only be dropped when the oob capability is enabled.
 #
 # @id: The dropped command's "id" field.
+# FIXME Broken by design.  Events are broadcast to all monitors.  If
+# another monitor's client has a command with the same ID in flight,
+# the event will incorrectly claim that command was dropped.
 #
 # @reason: The reason why the command is dropped.
 #
@@ -3467,19 +3473,15 @@
   'data': { 'id': 'any', 'reason': 'CommandDropReason' } }
 
 ##
-# @x-oob-test:
+# @set-numa-node:
 #
-# Test OOB functionality.  When sending this command with lock=true,
-# it'll try to hang the dispatcher.  When sending it with lock=false,
-# it'll try to notify the locked thread to continue.  Note: it should
-# only be used by QMP test program rather than anything else.
+# Runtime equivalent of '-numa' CLI option, available at
+# preconfigure stage to configure numa mapping before initializing
+# machine.
 #
-# Since: 2.12
-#
-# Example:
-#
-# { "execute": "x-oob-test",
-#   "arguments": { "lock": true } }
+# Since 3.0
 ##
-{ 'command': 'x-oob-test', 'data' : { 'lock': 'bool' },
-  'allow-oob': true }
+{ 'command': 'set-numa-node', 'boxed': true,
+  'data': 'NumaOptions',
+  'allow-preconfig': true
+}

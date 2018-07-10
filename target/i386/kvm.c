@@ -18,7 +18,7 @@
 #include <sys/utsname.h>
 
 #include <linux/kvm.h>
-#include <linux/kvm_para.h>
+#include "standard-headers/asm-x86/kvm_para.h"
 
 #include "qemu-common.h"
 #include "cpu.h"
@@ -40,7 +40,6 @@
 #include "hw/i386/intel_iommu.h"
 #include "hw/i386/x86-iommu.h"
 
-#include "exec/ioport.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
@@ -93,6 +92,7 @@ static bool has_msr_hv_frequencies;
 static bool has_msr_hv_reenlightenment;
 static bool has_msr_xss;
 static bool has_msr_spec_ctrl;
+static bool has_msr_virt_ssbd;
 static bool has_msr_smi_count;
 
 static uint32_t has_architectural_pmu_version;
@@ -366,12 +366,28 @@ uint32_t kvm_arch_get_supported_cpuid(KVMState *s, uint32_t function,
         if (!kvm_irqchip_in_kernel()) {
             ret &= ~CPUID_EXT_X2APIC;
         }
+
+        if (enable_cpu_pm) {
+            int disable_exits = kvm_check_extension(s,
+                                                    KVM_CAP_X86_DISABLE_EXITS);
+
+            if (disable_exits & KVM_X86_DISABLE_EXITS_MWAIT) {
+                ret |= CPUID_EXT_MONITOR;
+            }
+        }
     } else if (function == 6 && reg == R_EAX) {
         ret |= CPUID_6_EAX_ARAT; /* safe to allow because of emulated APIC */
     } else if (function == 7 && index == 0 && reg == R_EBX) {
         if (host_tsx_blacklisted()) {
             ret &= ~(CPUID_7_0_EBX_RTM | CPUID_7_0_EBX_HLE);
         }
+    } else if (function == 0x80000001 && reg == R_ECX) {
+        /*
+         * It's safe to enable TOPOEXT even if it's not returned by
+         * GET_SUPPORTED_CPUID.  Unconditionally enabling TOPOEXT here allows
+         * us to keep CPU models including TOPOEXT runnable on older kernels.
+         */
+        ret |= CPUID_EXT3_TOPOEXT;
     } else if (function == 0x80000001 && reg == R_EDX) {
         /* On Intel, kvm returns cpuid according to the Intel spec,
          * so add missing bits according to the AMD spec:
@@ -386,7 +402,7 @@ uint32_t kvm_arch_get_supported_cpuid(KVMState *s, uint32_t function,
             ret &= ~(1U << KVM_FEATURE_PV_UNHALT);
         }
     } else if (function == KVM_CPUID_FEATURES && reg == R_EDX) {
-        ret |= KVM_HINTS_DEDICATED;
+        ret |= 1U << KVM_HINTS_REALTIME;
         found = 1;
     }
 
@@ -585,7 +601,8 @@ static bool hyperv_enabled(X86CPU *cpu)
             cpu->hyperv_runtime ||
             cpu->hyperv_synic ||
             cpu->hyperv_stimer ||
-            cpu->hyperv_reenlightenment);
+            cpu->hyperv_reenlightenment ||
+            cpu->hyperv_tlbflush);
 }
 
 static int kvm_arch_set_tsc_khz(CPUState *cs)
@@ -823,6 +840,18 @@ int kvm_arch_init_vcpu(CPUState *cs)
         if (cpu->hyperv_vapic) {
             c->eax |= HV_APIC_ACCESS_RECOMMENDED;
         }
+        if (cpu->hyperv_tlbflush) {
+            if (kvm_check_extension(cs->kvm_state,
+                                    KVM_CAP_HYPERV_TLBFLUSH) <= 0) {
+                fprintf(stderr, "Hyper-V TLB flush support "
+                        "(requested by 'hv-tlbflush' cpu flag) "
+                        " is not supported by kernel\n");
+                return -ENOSYS;
+            }
+            c->eax |= HV_REMOTE_TLB_FLUSH_RECOMMENDED;
+            c->eax |= HV_EX_PROCESSOR_MASKS_RECOMMENDED;
+        }
+
         c->ebx = cpu->hyperv_spinlock_attempts;
 
         c = &cpuid_data.entries[cpuid_i++];
@@ -981,9 +1010,32 @@ int kvm_arch_init_vcpu(CPUState *cs)
         c = &cpuid_data.entries[cpuid_i++];
         assert(cpuid_i < 100);
 
-        c->function = i;
-        c->flags = 0;
-        cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
+        switch (i) {
+        case 0x8000001d:
+            /* Query for all AMD cache information leaves */
+            for (j = 0; ; j++) {
+                c->function = i;
+                c->flags = KVM_CPUID_FLAG_SIGNIFCANT_INDEX;
+                c->index = j;
+                cpu_x86_cpuid(env, i, j, &c->eax, &c->ebx, &c->ecx, &c->edx);
+
+                if (c->eax == 0) {
+                    break;
+                }
+                if (cpuid_i == KVM_MAX_CPUID_ENTRIES) {
+                    fprintf(stderr, "cpuid_data is full, no space for "
+                            "cpuid(eax:0x%x,ecx:0x%x)\n", i, j);
+                    abort();
+                }
+                c = &cpuid_data.entries[cpuid_i++];
+            }
+            break;
+        default:
+            c->function = i;
+            c->flags = 0;
+            cpu_x86_cpuid(env, i, 0, &c->eax, &c->ebx, &c->ecx, &c->edx);
+            break;
+        }
     }
 
     /* Call Centaur's CPUID instructions they are supported. */
@@ -1235,6 +1287,9 @@ static int kvm_get_supported_msrs(KVMState *s)
                 case MSR_IA32_SPEC_CTRL:
                     has_msr_spec_ctrl = true;
                     break;
+                case MSR_VIRT_SSBD:
+                    has_msr_virt_ssbd = true;
+                    break;
                 }
             }
         }
@@ -1356,6 +1411,29 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
         smram_machine_done.notify = register_smram_listener;
         qemu_add_machine_init_done_notifier(&smram_machine_done);
     }
+
+    if (enable_cpu_pm) {
+        int disable_exits = kvm_check_extension(s, KVM_CAP_X86_DISABLE_EXITS);
+        int ret;
+
+/* Work around for kernel header with a typo. TODO: fix header and drop. */
+#if defined(KVM_X86_DISABLE_EXITS_HTL) && !defined(KVM_X86_DISABLE_EXITS_HLT)
+#define KVM_X86_DISABLE_EXITS_HLT KVM_X86_DISABLE_EXITS_HTL
+#endif
+        if (disable_exits) {
+            disable_exits &= (KVM_X86_DISABLE_EXITS_MWAIT |
+                              KVM_X86_DISABLE_EXITS_HLT |
+                              KVM_X86_DISABLE_EXITS_PAUSE);
+        }
+
+        ret = kvm_vm_enable_cap(s, KVM_CAP_X86_DISABLE_EXITS, 0,
+                                disable_exits);
+        if (ret < 0) {
+            error_report("kvm: guest stopping CPU not supported: %s",
+                         strerror(-ret));
+        }
+    }
+
     return 0;
 }
 
@@ -1502,7 +1580,7 @@ static int kvm_put_fpu(X86CPU *cpu)
 #define XSAVE_PKRU        672
 
 #define XSAVE_BYTE_OFFSET(word_offset) \
-    ((word_offset) * sizeof(((struct kvm_xsave *)0)->region[0]))
+    ((word_offset) * sizeof_field(struct kvm_xsave, region[0]))
 
 #define ASSERT_OFFSET(word_offset, field) \
     QEMU_BUILD_BUG_ON(XSAVE_BYTE_OFFSET(word_offset) != \
@@ -1723,6 +1801,10 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
     if (has_msr_spec_ctrl) {
         kvm_msr_entry_add(cpu, MSR_IA32_SPEC_CTRL, env->spec_ctrl);
     }
+    if (has_msr_virt_ssbd) {
+        kvm_msr_entry_add(cpu, MSR_VIRT_SSBD, env->virt_ssbd);
+    }
+
 #ifdef TARGET_X86_64
     if (lm_capable_kernel) {
         kvm_msr_entry_add(cpu, MSR_CSTAR, env->cstar);
@@ -2102,8 +2184,9 @@ static int kvm_get_msrs(X86CPU *cpu)
     if (has_msr_spec_ctrl) {
         kvm_msr_entry_add(cpu, MSR_IA32_SPEC_CTRL, 0);
     }
-
-
+    if (has_msr_virt_ssbd) {
+        kvm_msr_entry_add(cpu, MSR_VIRT_SSBD, 0);
+    }
     if (!env->tsc_valid) {
         kvm_msr_entry_add(cpu, MSR_IA32_TSC, 0);
         env->tsc_valid = !runstate_is_running();
@@ -2482,6 +2565,9 @@ static int kvm_get_msrs(X86CPU *cpu)
             break;
         case MSR_IA32_SPEC_CTRL:
             env->spec_ctrl = msrs[i].data;
+            break;
+        case MSR_VIRT_SSBD:
+            env->virt_ssbd = msrs[i].data;
             break;
         case MSR_IA32_RTIT_CTL:
             env->msr_rtit_ctrl = msrs[i].data;

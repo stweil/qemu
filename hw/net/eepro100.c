@@ -41,6 +41,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/units.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
 #include "net/net.h"
@@ -58,8 +59,6 @@
  * frames. The following definition enables this workaround for
  * eepro100, too. */
 #define CONFIG_PAD_RECEIVED_FRAMES
-
-#define KiB 1024
 
 /* Debug EEPRO100 card. */
 #if 0

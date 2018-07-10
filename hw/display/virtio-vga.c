@@ -106,7 +106,7 @@ static void virtio_vga_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
 
     /* init vga compat bits */
     vga->vram_size_mb = 8;
-    vga_common_init(vga, OBJECT(vpci_dev), false);
+    vga_common_init(vga, OBJECT(vpci_dev));
     vga_init(vga, OBJECT(vpci_dev), pci_address_space(&vpci_dev->pci_dev),
              pci_address_space_io(&vpci_dev->pci_dev), true);
     pci_register_bar(&vpci_dev->pci_dev, 0,
@@ -152,7 +152,7 @@ static void virtio_vga_realize(VirtIOPCIProxy *vpci_dev, Error **errp)
     }
 
     /* add stdvga mmio regions */
-    pci_std_vga_mmio_region_init(vga, &vpci_dev->modern_bar,
+    pci_std_vga_mmio_region_init(vga, OBJECT(vvga), &vpci_dev->modern_bar,
                                  vvga->vga_mrs, true);
 
     vga->con = g->scanout[0].con;

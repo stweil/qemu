@@ -302,7 +302,7 @@ static bool zdma_load_descriptor(XlnxZDMA *s, uint64_t addr, void *buf)
         qemu_log_mask(LOG_GUEST_ERROR,
                       "zdma: unaligned descriptor at %" PRIx64,
                       addr);
-        memset(buf, 0xdeadbeef, sizeof(XlnxZDMADescr));
+        memset(buf, 0x0, sizeof(XlnxZDMADescr));
         s->error = true;
         return false;
     }
@@ -707,9 +707,11 @@ static uint64_t zdma_read(void *opaque, hwaddr addr, unsigned size)
     RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
+        gchar *path = object_get_canonical_path(OBJECT(s));
         qemu_log("%s: Decode error: read from %" HWADDR_PRIx "\n",
-                 object_get_canonical_path(OBJECT(s)),
+                 path,
                  addr);
+        g_free(path);
         ARRAY_FIELD_DP32(s->regs, ZDMA_CH_ISR, INV_APB, true);
         zdma_ch_imr_update_irq(s);
         return 0;
@@ -724,9 +726,11 @@ static void zdma_write(void *opaque, hwaddr addr, uint64_t value,
     RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
+        gchar *path = object_get_canonical_path(OBJECT(s));
         qemu_log("%s: Decode error: write to %" HWADDR_PRIx "=%" PRIx64 "\n",
-                 object_get_canonical_path(OBJECT(s)),
+                 path,
                  addr, value);
+        g_free(path);
         ARRAY_FIELD_DP32(s->regs, ZDMA_CH_ISR, INV_APB, true);
         zdma_ch_imr_update_irq(s);
         return;
@@ -783,7 +787,7 @@ static void zdma_init(Object *obj)
     object_property_add_link(obj, "dma", TYPE_MEMORY_REGION,
                              (Object **)&s->dma_mr,
                              qdev_prop_allow_set_link_before_realize,
-                             OBJ_PROP_LINK_UNREF_ON_RELEASE,
+                             OBJ_PROP_LINK_STRONG,
                              &error_abort);
 }
 

@@ -45,6 +45,10 @@ typedef struct BackupBlockJob {
     QLIST_HEAD(, CowRequest) inflight_reqs;
 
     HBitmap *copy_bitmap;
+    bool use_copy_range;
+    int64_t copy_range_size;
+
+    bool serialize_target_writes;
 } BackupBlockJob;
 
 static const BlockJobDriver backup_job_driver;
@@ -86,19 +90,104 @@ static void cow_request_end(CowRequest *req)
     qemu_co_queue_restart_all(&req->wait_queue);
 }
 
+/* Copy range to target with a bounce buffer and return the bytes copied. If
+ * error occured, return a negative error number */
+static int coroutine_fn backup_cow_with_bounce_buffer(BackupBlockJob *job,
+                                                      int64_t start,
+                                                      int64_t end,
+                                                      bool is_write_notifier,
+                                                      bool *error_is_read,
+                                                      void **bounce_buffer)
+{
+    int ret;
+    struct iovec iov;
+    QEMUIOVector qiov;
+    BlockBackend *blk = job->common.blk;
+    int nbytes;
+    int read_flags = is_write_notifier ? BDRV_REQ_NO_SERIALISING : 0;
+    int write_flags = job->serialize_target_writes ? BDRV_REQ_SERIALISING : 0;
+
+    hbitmap_reset(job->copy_bitmap, start / job->cluster_size, 1);
+    nbytes = MIN(job->cluster_size, job->len - start);
+    if (!*bounce_buffer) {
+        *bounce_buffer = blk_blockalign(blk, job->cluster_size);
+    }
+    iov.iov_base = *bounce_buffer;
+    iov.iov_len = nbytes;
+    qemu_iovec_init_external(&qiov, &iov, 1);
+
+    ret = blk_co_preadv(blk, start, qiov.size, &qiov, read_flags);
+    if (ret < 0) {
+        trace_backup_do_cow_read_fail(job, start, ret);
+        if (error_is_read) {
+            *error_is_read = true;
+        }
+        goto fail;
+    }
+
+    if (qemu_iovec_is_zero(&qiov)) {
+        ret = blk_co_pwrite_zeroes(job->target, start,
+                                   qiov.size, write_flags | BDRV_REQ_MAY_UNMAP);
+    } else {
+        ret = blk_co_pwritev(job->target, start,
+                             qiov.size, &qiov, write_flags |
+                             (job->compress ? BDRV_REQ_WRITE_COMPRESSED : 0));
+    }
+    if (ret < 0) {
+        trace_backup_do_cow_write_fail(job, start, ret);
+        if (error_is_read) {
+            *error_is_read = false;
+        }
+        goto fail;
+    }
+
+    return nbytes;
+fail:
+    hbitmap_set(job->copy_bitmap, start / job->cluster_size, 1);
+    return ret;
+
+}
+
+/* Copy range to target and return the bytes copied. If error occured, return a
+ * negative error number. */
+static int coroutine_fn backup_cow_with_offload(BackupBlockJob *job,
+                                                int64_t start,
+                                                int64_t end,
+                                                bool is_write_notifier)
+{
+    int ret;
+    int nr_clusters;
+    BlockBackend *blk = job->common.blk;
+    int nbytes;
+    int read_flags = is_write_notifier ? BDRV_REQ_NO_SERIALISING : 0;
+    int write_flags = job->serialize_target_writes ? BDRV_REQ_SERIALISING : 0;
+
+    assert(QEMU_IS_ALIGNED(job->copy_range_size, job->cluster_size));
+    nbytes = MIN(job->copy_range_size, end - start);
+    nr_clusters = DIV_ROUND_UP(nbytes, job->cluster_size);
+    hbitmap_reset(job->copy_bitmap, start / job->cluster_size,
+                  nr_clusters);
+    ret = blk_co_copy_range(blk, start, job->target, start, nbytes,
+                            read_flags, write_flags);
+    if (ret < 0) {
+        trace_backup_do_cow_copy_range_fail(job, start, ret);
+        hbitmap_set(job->copy_bitmap, start / job->cluster_size,
+                    nr_clusters);
+        return ret;
+    }
+
+    return nbytes;
+}
+
 static int coroutine_fn backup_do_cow(BackupBlockJob *job,
                                       int64_t offset, uint64_t bytes,
                                       bool *error_is_read,
                                       bool is_write_notifier)
 {
-    BlockBackend *blk = job->common.blk;
     CowRequest cow_request;
-    struct iovec iov;
-    QEMUIOVector bounce_qiov;
-    void *bounce_buffer = NULL;
     int ret = 0;
     int64_t start, end; /* bytes */
-    int n; /* bytes */
+    void *bounce_buffer = NULL;
 
     qemu_co_rwlock_rdlock(&job->flush_rwlock);
 
@@ -110,60 +199,38 @@ static int coroutine_fn backup_do_cow(BackupBlockJob *job,
     wait_for_overlapping_requests(job, start, end);
     cow_request_begin(&cow_request, job, start, end);
 
-    for (; start < end; start += job->cluster_size) {
+    while (start < end) {
         if (!hbitmap_get(job->copy_bitmap, start / job->cluster_size)) {
             trace_backup_do_cow_skip(job, start);
+            start += job->cluster_size;
             continue; /* already copied */
         }
-        hbitmap_reset(job->copy_bitmap, start / job->cluster_size, 1);
 
         trace_backup_do_cow_process(job, start);
 
-        n = MIN(job->cluster_size, job->len - start);
-
-        if (!bounce_buffer) {
-            bounce_buffer = blk_blockalign(blk, job->cluster_size);
-        }
-        iov.iov_base = bounce_buffer;
-        iov.iov_len = n;
-        qemu_iovec_init_external(&bounce_qiov, &iov, 1);
-
-        ret = blk_co_preadv(blk, start, bounce_qiov.size, &bounce_qiov,
-                            is_write_notifier ? BDRV_REQ_NO_SERIALISING : 0);
-        if (ret < 0) {
-            trace_backup_do_cow_read_fail(job, start, ret);
-            if (error_is_read) {
-                *error_is_read = true;
+        if (job->use_copy_range) {
+            ret = backup_cow_with_offload(job, start, end, is_write_notifier);
+            if (ret < 0) {
+                job->use_copy_range = false;
             }
-            hbitmap_set(job->copy_bitmap, start / job->cluster_size, 1);
-            goto out;
         }
-
-        if (buffer_is_zero(iov.iov_base, iov.iov_len)) {
-            ret = blk_co_pwrite_zeroes(job->target, start,
-                                       bounce_qiov.size, BDRV_REQ_MAY_UNMAP);
-        } else {
-            ret = blk_co_pwritev(job->target, start,
-                                 bounce_qiov.size, &bounce_qiov,
-                                 job->compress ? BDRV_REQ_WRITE_COMPRESSED : 0);
+        if (!job->use_copy_range) {
+            ret = backup_cow_with_bounce_buffer(job, start, end, is_write_notifier,
+                                                error_is_read, &bounce_buffer);
         }
         if (ret < 0) {
-            trace_backup_do_cow_write_fail(job, start, ret);
-            if (error_is_read) {
-                *error_is_read = false;
-            }
-            hbitmap_set(job->copy_bitmap, start / job->cluster_size, 1);
-            goto out;
+            break;
         }
 
         /* Publish progress, guest I/O counts as progress too.  Note that the
          * offset field is an opaque progress value, it is not a disk offset.
          */
-        job->bytes_read += n;
-        block_job_progress_update(&job->common, n);
+        start += ret;
+        job->bytes_read += ret;
+        job_progress_update(&job->common.job, ret);
+        ret = 0;
     }
 
-out:
     if (bounce_buffer) {
         qemu_vfree(bounce_buffer);
     }
@@ -207,25 +274,25 @@ static void backup_cleanup_sync_bitmap(BackupBlockJob *job, int ret)
     }
 }
 
-static void backup_commit(BlockJob *job)
+static void backup_commit(Job *job)
 {
-    BackupBlockJob *s = container_of(job, BackupBlockJob, common);
+    BackupBlockJob *s = container_of(job, BackupBlockJob, common.job);
     if (s->sync_bitmap) {
         backup_cleanup_sync_bitmap(s, 0);
     }
 }
 
-static void backup_abort(BlockJob *job)
+static void backup_abort(Job *job)
 {
-    BackupBlockJob *s = container_of(job, BackupBlockJob, common);
+    BackupBlockJob *s = container_of(job, BackupBlockJob, common.job);
     if (s->sync_bitmap) {
         backup_cleanup_sync_bitmap(s, -1);
     }
 }
 
-static void backup_clean(BlockJob *job)
+static void backup_clean(Job *job)
 {
-    BackupBlockJob *s = container_of(job, BackupBlockJob, common);
+    BackupBlockJob *s = container_of(job, BackupBlockJob, common.job);
     assert(s->target);
     blk_unref(s->target);
     s->target = NULL;
@@ -317,11 +384,11 @@ typedef struct {
     int ret;
 } BackupCompleteData;
 
-static void backup_complete(BlockJob *job, void *opaque)
+static void backup_complete(Job *job, void *opaque)
 {
     BackupCompleteData *data = opaque;
 
-    block_job_completed(job, data->ret);
+    job_completed(job, data->ret, NULL);
     g_free(data);
 }
 
@@ -329,7 +396,7 @@ static bool coroutine_fn yield_and_check(BackupBlockJob *job)
 {
     uint64_t delay_ns;
 
-    if (block_job_is_cancelled(&job->common)) {
+    if (job_is_cancelled(&job->common.job)) {
         return true;
     }
 
@@ -337,9 +404,9 @@ static bool coroutine_fn yield_and_check(BackupBlockJob *job)
      * return. Without a yield, the VM would not reboot. */
     delay_ns = block_job_ratelimit_get_delay(&job->common, job->bytes_read);
     job->bytes_read = 0;
-    block_job_sleep_ns(&job->common, delay_ns);
+    job_sleep_ns(&job->common.job, delay_ns);
 
-    if (block_job_is_cancelled(&job->common)) {
+    if (job_is_cancelled(&job->common.job)) {
         return true;
     }
 
@@ -354,7 +421,7 @@ static int coroutine_fn backup_run_incremental(BackupBlockJob *job)
     HBitmapIter hbi;
 
     hbitmap_iter_init(&hbi, job->copy_bitmap, 0);
-    while ((cluster = hbitmap_iter_next(&hbi)) != -1) {
+    while ((cluster = hbitmap_iter_next(&hbi, true)) != -1) {
         do {
             if (yield_and_check(job)) {
                 return 0;
@@ -406,8 +473,8 @@ static void backup_incremental_init_copy_bitmap(BackupBlockJob *job)
         bdrv_set_dirty_iter(dbi, next_cluster * job->cluster_size);
     }
 
-    /* TODO block_job_progress_set_remaining() would make more sense */
-    block_job_progress_update(&job->common,
+    /* TODO job_progress_set_remaining() would make more sense */
+    job_progress_update(&job->common.job,
         job->len - hbitmap_count(job->copy_bitmap) * job->cluster_size);
 
     bdrv_dirty_iter_free(dbi);
@@ -425,7 +492,7 @@ static void coroutine_fn backup_run(void *opaque)
     qemu_co_rwlock_init(&job->flush_rwlock);
 
     nb_clusters = DIV_ROUND_UP(job->len, job->cluster_size);
-    block_job_progress_set_remaining(&job->common, job->len);
+    job_progress_set_remaining(&job->common.job, job->len);
 
     job->copy_bitmap = hbitmap_alloc(nb_clusters, 0);
     if (job->sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) {
@@ -441,10 +508,10 @@ static void coroutine_fn backup_run(void *opaque)
     if (job->sync_mode == MIRROR_SYNC_MODE_NONE) {
         /* All bits are set in copy_bitmap to allow any cluster to be copied.
          * This does not actually require them to be copied. */
-        while (!block_job_is_cancelled(&job->common)) {
+        while (!job_is_cancelled(&job->common.job)) {
             /* Yield until the job is cancelled.  We just let our before_write
              * notify callback service CoW requests. */
-            block_job_yield(&job->common);
+            job_yield(&job->common.job);
         }
     } else if (job->sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) {
         ret = backup_run_incremental(job);
@@ -519,16 +586,21 @@ static void coroutine_fn backup_run(void *opaque)
 
     data = g_malloc(sizeof(*data));
     data->ret = ret;
-    block_job_defer_to_main_loop(&job->common, backup_complete, data);
+    job_defer_to_main_loop(&job->common.job, backup_complete, data);
 }
 
 static const BlockJobDriver backup_job_driver = {
-    .instance_size          = sizeof(BackupBlockJob),
-    .job_type               = BLOCK_JOB_TYPE_BACKUP,
-    .start                  = backup_run,
-    .commit                 = backup_commit,
-    .abort                  = backup_abort,
-    .clean                  = backup_clean,
+    .job_driver = {
+        .instance_size          = sizeof(BackupBlockJob),
+        .job_type               = JOB_TYPE_BACKUP,
+        .free                   = block_job_free,
+        .user_resume            = block_job_user_resume,
+        .drain                  = block_job_drain,
+        .start                  = backup_run,
+        .commit                 = backup_commit,
+        .abort                  = backup_abort,
+        .clean                  = backup_clean,
+    },
     .attached_aio_context   = backup_attached_aio_context,
     .drain                  = backup_drain,
 };
@@ -541,7 +613,7 @@ BlockJob *backup_job_create(const char *job_id, BlockDriverState *bs,
                   BlockdevOnError on_target_error,
                   int creation_flags,
                   BlockCompletionFunc *cb, void *opaque,
-                  BlockJobTxn *txn, Error **errp)
+                  JobTxn *txn, Error **errp)
 {
     int64_t len;
     BlockDriverInfo bdi;
@@ -634,6 +706,9 @@ BlockJob *backup_job_create(const char *job_id, BlockDriverState *bs,
                        sync_bitmap : NULL;
     job->compress = compress;
 
+    /* Detect image-fleecing (and similar) schemes */
+    job->serialize_target_writes = bdrv_chain_contains(target, bs);
+
     /* If there is no backing file on the target, we cannot rely on COW if our
      * backup cluster size is smaller than the target cluster size. Even for
      * targets with a backing file, try to avoid COW if possible. */
@@ -660,6 +735,12 @@ BlockJob *backup_job_create(const char *job_id, BlockDriverState *bs,
     } else {
         job->cluster_size = MAX(BACKUP_CLUSTER_SIZE_DEFAULT, bdi.cluster_size);
     }
+    job->use_copy_range = true;
+    job->copy_range_size = MIN_NON_ZERO(blk_get_max_transfer(job->common.blk),
+                                        blk_get_max_transfer(job->target));
+    job->copy_range_size = MAX(job->cluster_size,
+                               QEMU_ALIGN_UP(job->copy_range_size,
+                                             job->cluster_size));
 
     /* Required permissions are already taken with target's blk_new() */
     block_job_add_bdrv(&job->common, "target", target, 0, BLK_PERM_ALL,
@@ -673,8 +754,8 @@ BlockJob *backup_job_create(const char *job_id, BlockDriverState *bs,
         bdrv_reclaim_dirty_bitmap(bs, sync_bitmap, NULL);
     }
     if (job) {
-        backup_clean(&job->common);
-        block_job_early_fail(&job->common);
+        backup_clean(&job->common.job);
+        job_early_fail(&job->common.job);
     }
 
     return NULL;

@@ -20,6 +20,7 @@
 #include "qemu/osdep.h"
 #include "channel.h"
 #include "exec.h"
+#include "migration.h"
 #include "io/channel-command.h"
 #include "trace.h"
 

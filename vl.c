@@ -23,16 +23,13 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/units.h"
 #include "qapi/error.h"
 #include "qemu-version.h"
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
 #include "qemu/uuid.h"
-
-#ifdef CONFIG_SECCOMP
-#include <sys/prctl.h>
 #include "sysemu/seccomp.h"
-#endif
 
 #ifdef CONFIG_SDL
 #if defined(__APPLE__) || defined(main)
@@ -153,6 +150,7 @@ ram_addr_t ram_size;
 const char *mem_path = NULL;
 int mem_prealloc = 0; /* force preallocation of physical target memory */
 bool enable_mlock = false;
+bool enable_cpu_pm = false;
 int nb_nics;
 NICInfo nd_table[MAX_NICS];
 int autostart;
@@ -162,8 +160,8 @@ QEMUClockType rtc_clock;
 int vga_interface_type = VGA_NONE;
 static DisplayOptions dpy;
 int no_frame;
-static int num_serial_hds = 0;
-static Chardev **serial_hds = NULL;
+static int num_serial_hds;
+static Chardev **serial_hds;
 Chardev *parallel_hds[MAX_PARALLEL_PORTS];
 Chardev *virtcon_hds[MAX_VIRTIO_CONSOLES];
 int win2k_install_hack = 0;
@@ -263,35 +261,6 @@ static QemuOptsList qemu_rtc_opts = {
             .type = QEMU_OPT_STRING,
         },{
             .name = "driftfix",
-            .type = QEMU_OPT_STRING,
-        },
-        { /* end of list */ }
-    },
-};
-
-static QemuOptsList qemu_sandbox_opts = {
-    .name = "sandbox",
-    .implied_opt_name = "enable",
-    .head = QTAILQ_HEAD_INITIALIZER(qemu_sandbox_opts.head),
-    .desc = {
-        {
-            .name = "enable",
-            .type = QEMU_OPT_BOOL,
-        },
-        {
-            .name = "obsolete",
-            .type = QEMU_OPT_STRING,
-        },
-        {
-            .name = "elevateprivileges",
-            .type = QEMU_OPT_STRING,
-        },
-        {
-            .name = "spawn",
-            .type = QEMU_OPT_STRING,
-        },
-        {
-            .name = "resourcecontrol",
             .type = QEMU_OPT_STRING,
         },
         { /* end of list */ }
@@ -427,6 +396,22 @@ static QemuOptsList qemu_realtime_opts = {
     .desc = {
         {
             .name = "mlock",
+            .type = QEMU_OPT_BOOL,
+        },
+        { /* end of list */ }
+    },
+};
+
+static QemuOptsList qemu_overcommit_opts = {
+    .name = "overcommit",
+    .head = QTAILQ_HEAD_INITIALIZER(qemu_overcommit_opts.head),
+    .desc = {
+        {
+            .name = "mem-lock",
+            .type = QEMU_OPT_BOOL,
+        },
+        {
+            .name = "cpu-pm",
             .type = QEMU_OPT_BOOL,
         },
         { /* end of list */ }
@@ -604,7 +589,7 @@ static int default_driver_check(void *opaque, QemuOpts *opts, Error **errp)
 /***********************************************************/
 /* QEMU state */
 
-static RunState current_run_state = RUN_STATE_PRELAUNCH;
+static RunState current_run_state = RUN_STATE_PRECONFIG;
 
 /* We use RUN_STATE__MAX but any invalid value will do */
 static RunState vmstop_requested = RUN_STATE__MAX;
@@ -617,6 +602,13 @@ typedef struct {
 
 static const RunStateTransition runstate_transitions_def[] = {
     /*     from      ->     to      */
+    { RUN_STATE_PRECONFIG, RUN_STATE_PRELAUNCH },
+      /* Early switch to inmigrate state to allow  -incoming CLI option work
+       * as it used to. TODO: delay actual switching to inmigrate state to
+       * the point after machine is built and remove this hack.
+       */
+    { RUN_STATE_PRECONFIG, RUN_STATE_INMIGRATE },
+
     { RUN_STATE_DEBUG, RUN_STATE_RUNNING },
     { RUN_STATE_DEBUG, RUN_STATE_FINISH_MIGRATE },
     { RUN_STATE_DEBUG, RUN_STATE_PRELAUNCH },
@@ -1051,88 +1043,6 @@ static int bt_parse(const char *opt)
 
     error_report("bad bluetooth parameter '%s'", opt);
     return 1;
-}
-
-static int parse_sandbox(void *opaque, QemuOpts *opts, Error **errp)
-{
-    if (qemu_opt_get_bool(opts, "enable", false)) {
-#ifdef CONFIG_SECCOMP
-        uint32_t seccomp_opts = QEMU_SECCOMP_SET_DEFAULT
-                | QEMU_SECCOMP_SET_OBSOLETE;
-        const char *value = NULL;
-
-        value = qemu_opt_get(opts, "obsolete");
-        if (value) {
-            if (g_str_equal(value, "allow")) {
-                seccomp_opts &= ~QEMU_SECCOMP_SET_OBSOLETE;
-            } else if (g_str_equal(value, "deny")) {
-                /* this is the default option, this if is here
-                 * to provide a little bit of consistency for
-                 * the command line */
-            } else {
-                error_report("invalid argument for obsolete");
-                return -1;
-            }
-        }
-
-        value = qemu_opt_get(opts, "elevateprivileges");
-        if (value) {
-            if (g_str_equal(value, "deny")) {
-                seccomp_opts |= QEMU_SECCOMP_SET_PRIVILEGED;
-            } else if (g_str_equal(value, "children")) {
-                seccomp_opts |= QEMU_SECCOMP_SET_PRIVILEGED;
-
-                /* calling prctl directly because we're
-                 * not sure if host has CAP_SYS_ADMIN set*/
-                if (prctl(PR_SET_NO_NEW_PRIVS, 1)) {
-                    error_report("failed to set no_new_privs "
-                                 "aborting");
-                    return -1;
-                }
-            } else if (g_str_equal(value, "allow")) {
-                /* default value */
-            } else {
-                error_report("invalid argument for elevateprivileges");
-                return -1;
-            }
-        }
-
-        value = qemu_opt_get(opts, "spawn");
-        if (value) {
-            if (g_str_equal(value, "deny")) {
-                seccomp_opts |= QEMU_SECCOMP_SET_SPAWN;
-            } else if (g_str_equal(value, "allow")) {
-                /* default value */
-            } else {
-                error_report("invalid argument for spawn");
-                return -1;
-            }
-        }
-
-        value = qemu_opt_get(opts, "resourcecontrol");
-        if (value) {
-            if (g_str_equal(value, "deny")) {
-                seccomp_opts |= QEMU_SECCOMP_SET_RESOURCECTL;
-            } else if (g_str_equal(value, "allow")) {
-                /* default value */
-            } else {
-                error_report("invalid argument for resourcecontrol");
-                return -1;
-            }
-        }
-
-        if (seccomp_start(seccomp_opts) < 0) {
-            error_report("failed to install seccomp syscall filter "
-                         "in the kernel");
-            return -1;
-        }
-#else
-        error_report("seccomp support is disabled");
-        return -1;
-#endif
-    }
-
-    return 0;
 }
 
 static int parse_name(void *opaque, QemuOpts *opts, Error **errp)
@@ -1640,6 +1550,7 @@ static pid_t shutdown_pid;
 static int powerdown_requested;
 static int debug_requested;
 static int suspend_requested;
+static bool preconfig_exit_requested = true;
 static WakeupReason wakeup_reason;
 static NotifierList powerdown_notifiers =
     NOTIFIER_LIST_INITIALIZER(powerdown_notifiers);
@@ -1724,6 +1635,11 @@ static int qemu_debug_requested(void)
     return r;
 }
 
+void qemu_exit_preconfig_request(void)
+{
+    preconfig_exit_requested = true;
+}
+
 /*
  * Reset the VM. Issue an event unless @reason is SHUTDOWN_CAUSE_NONE.
  */
@@ -1740,7 +1656,7 @@ void qemu_system_reset(ShutdownCause reason)
     } else {
         qemu_devices_reset();
     }
-    if (reason) {
+    if (reason != SHUTDOWN_CAUSE_SUBSYSTEM_RESET) {
         qapi_event_send_reset(shutdown_caused_by_guest(reason),
                               &error_abort);
     }
@@ -1786,7 +1702,7 @@ void qemu_system_guest_panicked(GuestPanicInformation *info)
 
 void qemu_system_reset_request(ShutdownCause reason)
 {
-    if (no_reboot) {
+    if (no_reboot && reason != SHUTDOWN_CAUSE_SUBSYSTEM_RESET) {
         shutdown_requested = reason;
     } else {
         reset_requested = reason;
@@ -1897,6 +1813,13 @@ static bool main_loop_should_exit(void)
     RunState r;
     ShutdownCause request;
 
+    if (preconfig_exit_requested) {
+        if (runstate_check(RUN_STATE_PRECONFIG)) {
+            runstate_set(RUN_STATE_PRELAUNCH);
+        }
+        preconfig_exit_requested = false;
+        return true;
+    }
     if (qemu_debug_requested()) {
         vm_stop(RUN_STATE_DEBUG);
     }
@@ -1946,7 +1869,7 @@ static void main_loop(void)
 #ifdef CONFIG_PROFILER
     int64_t ti;
 #endif
-    do {
+    while (!main_loop_should_exit()) {
 #ifdef CONFIG_PROFILER
         ti = profile_getclock();
 #endif
@@ -1954,7 +1877,7 @@ static void main_loop(void)
 #ifdef CONFIG_PROFILER
         dev_time += profile_getclock() - ti;
 #endif
-    } while (!main_loop_should_exit());
+    }
 }
 
 static void version(void)
@@ -2701,8 +2624,9 @@ static gint machine_class_cmp(gconstpointer a, gconstpointer b)
             if (mc->alias) {
                 printf("%-20s %s (alias of %s)\n", mc->alias, mc->desc, mc->name);
             }
-            printf("%-20s %s%s\n", mc->name, mc->desc,
-                   mc->is_default ? " (default)" : "");
+            printf("%-20s %s%s%s\n", mc->name, mc->desc,
+                   mc->is_default ? " (default)" : "",
+                   mc->deprecation_reason ? " (deprecated)" : "");
         }
     }
 
@@ -2931,8 +2855,8 @@ static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
         if (g_ascii_isdigit(mem_str[strlen(mem_str) - 1])) {
             uint64_t overflow_check = sz;
 
-            sz <<= 20;
-            if ((sz >> 20) != overflow_check) {
+            sz *= MiB;
+            if (sz / MiB != overflow_check) {
                 error_report("too large 'size' option value");
                 exit(EXIT_FAILURE);
             }
@@ -3105,7 +3029,6 @@ int main(int argc, char **argv)
     qemu_add_opts(&qemu_mem_opts);
     qemu_add_opts(&qemu_smp_opts);
     qemu_add_opts(&qemu_boot_opts);
-    qemu_add_opts(&qemu_sandbox_opts);
     qemu_add_opts(&qemu_add_fd_opts);
     qemu_add_opts(&qemu_object_opts);
     qemu_add_opts(&qemu_tpmdev_opts);
@@ -3120,6 +3043,7 @@ int main(int argc, char **argv)
 
     runstate_init();
     postcopy_infrastructure_init();
+    monitor_init_globals();
 
     if (qcrypto_init(&err) < 0) {
         error_reportf_err(err, "cannot initialize crypto: ");
@@ -3713,11 +3637,15 @@ int main(int argc, char **argv)
                     exit(1);
                 }
                 break;
+            case QEMU_OPTION_preconfig:
+                preconfig_exit_requested = false;
+                break;
             case QEMU_OPTION_enable_kvm:
                 olist = qemu_find_opts("machine");
                 qemu_opts_parse_noisily(olist, "accel=kvm", false);
                 break;
             case QEMU_OPTION_enable_hax:
+                warn_report("Option is deprecated, use '-accel hax' instead");
                 olist = qemu_find_opts("machine");
                 qemu_opts_parse_noisily(olist, "accel=hax", false);
                 break;
@@ -3875,6 +3803,7 @@ int main(int argc, char **argv)
                 /* Clock options no longer exist.  Keep this option for
                  * backward compatibility.
                  */
+                warn_report("This option is ignored and will be removed soon");
                 break;
             case QEMU_OPTION_startdate:
                 warn_report("This option is deprecated, use '-rtc base=' instead.");
@@ -4006,11 +3935,17 @@ int main(int argc, char **argv)
                 qtest_log = optarg;
                 break;
             case QEMU_OPTION_sandbox:
+#ifdef CONFIG_SECCOMP
                 opts = qemu_opts_parse_noisily(qemu_find_opts("sandbox"),
                                                optarg, true);
                 if (!opts) {
                     exit(1);
                 }
+#else
+                error_report("-sandbox support is not enabled "
+                             "in this QEMU binary");
+                exit(1);
+#endif
                 break;
             case QEMU_OPTION_add_fd:
 #ifndef _WIN32
@@ -4038,7 +3973,20 @@ int main(int argc, char **argv)
                 if (!opts) {
                     exit(1);
                 }
-                enable_mlock = qemu_opt_get_bool(opts, "mlock", true);
+                /* Don't override the -overcommit option if set */
+                enable_mlock = enable_mlock ||
+                    qemu_opt_get_bool(opts, "mlock", true);
+                break;
+            case QEMU_OPTION_overcommit:
+                opts = qemu_opts_parse_noisily(qemu_find_opts("overcommit"),
+                                               optarg, false);
+                if (!opts) {
+                    exit(1);
+                }
+                /* Don't override the -realtime option if set */
+                enable_mlock = enable_mlock ||
+                    qemu_opt_get_bool(opts, "mem-lock", false);
+                enable_cpu_pm = qemu_opt_get_bool(opts, "cpu-pm", false);
                 break;
             case QEMU_OPTION_msg:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("msg"), optarg,
@@ -4060,6 +4008,10 @@ int main(int argc, char **argv)
                     exit(1);
                 }
                 break;
+            case QEMU_OPTION_nodefconfig:
+            case QEMU_OPTION_nouserconfig:
+                /* Nothing to be parsed here. Especially, do not error out below. */
+                break;
             default:
                 if (os_parse_cmd_args(popt->index, optarg)) {
                     error_report("Option not supported in this build");
@@ -4075,6 +4027,12 @@ int main(int argc, char **argv)
     loc_set_none();
 
     replay_configure(icount_opts);
+
+    if (incoming && !preconfig_exit_requested) {
+        error_report("'preconfig' and 'incoming' options are "
+                     "mutually exclusive");
+        exit(EXIT_FAILURE);
+    }
 
     machine_class = select_machine();
 
@@ -4093,10 +4051,12 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+#ifdef CONFIG_SECCOMP
     if (qemu_opts_foreach(qemu_find_opts("sandbox"),
                           parse_sandbox, NULL, NULL)) {
         exit(1);
     }
+#endif
 
     if (qemu_opts_foreach(qemu_find_opts("name"),
                           parse_name, NULL, NULL)) {
@@ -4256,6 +4216,12 @@ int main(int argc, char **argv)
     }
 
     if (is_daemonized()) {
+        if (!preconfig_exit_requested) {
+            error_report("'preconfig' and 'daemonize' options are "
+                         "mutually exclusive");
+            exit(EXIT_FAILURE);
+        }
+
         /* According to documentation and historically, -nographic redirects
          * serial port, parallel port and monitor to stdio, which does not work
          * with -daemonize.  We can redirect these to null instead, but since
@@ -4378,6 +4344,11 @@ int main(int argc, char **argv)
     }
 
     configure_accelerator(current_machine);
+
+    if (!qtest_enabled() && machine_class->deprecation_reason) {
+        error_report("Machine type '%s' is deprecated: %s",
+                     machine_class->name, machine_class->deprecation_reason);
+    }
 
     /*
      * Register all the global properties, including accel properties,
@@ -4535,12 +4506,6 @@ int main(int argc, char **argv)
     default_drive(default_floppy, snapshot, IF_FLOPPY, 0, FD_OPTS);
     default_drive(default_sdcard, snapshot, IF_SD, 0, SD_OPTS);
 
-    /*
-     * Note: qtest_enabled() (which is used in monitor_qapi_event_init())
-     * depends on configure_accelerator() above.
-     */
-    monitor_init_globals();
-
     if (qemu_opts_foreach(qemu_find_opts("mon"),
                           mon_init_func, NULL, NULL)) {
         exit(1);
@@ -4593,6 +4558,10 @@ int main(int argc, char **argv)
     }
     parse_numa_opts(current_machine);
 
+    /* do monitor/qmp handling at preconfig state if requested */
+    main_loop();
+
+    /* from here on runstate is RUN_STATE_PRELAUNCH */
     machine_run_board_init(current_machine);
 
     realtime_init();
@@ -4728,6 +4697,7 @@ int main(int argc, char **argv)
     /* No more vcpu or device emulation activity beyond this point */
     vm_shutdown();
 
+    job_cancel_sync_all();
     bdrv_close_all();
 
     res_free();

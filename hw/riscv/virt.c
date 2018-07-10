@@ -19,6 +19,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/units.h"
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
@@ -84,7 +85,7 @@ static hwaddr load_initrd(const char *filename, uint64_t mem_size,
      * halfway into RAM, and for boards with 256MB of RAM or more we put
      * the initrd at 128MB.
      */
-    *start = kernel_entry + MIN(mem_size / 2, 128 * 1024 * 1024);
+    *start = kernel_entry + MIN(mem_size / 2, 128 * MiB);
 
     size = load_ramdisk(filename, *start, mem_size - *start);
     if (size == -1) {
@@ -379,11 +380,11 @@ static void riscv_virt_board_init(MachineState *machine)
     for (i = 0; i < VIRTIO_COUNT; i++) {
         sysbus_create_simple("virtio-mmio",
             memmap[VIRT_VIRTIO].base + i * memmap[VIRT_VIRTIO].size,
-            SIFIVE_PLIC(s->plic)->irqs[VIRTIO_IRQ + i]);
+            qdev_get_gpio_in(DEVICE(s->plic), VIRTIO_IRQ + i));
     }
 
     serial_mm_init(system_memory, memmap[VIRT_UART0].base,
-        0, SIFIVE_PLIC(s->plic)->irqs[UART0_IRQ], 399193,
+        0, qdev_get_gpio_in(DEVICE(s->plic), UART0_IRQ), 399193,
         serial_hd(0), DEVICE_LITTLE_ENDIAN);
 }
 

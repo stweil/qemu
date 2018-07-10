@@ -121,6 +121,11 @@ struct MigrationState
      */
     QemuMutex qemu_file_lock;
 
+    /*
+     * Used to allow urgent requests to override rate limiting.
+     */
+    QemuSemaphore rate_limit_sem;
+
     /* bytes already send at the beggining of current interation */
     uint64_t iteration_initial_bytes;
     /* time at the start of current iteration */
@@ -212,6 +217,13 @@ struct MigrationState
     /* Needed by postcopy-pause state */
     QemuSemaphore postcopy_pause_sem;
     QemuSemaphore postcopy_pause_rp_sem;
+    /*
+     * Whether we abort the migration if decompression errors are
+     * detected at the destination. It is left at false for qemu
+     * older than 3.0, since only newer qemu sends streams that
+     * do not trigger spurious decompression errors.
+     */
+    bool decompress_error_check;
 };
 
 void migrate_set_state(int *state, int old_state, int new_state);
@@ -276,5 +288,11 @@ void migrate_send_rp_resume_ack(MigrationIncomingState *mis, uint32_t value);
 
 void dirty_bitmap_mig_before_vm_start(void);
 void init_dirty_bitmap_incoming_migration(void);
+
+#define qemu_ram_foreach_block \
+  #warning "Use qemu_ram_foreach_block_migratable in migration code"
+
+void migration_make_urgent_request(void);
+void migration_consume_urgent_request(void);
 
 #endif

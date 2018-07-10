@@ -406,6 +406,8 @@ enum {
     QEMU_IFLA_BR_PAD,
     QEMU_IFLA_BR_VLAN_STATS_ENABLED,
     QEMU_IFLA_BR_MCAST_STATS_ENABLED,
+    QEMU_IFLA_BR_MCAST_IGMP_VERSION,
+    QEMU_IFLA_BR_MCAST_MLD_VERSION,
     QEMU___IFLA_BR_MAX,
 };
 
@@ -454,6 +456,12 @@ enum {
     QEMU_IFLA_GSO_MAX_SIZE,
     QEMU_IFLA_PAD,
     QEMU_IFLA_XDP,
+    QEMU_IFLA_EVENT,
+    QEMU_IFLA_NEW_NETNSID,
+    QEMU_IFLA_IF_NETNSID,
+    QEMU_IFLA_CARRIER_UP_COUNT,
+    QEMU_IFLA_CARRIER_DOWN_COUNT,
+    QEMU_IFLA_NEW_IFINDEX,
     QEMU___IFLA_MAX
 };
 
@@ -485,6 +493,12 @@ enum {
     QEMU_IFLA_BRPORT_FLUSH,
     QEMU_IFLA_BRPORT_MULTICAST_ROUTER,
     QEMU_IFLA_BRPORT_PAD,
+    QEMU_IFLA_BRPORT_MCAST_FLOOD,
+    QEMU_IFLA_BRPORT_MCAST_TO_UCAST,
+    QEMU_IFLA_BRPORT_VLAN_TUNNEL,
+    QEMU_IFLA_BRPORT_BCAST_FLOOD,
+    QEMU_IFLA_BRPORT_GROUP_FWD_MASK,
+    QEMU_IFLA_BRPORT_NEIGH_SUPPRESS,
     QEMU___IFLA_BRPORT_MAX
 };
 
@@ -515,6 +529,15 @@ enum {
     QEMU_IFLA_INET6_TOKEN,
     QEMU_IFLA_INET6_ADDR_GEN_MODE,
     QEMU___IFLA_INET6_MAX
+};
+
+enum {
+    QEMU_IFLA_XDP_UNSPEC,
+    QEMU_IFLA_XDP_FD,
+    QEMU_IFLA_XDP_ATTACHED,
+    QEMU_IFLA_XDP_FLAGS,
+    QEMU_IFLA_XDP_PROG_ID,
+    QEMU___IFLA_XDP_MAX,
 };
 
 typedef abi_long (*TargetFdDataFunc)(void *, size_t);
@@ -882,11 +905,6 @@ static inline abi_long get_errno(abi_long ret)
         return -host_to_target_errno(errno);
     else
         return ret;
-}
-
-static inline int is_error(abi_long ret)
-{
-    return (abi_ulong)ret >= (abi_ulong)(-4096);
 }
 
 const char *target_strerror(int err)
@@ -1826,6 +1844,7 @@ static inline abi_long host_to_target_cmsg(struct target_msghdr *target_msgh,
         /* Payload types which need a different size of payload on
          * the target must adjust tgt_len here.
          */
+        tgt_len = len;
         switch (cmsg->cmsg_level) {
         case SOL_SOCKET:
             switch (cmsg->cmsg_type) {
@@ -1835,8 +1854,8 @@ static inline abi_long host_to_target_cmsg(struct target_msghdr *target_msgh,
             default:
                 break;
             }
+            break;
         default:
-            tgt_len = len;
             break;
         }
 
@@ -2183,6 +2202,10 @@ static abi_long host_to_target_data_bridge_nlattr(struct nlattr *nlattr,
     case QEMU_IFLA_BR_NF_CALL_IPTABLES:
     case QEMU_IFLA_BR_NF_CALL_IP6TABLES:
     case QEMU_IFLA_BR_NF_CALL_ARPTABLES:
+    case QEMU_IFLA_BR_VLAN_STATS_ENABLED:
+    case QEMU_IFLA_BR_MCAST_STATS_ENABLED:
+    case QEMU_IFLA_BR_MCAST_IGMP_VERSION:
+    case QEMU_IFLA_BR_MCAST_MLD_VERSION:
         break;
     /* uint16_t */
     case QEMU_IFLA_BR_PRIORITY:
@@ -2254,6 +2277,11 @@ static abi_long host_to_target_slave_data_bridge_nlattr(struct nlattr *nlattr,
     case QEMU_IFLA_BRPORT_TOPOLOGY_CHANGE_ACK:
     case QEMU_IFLA_BRPORT_CONFIG_PENDING:
     case QEMU_IFLA_BRPORT_MULTICAST_ROUTER:
+    case QEMU_IFLA_BRPORT_MCAST_FLOOD:
+    case QEMU_IFLA_BRPORT_MCAST_TO_UCAST:
+    case QEMU_IFLA_BRPORT_VLAN_TUNNEL:
+    case QEMU_IFLA_BRPORT_BCAST_FLOOD:
+    case QEMU_IFLA_BRPORT_NEIGH_SUPPRESS:
         break;
     /* uint16_t */
     case QEMU_IFLA_BRPORT_PRIORITY:
@@ -2261,6 +2289,7 @@ static abi_long host_to_target_slave_data_bridge_nlattr(struct nlattr *nlattr,
     case QEMU_IFLA_BRPORT_DESIGNATED_COST:
     case QEMU_IFLA_BRPORT_ID:
     case QEMU_IFLA_BRPORT_NO:
+    case QEMU_IFLA_BRPORT_GROUP_FWD_MASK:
         u16 = NLA_DATA(nlattr);
         *u16 = tswap16(*u16);
         break;
@@ -2435,6 +2464,27 @@ static abi_long host_to_target_data_spec_nlattr(struct nlattr *nlattr,
     return 0;
 }
 
+static abi_long host_to_target_data_xdp_nlattr(struct nlattr *nlattr,
+                                               void *context)
+{
+    uint32_t *u32;
+
+    switch (nlattr->nla_type) {
+    /* uint8_t */
+    case QEMU_IFLA_XDP_ATTACHED:
+        break;
+    /* uint32_t */
+    case QEMU_IFLA_XDP_PROG_ID:
+        u32 = NLA_DATA(nlattr);
+        *u32 = tswap32(*u32);
+        break;
+    default:
+        gemu_log("Unknown host XDP type: %d\n", nlattr->nla_type);
+        break;
+    }
+    return 0;
+}
+
 static abi_long host_to_target_data_link_rtattr(struct rtattr *rtattr)
 {
     uint32_t *u32;
@@ -2473,6 +2523,8 @@ static abi_long host_to_target_data_link_rtattr(struct rtattr *rtattr)
     case QEMU_IFLA_NUM_VF:
     case QEMU_IFLA_GSO_MAX_SEGS:
     case QEMU_IFLA_GSO_MAX_SIZE:
+    case QEMU_IFLA_CARRIER_UP_COUNT:
+    case QEMU_IFLA_CARRIER_DOWN_COUNT:
         u32 = RTA_DATA(rtattr);
         *u32 = tswap32(*u32);
         break;
@@ -2560,6 +2612,10 @@ static abi_long host_to_target_data_link_rtattr(struct rtattr *rtattr)
         return host_to_target_for_each_nlattr(RTA_DATA(rtattr), rtattr->rta_len,
                                               NULL,
                                              host_to_target_data_spec_nlattr);
+    case QEMU_IFLA_XDP:
+        return host_to_target_for_each_nlattr(RTA_DATA(rtattr), rtattr->rta_len,
+                                              NULL,
+                                                host_to_target_data_xdp_nlattr);
     default:
         gemu_log("Unknown host QEMU_IFLA type: %d\n", rtattr->rta_type);
         break;
@@ -2964,6 +3020,8 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
         case IPV6_V6ONLY:
         case IPV6_RECVPKTINFO:
         case IPV6_UNICAST_HOPS:
+        case IPV6_MULTICAST_HOPS:
+        case IPV6_MULTICAST_LOOP:
         case IPV6_RECVERR:
         case IPV6_RECVHOPLIMIT:
         case IPV6_2292HOPLIMIT:
@@ -7964,10 +8022,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         }
 
         cpu_list_unlock();
-#ifdef TARGET_GPROF
-        _mcleanup();
-#endif
-        gdb_exit(cpu_env, arg1);
+        preexit_cleanup(cpu_env, arg1);
         _exit(arg1);
         ret = 0; /* avoid warning */
         break;
@@ -10073,10 +10128,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #ifdef __NR_exit_group
         /* new thread calls */
     case TARGET_NR_exit_group:
-#ifdef TARGET_GPROF
-        _mcleanup();
-#endif
-        gdb_exit(cpu_env, arg1);
+        preexit_cleanup(cpu_env, arg1);
         ret = get_errno(exit_group(arg1));
         break;
 #endif
@@ -10097,7 +10149,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
             if (!is_error(ret)) {
                 /* Overwrite the native machine name with whatever is being
                    emulated. */
-                strcpy (buf->machine, cpu_to_uname_machine(cpu_env));
+                g_strlcpy(buf->machine, cpu_to_uname_machine(cpu_env),
+                          sizeof(buf->machine));
                 /* Allow the user to override the reported release.  */
                 if (qemu_uname_release && *qemu_uname_release) {
                     g_strlcpy(buf->release, qemu_uname_release,
@@ -12704,7 +12757,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 
     default:
     unimplemented:
-        gemu_log("qemu: Unsupported syscall: %d\n", num);
+        qemu_log_mask(LOG_UNIMP, "Unsupported syscall: %d\n", num);
 #if defined(TARGET_NR_setxattr) || defined(TARGET_NR_get_thread_area) || defined(TARGET_NR_getdomainname) || defined(TARGET_NR_set_robust_list)
     unimplemented_nowarn:
 #endif

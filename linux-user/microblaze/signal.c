@@ -18,7 +18,6 @@
  */
 #include "qemu/osdep.h"
 #include "qemu.h"
-#include "target_signal.h"
 #include "signal-common.h"
 #include "linux-user/trace.h"
 
@@ -201,7 +200,7 @@ void setup_rt_frame(int sig, struct target_sigaction *ka,
                     target_siginfo_t *info,
                     target_sigset_t *set, CPUMBState *env)
 {
-    fprintf(stderr, "Microblaze setup_rt_frame: not implemented\n");
+    qemu_log_mask(LOG_UNIMP, "setup_rt_frame: not implemented\n");
 }
 
 long do_sigreturn(CPUMBState *env)
@@ -241,6 +240,6 @@ badframe:
 long do_rt_sigreturn(CPUMBState *env)
 {
     trace_user_do_rt_sigreturn(env, 0);
-    fprintf(stderr, "Microblaze do_rt_sigreturn: not implemented\n");
+    qemu_log_mask(LOG_UNIMP, "do_rt_sigreturn: not implemented\n");
     return -TARGET_ENOSYS;
 }
