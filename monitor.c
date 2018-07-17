@@ -4186,6 +4186,7 @@ static void monitor_qmp_bh_dispatcher(void *data)
     } else {
         assert(req_obj->err);
         rsp = qmp_error_response(req_obj->err);
+        req_obj->err = NULL;
         monitor_qmp_respond(req_obj->mon, rsp, NULL);
         qobject_unref(rsp);
     }
@@ -4223,7 +4224,7 @@ static void handle_qmp_command(JSONMessageParser *parser, GQueue *tokens)
         qdict_del(qdict, "id");
     } /* else will fail qmp_dispatch() */
 
-    if (trace_event_get_state_backends(TRACE_HANDLE_QMP_COMMAND)) {
+    if (req && trace_event_get_state_backends(TRACE_HANDLE_QMP_COMMAND)) {
         QString *req_json = qobject_to_json(req);
         trace_handle_qmp_command(mon, qstring_get_str(req_json));
         qobject_unref(req_json);
