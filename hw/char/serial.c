@@ -482,8 +482,8 @@ static uint64_t serial_ioport_read(void *opaque, hwaddr addr, unsigned size)
     SerialState *s = opaque;
     uint32_t ret;
 
-    addr &= 7;
     assert(addr < 8);
+    addr &= 7;
 
   //~ fprintf(stderr, "%s(%p,0x%08x)\n", __func__, opaque, addr);
 
