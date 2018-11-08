@@ -28,11 +28,25 @@
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
 
-static void QEMU_NORETURN
-raise_exception(CPUARMState *env, uint32_t excp,
-                uint32_t syndrome, uint32_t target_el)
+QEMU_NORETURN
+void raise_exception(CPUARMState *env, uint32_t excp,
+                     uint32_t syndrome, uint32_t target_el)
 {
     CPUState *cs = CPU(arm_env_get_cpu(env));
+
+    if ((env->cp15.hcr_el2 & HCR_TGE) &&
+        target_el == 1 && !arm_is_secure(env)) {
+        /*
+         * Redirect NS EL1 exceptions to NS EL2. These are reported with
+         * their original syndrome register value, with the exception of
+         * SIMD/FP access traps, which are reported as uncategorized
+         * (see DDI0478C.a D1.10.4)
+         */
+        target_el = 2;
+        if (syn_get_ec(syndrome) == EC_ADVSIMDFPACCESSTRAP) {
+            syndrome = syn_uncategorized();
+        }
+    }
 
     assert(!excp_is_internal(excp));
     cs->exception_index = excp;
@@ -224,6 +238,25 @@ void arm_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
 }
 
 #endif /* !defined(CONFIG_USER_ONLY) */
+
+void HELPER(v8m_stackcheck)(CPUARMState *env, uint32_t newvalue)
+{
+    /*
+     * Perform the v8M stack limit check for SP updates from translated code,
+     * raising an exception if the limit is breached.
+     */
+    if (newvalue < v7m_sp_limit(env)) {
+        CPUState *cs = CPU(arm_env_get_cpu(env));
+
+        /*
+         * Stack limit exceptions are a rare case, so rather than syncing
+         * PC/condbits before the call, we use cpu_restore_state() to
+         * get them right before raising the exception.
+         */
+        cpu_restore_state(cs, GETPC(), true);
+        raise_exception(env, EXCP_STKOF, 0, 1);
+    }
+}
 
 uint32_t HELPER(add_setq)(CPUARMState *env, uint32_t a, uint32_t b)
 {
@@ -599,6 +632,14 @@ static void msr_mrs_banked_exc_checks(CPUARMState *env, uint32_t tgtmode,
      */
     int curmode = env->uncached_cpsr & CPSR_M;
 
+    if (regno == 17) {
+        /* ELR_Hyp: a special case because access from tgtmode is OK */
+        if (curmode != ARM_CPU_MODE_HYP && curmode != ARM_CPU_MODE_MON) {
+            goto undef;
+        }
+        return;
+    }
+
     if (curmode == tgtmode) {
         goto undef;
     }
@@ -626,17 +667,9 @@ static void msr_mrs_banked_exc_checks(CPUARMState *env, uint32_t tgtmode,
     }
 
     if (tgtmode == ARM_CPU_MODE_HYP) {
-        switch (regno) {
-        case 17: /* ELR_Hyp */
-            if (curmode != ARM_CPU_MODE_HYP && curmode != ARM_CPU_MODE_MON) {
-                goto undef;
-            }
-            break;
-        default:
-            if (curmode != ARM_CPU_MODE_MON) {
-                goto undef;
-            }
-            break;
+        /* SPSR_Hyp, r13_hyp: accessible from Monitor mode only */
+        if (curmode != ARM_CPU_MODE_MON) {
+            goto undef;
         }
     }
 
@@ -1070,6 +1103,11 @@ void HELPER(exception_return)(CPUARMState *env)
                       "AArch64 EL%d PC 0x%" PRIx64 "\n",
                       cur_el, new_el, env->pc);
     }
+    /*
+     * Note that cur_el can never be 0.  If new_el is 0, then
+     * el0_a64 is return_to_aa64, else el0_a64 is ignored.
+     */
+    aarch64_sve_change_el(env, cur_el, new_el, return_to_aa64);
 
     qemu_mutex_lock_iothread();
     arm_call_el_change_hook(arm_env_get_cpu(env));

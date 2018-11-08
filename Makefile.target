@@ -36,17 +36,6 @@ endif
 PROGS=$(QEMU_PROG) $(QEMU_PROGW)
 STPFILES=
 
-ifeq ($(CONFIG_RUBY),y)
-ifndef CONFIG_WIN32
-ifneq ($(wildcard /usr/lib/ruby/1.8/i486-linux/ruby.h),)
-CPPFLAGS += -I/usr/lib/ruby/1.8/i486-linux -DCONFIG_RUBY
-LIBS += -lruby1.8
-QEMU_RUBY := qemu.so
-PROGS += $(QEMU_RUBY)
-endif
-endif # !CONFIG_WIN32
-endif # CONFIG_RUBY
-
 # Makefile Tests
 ifdef CONFIG_USER_ONLY
 include $(SRC_PATH)/tests/tcg/Makefile.include
@@ -163,11 +152,6 @@ ifeq ($(TARGET_NAME), sparc64)
 obj-y += hw/sparc64/
 else
 obj-y += hw/$(TARGET_BASE_ARCH)/
-endif
-
-ifdef QEMU_RUBY
-$(QEMU_RUBY): $(OBJS) libqemu.a
-	$(CC) -shared $(VL_LDFLAGS) -o $(QEMU_RUBY) $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(VL_LIBS)
 endif
 
 GENERATED_FILES += hmp-commands.h hmp-commands-info.h

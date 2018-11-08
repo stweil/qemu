@@ -103,6 +103,29 @@ struct IOMMUNotifier {
 };
 typedef struct IOMMUNotifier IOMMUNotifier;
 
+/* RAM is pre-allocated and passed into qemu_ram_alloc_from_ptr */
+#define RAM_PREALLOC   (1 << 0)
+
+/* RAM is mmap-ed with MAP_SHARED */
+#define RAM_SHARED     (1 << 1)
+
+/* Only a portion of RAM (used_length) is actually used, and migrated.
+ * This used_length size can change across reboots.
+ */
+#define RAM_RESIZEABLE (1 << 2)
+
+/* UFFDIO_ZEROPAGE is available on this RAMBlock to atomically
+ * zero the page and wake waiting processes.
+ * (Set during postcopy)
+ */
+#define RAM_UF_ZEROPAGE (1 << 3)
+
+/* RAM can be migrated */
+#define RAM_MIGRATABLE (1 << 4)
+
+/* RAM is a persistent kind memory */
+#define RAM_PMEM (1 << 5)
+
 static inline void iommu_notifier_init(IOMMUNotifier *n, IOMMUNotify fn,
                                        IOMMUNotifierFlag flags,
                                        hwaddr start, hwaddr end,
@@ -141,15 +164,6 @@ struct MemoryRegionOps {
                                     uint64_t data,
                                     unsigned size,
                                     MemTxAttrs attrs);
-    /* Instruction execution pre-callback:
-     * @addr is the address of the access relative to the @mr.
-     * @size is the size of the area returned by the callback.
-     * @offset is the location of the pointer inside @mr.
-     *
-     * Returns a pointer to a location which contains guest code.
-     */
-    void *(*request_ptr)(void *opaque, hwaddr addr, unsigned *size,
-                         unsigned *offset);
 
     enum device_endian endianness;
     /* Guest-visible constraints: */
@@ -187,11 +201,6 @@ struct MemoryRegionOps {
          */
         bool unaligned;
     } impl;
-
-    /* If .read and .write are not present, old_mmio may be used for
-     * backwards compatibility with old mmio registration
-     */
-    const MemoryRegionMmio old_mmio;
 };
 
 enum IOMMUMemoryRegionAttr {
@@ -410,9 +419,9 @@ struct MemoryListener {
                         bool match_data, uint64_t data, EventNotifier *e);
     void (*eventfd_del)(MemoryListener *listener, MemoryRegionSection *section,
                         bool match_data, uint64_t data, EventNotifier *e);
-    void (*coalesced_mmio_add)(MemoryListener *listener, MemoryRegionSection *section,
+    void (*coalesced_io_add)(MemoryListener *listener, MemoryRegionSection *section,
                                hwaddr addr, hwaddr len);
-    void (*coalesced_mmio_del)(MemoryListener *listener, MemoryRegionSection *section,
+    void (*coalesced_io_del)(MemoryListener *listener, MemoryRegionSection *section,
                                hwaddr addr, hwaddr len);
     /* Lower = earlier (during add), later (during del) */
     unsigned priority;
@@ -619,7 +628,8 @@ void memory_region_init_resizeable_ram(MemoryRegion *mr,
                                                        uint64_t length,
                                                        void *host),
                                        Error **errp);
-#ifdef __linux__
+#ifdef CONFIG_POSIX
+
 /**
  * memory_region_init_ram_from_file:  Initialize RAM memory region with a
  *                                    mmap-ed backend.
@@ -631,7 +641,10 @@ void memory_region_init_resizeable_ram(MemoryRegion *mr,
  * @size: size of the region.
  * @align: alignment of the region base address; if 0, the default alignment
  *         (getpagesize()) will be used.
- * @share: %true if memory must be mmaped with the MAP_SHARED flag
+ * @ram_flags: Memory region features:
+ *             - RAM_SHARED: memory must be mmaped with the MAP_SHARED flag
+ *             - RAM_PMEM: the memory is persistent memory
+ *             Other bits are ignored now.
  * @path: the path in which to allocate the RAM.
  * @errp: pointer to Error*, to store an error if it happens.
  *
@@ -643,7 +656,7 @@ void memory_region_init_ram_from_file(MemoryRegion *mr,
                                       const char *name,
                                       uint64_t size,
                                       uint64_t align,
-                                      bool share,
+                                      uint32_t ram_flags,
                                       const char *path,
                                       Error **errp);
 
@@ -922,7 +935,7 @@ uint64_t memory_region_size(MemoryRegion *mr);
 /**
  * memory_region_is_ram: check whether a memory region is random access
  *
- * Returns %true is a memory region is random access.
+ * Returns %true if a memory region is random access.
  *
  * @mr: the memory region being queried
  */
@@ -934,7 +947,7 @@ static inline bool memory_region_is_ram(MemoryRegion *mr)
 /**
  * memory_region_is_ram_device: check whether a memory region is a ram device
  *
- * Returns %true is a memory region is a device backed ram region
+ * Returns %true if a memory region is a device backed ram region
  *
  * @mr: the memory region being queried
  */
@@ -1148,7 +1161,7 @@ uint8_t memory_region_get_dirty_log_mask(MemoryRegion *mr);
 /**
  * memory_region_is_rom: check whether a memory region is ROM
  *
- * Returns %true is a memory region is read-only memory.
+ * Returns %true if a memory region is read-only memory.
  *
  * @mr: the memory region being queried
  */
@@ -1666,32 +1679,6 @@ void memory_global_dirty_log_stop(void);
 
 void mtree_info(fprintf_function mon_printf, void *f, bool flatview,
                 bool dispatch_tree, bool owner);
-
-/**
- * memory_region_request_mmio_ptr: request a pointer to an mmio
- * MemoryRegion. If it is possible map a RAM MemoryRegion with this pointer.
- * When the device wants to invalidate the pointer it will call
- * memory_region_invalidate_mmio_ptr.
- *
- * @mr: #MemoryRegion to check
- * @addr: address within that region
- *
- * Returns true on success, false otherwise.
- */
-bool memory_region_request_mmio_ptr(MemoryRegion *mr, hwaddr addr);
-
-/**
- * memory_region_invalidate_mmio_ptr: invalidate the pointer to an mmio
- * previously requested.
- * In the end that means that if something wants to execute from this area it
- * will need to request the pointer again.
- *
- * @mr: #MemoryRegion associated to the pointer.
- * @offset: offset within the memory region
- * @size: size of that area.
- */
-void memory_region_invalidate_mmio_ptr(MemoryRegion *mr, hwaddr offset,
-                                       unsigned size);
 
 /**
  * memory_region_dispatch_read: perform a read directly to the specified

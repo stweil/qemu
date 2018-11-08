@@ -266,22 +266,41 @@ int bdrv_can_set_read_only(BlockDriverState *bs, bool read_only,
     return 0;
 }
 
-/* TODO Remove (deprecated since 2.11)
- * Block drivers are not supposed to automatically change bs->read_only.
- * Instead, they should just check whether they can provide what the user
- * explicitly requested and error out if read-write is requested, but they can
- * only provide read-only access. */
-int bdrv_set_read_only(BlockDriverState *bs, bool read_only, Error **errp)
+/*
+ * Called by a driver that can only provide a read-only image.
+ *
+ * Returns 0 if the node is already read-only or it could switch the node to
+ * read-only because BDRV_O_AUTO_RDONLY is set.
+ *
+ * Returns -EACCES if the node is read-write and BDRV_O_AUTO_RDONLY is not set
+ * or bdrv_can_set_read_only() forbids making the node read-only. If @errmsg
+ * is not NULL, it is used as the error message for the Error object.
+ */
+int bdrv_apply_auto_read_only(BlockDriverState *bs, const char *errmsg,
+                              Error **errp)
 {
     int ret = 0;
 
-    ret = bdrv_can_set_read_only(bs, read_only, false, errp);
-    if (ret < 0) {
-        return ret;
+    if (!(bs->open_flags & BDRV_O_RDWR)) {
+        return 0;
+    }
+    if (!(bs->open_flags & BDRV_O_AUTO_RDONLY)) {
+        goto fail;
     }
 
-    bs->read_only = read_only;
+    ret = bdrv_can_set_read_only(bs, true, false, NULL);
+    if (ret < 0) {
+        goto fail;
+    }
+
+    bs->read_only = true;
+    bs->open_flags &= ~BDRV_O_RDWR;
+
     return 0;
+
+fail:
+    error_setg(errp, "%s", errmsg ?: "Image is read-only");
+    return -EACCES;
 }
 
 void bdrv_get_full_backing_filename_from_filename(const char *backed,
@@ -764,6 +783,31 @@ static void bdrv_join_options(BlockDriverState *bs, QDict *options,
     }
 }
 
+static BlockdevDetectZeroesOptions bdrv_parse_detect_zeroes(QemuOpts *opts,
+                                                            int open_flags,
+                                                            Error **errp)
+{
+    Error *local_err = NULL;
+    char *value = qemu_opt_get_del(opts, "detect-zeroes");
+    BlockdevDetectZeroesOptions detect_zeroes =
+        qapi_enum_parse(&BlockdevDetectZeroesOptions_lookup, value,
+                        BLOCKDEV_DETECT_ZEROES_OPTIONS_OFF, &local_err);
+    g_free(value);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        return detect_zeroes;
+    }
+
+    if (detect_zeroes == BLOCKDEV_DETECT_ZEROES_OPTIONS_UNMAP &&
+        !(open_flags & BDRV_O_UNMAP))
+    {
+        error_setg(errp, "setting detect-zeroes to unmap is not allowed "
+                   "without setting discard operation to unmap");
+    }
+
+    return detect_zeroes;
+}
+
 /**
  * Set open flags for a given discard mode
  *
@@ -898,6 +942,7 @@ static void bdrv_inherited_options(int *child_flags, QDict *child_options,
 
     /* Inherit the read-only option from the parent if it's not set */
     qdict_copy_default(child_options, parent_options, BDRV_OPT_READ_ONLY);
+    qdict_copy_default(child_options, parent_options, BDRV_OPT_AUTO_READ_ONLY);
 
     /* Our block drivers take care to send flushes and respect unmap policy,
      * so we can default to enable both on lower layers regardless of the
@@ -1021,6 +1066,7 @@ static void bdrv_backing_options(int *child_flags, QDict *child_options,
 
     /* backing files always opened read-only */
     qdict_set_default_str(child_options, BDRV_OPT_READ_ONLY, "on");
+    qdict_set_default_str(child_options, BDRV_OPT_AUTO_READ_ONLY, "off");
     flags &= ~BDRV_O_COPY_ON_READ;
 
     /* snapshot=on is handled on the top layer */
@@ -1094,22 +1140,26 @@ static void update_flags_from_options(int *flags, QemuOpts *opts)
     *flags &= ~BDRV_O_CACHE_MASK;
 
     assert(qemu_opt_find(opts, BDRV_OPT_CACHE_NO_FLUSH));
-    if (qemu_opt_get_bool(opts, BDRV_OPT_CACHE_NO_FLUSH, false)) {
+    if (qemu_opt_get_bool_del(opts, BDRV_OPT_CACHE_NO_FLUSH, false)) {
         *flags |= BDRV_O_NO_FLUSH;
     }
 
     assert(qemu_opt_find(opts, BDRV_OPT_CACHE_DIRECT));
-    if (qemu_opt_get_bool(opts, BDRV_OPT_CACHE_DIRECT, false)) {
+    if (qemu_opt_get_bool_del(opts, BDRV_OPT_CACHE_DIRECT, false)) {
         *flags |= BDRV_O_NOCACHE;
     }
 
     *flags &= ~BDRV_O_RDWR;
 
     assert(qemu_opt_find(opts, BDRV_OPT_READ_ONLY));
-    if (!qemu_opt_get_bool(opts, BDRV_OPT_READ_ONLY, false)) {
+    if (!qemu_opt_get_bool_del(opts, BDRV_OPT_READ_ONLY, false)) {
         *flags |= BDRV_O_RDWR;
     }
 
+    assert(qemu_opt_find(opts, BDRV_OPT_AUTO_READ_ONLY));
+    if (qemu_opt_get_bool_del(opts, BDRV_OPT_AUTO_READ_ONLY, false)) {
+        *flags |= BDRV_O_AUTO_RDONLY;
+    }
 }
 
 static void update_options_from_flags(QDict *options, int flags)
@@ -1123,6 +1173,10 @@ static void update_options_from_flags(QDict *options, int flags)
     }
     if (!qdict_haskey(options, BDRV_OPT_READ_ONLY)) {
         qdict_put_bool(options, BDRV_OPT_READ_ONLY, !(flags & BDRV_O_RDWR));
+    }
+    if (!qdict_haskey(options, BDRV_OPT_AUTO_READ_ONLY)) {
+        qdict_put_bool(options, BDRV_OPT_AUTO_READ_ONLY,
+                       flags & BDRV_O_AUTO_RDONLY);
     }
 }
 
@@ -1297,12 +1351,17 @@ QemuOptsList bdrv_runtime_opts = {
             .help = "Node is opened in read-only mode",
         },
         {
+            .name = BDRV_OPT_AUTO_READ_ONLY,
+            .type = QEMU_OPT_BOOL,
+            .help = "Node can become read-only if opening read-write fails",
+        },
+        {
             .name = "detect-zeroes",
             .type = QEMU_OPT_STRING,
             .help = "try to optimize zero writes (off, on, unmap)",
         },
         {
-            .name = "discard",
+            .name = BDRV_OPT_DISCARD,
             .type = QEMU_OPT_STRING,
             .help = "discard operation (ignore/off, unmap/on)",
         },
@@ -1328,7 +1387,6 @@ static int bdrv_open_common(BlockDriverState *bs, BlockBackend *file,
     const char *driver_name = NULL;
     const char *node_name = NULL;
     const char *discard;
-    const char *detect_zeroes;
     QemuOpts *opts;
     BlockDriver *drv;
     Error *local_err = NULL;
@@ -1408,7 +1466,7 @@ static int bdrv_open_common(BlockDriverState *bs, BlockBackend *file,
         }
     }
 
-    discard = qemu_opt_get(opts, "discard");
+    discard = qemu_opt_get(opts, BDRV_OPT_DISCARD);
     if (discard != NULL) {
         if (bdrv_parse_discard_flags(discard, &bs->open_flags) != 0) {
             error_setg(errp, "Invalid discard option");
@@ -1417,29 +1475,12 @@ static int bdrv_open_common(BlockDriverState *bs, BlockBackend *file,
         }
     }
 
-    detect_zeroes = qemu_opt_get(opts, "detect-zeroes");
-    if (detect_zeroes) {
-        BlockdevDetectZeroesOptions value =
-            qapi_enum_parse(&BlockdevDetectZeroesOptions_lookup,
-                            detect_zeroes,
-                            BLOCKDEV_DETECT_ZEROES_OPTIONS_OFF,
-                            &local_err);
-        if (local_err) {
-            error_propagate(errp, local_err);
-            ret = -EINVAL;
-            goto fail_opts;
-        }
-
-        if (value == BLOCKDEV_DETECT_ZEROES_OPTIONS_UNMAP &&
-            !(bs->open_flags & BDRV_O_UNMAP))
-        {
-            error_setg(errp, "setting detect-zeroes to unmap is not allowed "
-                             "without setting discard operation to unmap");
-            ret = -EINVAL;
-            goto fail_opts;
-        }
-
-        bs->detect_zeroes = value;
+    bs->detect_zeroes =
+        bdrv_parse_detect_zeroes(opts, bs->open_flags, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        ret = -EINVAL;
+        goto fail_opts;
     }
 
     if (filename != NULL) {
@@ -1479,11 +1520,6 @@ QDict *parse_json_filename(const char *filename, Error **errp)
 
     options_obj = qobject_from_json(filename, errp);
     if (!options_obj) {
-        /* Work around qobject_from_json() lossage TODO fix that */
-        if (errp && !*errp) {
-            error_setg(errp, "Could not parse the JSON options");
-            return NULL;
-        }
         error_prepend(errp, "Could not parse the JSON options: ");
         return NULL;
     }
@@ -2478,6 +2514,8 @@ BlockDriverState *bdrv_open_blockdev_ref(BlockdevRef *ref, Error **errp)
         qdict_set_default_str(qdict, BDRV_OPT_CACHE_DIRECT, "off");
         qdict_set_default_str(qdict, BDRV_OPT_CACHE_NO_FLUSH, "off");
         qdict_set_default_str(qdict, BDRV_OPT_READ_ONLY, "off");
+        qdict_set_default_str(qdict, BDRV_OPT_AUTO_READ_ONLY, "off");
+
     }
 
     bs = bdrv_open_inherit(NULL, reference, qdict, 0, NULL, NULL, errp);
@@ -2585,6 +2623,7 @@ static BlockDriverState *bdrv_open_inherit(const char *filename,
     BlockBackend *file = NULL;
     BlockDriverState *bs;
     BlockDriver *drv = NULL;
+    BdrvChild *child;
     const char *drvname;
     const char *backing;
     Error *local_err = NULL;
@@ -2768,6 +2807,18 @@ static BlockDriverState *bdrv_open_inherit(const char *filename,
         }
     }
 
+    /* Remove all children options and references
+     * from bs->options and bs->explicit_options */
+    QLIST_FOREACH(child, &bs->children, next) {
+        char *child_key_dot;
+        child_key_dot = g_strdup_printf("%s.", child->name);
+        qdict_extract_subqdict(bs->explicit_options, NULL, child_key_dot);
+        qdict_extract_subqdict(bs->options, NULL, child_key_dot);
+        qdict_del(bs->explicit_options, child->name);
+        qdict_del(bs->options, child->name);
+        g_free(child_key_dot);
+    }
+
     bdrv_refresh_filename(bs);
 
     /* Check if any unknown options were used */
@@ -2788,6 +2839,7 @@ static BlockDriverState *bdrv_open_inherit(const char *filename,
     bdrv_parent_cb_change_media(bs, true);
 
     qobject_unref(options);
+    options = NULL;
 
     /* For snapshot=on, create a temporary qcow2 overlay. bs points to the
      * temporary snapshot afterwards. */
@@ -2977,6 +3029,7 @@ static BlockReopenQueue *bdrv_reopen_queue_child(BlockReopenQueue *bs_queue,
         }
 
         child_key_dot = g_strdup_printf("%s.", child->name);
+        qdict_extract_subqdict(explicit_options, NULL, child_key_dot);
         qdict_extract_subqdict(options, &new_child_options, child_key_dot);
         g_free(child_key_dot);
 
@@ -3040,12 +3093,13 @@ int bdrv_reopen_multiple(AioContext *ctx, BlockReopenQueue *bs_queue, Error **er
 
 cleanup:
     QSIMPLEQ_FOREACH_SAFE(bs_entry, bs_queue, entry, next) {
-        if (ret && bs_entry->prepared) {
-            bdrv_reopen_abort(&bs_entry->state);
-        } else if (ret) {
+        if (ret) {
+            if (bs_entry->prepared) {
+                bdrv_reopen_abort(&bs_entry->state);
+            }
             qobject_unref(bs_entry->state.explicit_options);
+            qobject_unref(bs_entry->state.options);
         }
-        qobject_unref(bs_entry->state.options);
         g_free(bs_entry);
     }
     g_free(bs_queue);
@@ -3145,12 +3199,18 @@ int bdrv_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueue *queue,
     Error *local_err = NULL;
     BlockDriver *drv;
     QemuOpts *opts;
-    const char *value;
+    QDict *orig_reopen_opts;
+    char *discard = NULL;
     bool read_only;
 
     assert(reopen_state != NULL);
     assert(reopen_state->bs->drv != NULL);
     drv = reopen_state->bs->drv;
+
+    /* This function and each driver's bdrv_reopen_prepare() remove
+     * entries from reopen_state->options as they are processed, so
+     * we need to make a copy of the original QDict. */
+    orig_reopen_opts = qdict_clone_shallow(reopen_state->options);
 
     /* Process generic block layer options */
     opts = qemu_opts_create(&bdrv_runtime_opts, NULL, 0, &error_abort);
@@ -3163,17 +3223,27 @@ int bdrv_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueue *queue,
 
     update_flags_from_options(&reopen_state->flags, opts);
 
-    /* node-name and driver must be unchanged. Put them back into the QDict, so
-     * that they are checked at the end of this function. */
-    value = qemu_opt_get(opts, "node-name");
-    if (value) {
-        qdict_put_str(reopen_state->options, "node-name", value);
+    discard = qemu_opt_get_del(opts, BDRV_OPT_DISCARD);
+    if (discard != NULL) {
+        if (bdrv_parse_discard_flags(discard, &reopen_state->flags) != 0) {
+            error_setg(errp, "Invalid discard option");
+            ret = -EINVAL;
+            goto error;
+        }
     }
 
-    value = qemu_opt_get(opts, "driver");
-    if (value) {
-        qdict_put_str(reopen_state->options, "driver", value);
+    reopen_state->detect_zeroes =
+        bdrv_parse_detect_zeroes(opts, reopen_state->flags, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        ret = -EINVAL;
+        goto error;
     }
+
+    /* All other options (including node-name and driver) must be unchanged.
+     * Put them back into the QDict, so that they are checked at the end
+     * of this function. */
+    qemu_opts_to_qdict(opts, reopen_state->options);
 
     /* If we are to stay read-only, do not allow permission change
      * to r/w. Attempting to set to r/w may fail if either BDRV_O_ALLOW_RDWR is
@@ -3226,6 +3296,24 @@ int bdrv_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueue *queue,
             QObject *new = entry->value;
             QObject *old = qdict_get(reopen_state->bs->options, entry->key);
 
+            /* Allow child references (child_name=node_name) as long as they
+             * point to the current child (i.e. everything stays the same). */
+            if (qobject_type(new) == QTYPE_QSTRING) {
+                BdrvChild *child;
+                QLIST_FOREACH(child, &reopen_state->bs->children, next) {
+                    if (!strcmp(child->name, entry->key)) {
+                        break;
+                    }
+                }
+
+                if (child) {
+                    const char *str = qobject_get_try_str(new);
+                    if (!strcmp(child->bs->node_name, str)) {
+                        continue; /* Found child with this name, skip option */
+                    }
+                }
+            }
+
             /*
              * TODO: When using -drive to specify blockdev options, all values
              * will be strings; however, when using -blockdev, blockdev-add or
@@ -3258,8 +3346,14 @@ int bdrv_reopen_prepare(BDRVReopenState *reopen_state, BlockReopenQueue *queue,
 
     ret = 0;
 
+    /* Restore the original reopen_state->options QDict */
+    qobject_unref(reopen_state->options);
+    reopen_state->options = qobject_ref(orig_reopen_opts);
+
 error:
     qemu_opts_del(opts);
+    qobject_unref(orig_reopen_opts);
+    g_free(discard);
     return ret;
 }
 
@@ -3272,6 +3366,7 @@ void bdrv_reopen_commit(BDRVReopenState *reopen_state)
 {
     BlockDriver *drv;
     BlockDriverState *bs;
+    BdrvChild *child;
     bool old_can_write, new_can_write;
 
     assert(reopen_state != NULL);
@@ -3289,10 +3384,20 @@ void bdrv_reopen_commit(BDRVReopenState *reopen_state)
 
     /* set BDS specific flags now */
     qobject_unref(bs->explicit_options);
+    qobject_unref(bs->options);
 
     bs->explicit_options   = reopen_state->explicit_options;
+    bs->options            = reopen_state->options;
     bs->open_flags         = reopen_state->flags;
     bs->read_only = !(reopen_state->flags & BDRV_O_RDWR);
+    bs->detect_zeroes      = reopen_state->detect_zeroes;
+
+    /* Remove child references from bs->options and bs->explicit_options.
+     * Child options were already removed in bdrv_reopen_queue_child() */
+    QLIST_FOREACH(child, &bs->children, next) {
+        qdict_del(bs->explicit_options, child->name);
+        qdict_del(bs->options, child->name);
+    }
 
     bdrv_refresh_limits(bs, NULL);
 
@@ -3331,8 +3436,6 @@ void bdrv_reopen_abort(BDRVReopenState *reopen_state)
         drv->bdrv_reopen_abort(reopen_state);
     }
 
-    qobject_unref(reopen_state->explicit_options);
-
     bdrv_abort_perm_update(reopen_state->bs);
 }
 
@@ -3350,7 +3453,9 @@ static void bdrv_close(BlockDriverState *bs)
     bdrv_drain(bs); /* in case flush left pending I/O */
 
     if (bs->drv) {
-        bs->drv->bdrv_close(bs);
+        if (bs->drv->bdrv_close) {
+            bs->drv->bdrv_close(bs);
+        }
         bs->drv = NULL;
     }
 
@@ -4335,6 +4440,7 @@ static void coroutine_fn bdrv_co_invalidate_cache(BlockDriverState *bs,
     uint64_t perm, shared_perm;
     Error *local_err = NULL;
     int ret;
+    BdrvDirtyBitmap *bm;
 
     if (!bs->drv)  {
         return;
@@ -4382,6 +4488,12 @@ static void coroutine_fn bdrv_co_invalidate_cache(BlockDriverState *bs,
             error_propagate(errp, local_err);
             return;
         }
+    }
+
+    for (bm = bdrv_dirty_bitmap_next(bs, NULL); bm;
+         bm = bdrv_dirty_bitmap_next(bs, bm))
+    {
+        bdrv_dirty_bitmap_set_migration(bm, false);
     }
 
     ret = refresh_total_sectors(bs, bs->total_sectors);
@@ -4497,10 +4609,6 @@ static int bdrv_inactivate_recurse(BlockDriverState *bs,
             return ret;
         }
     }
-
-    /* At this point persistent bitmaps should be already stored by the format
-     * driver */
-    bdrv_release_persistent_dirty_bitmaps(bs);
 
     return 0;
 }
@@ -4629,9 +4737,9 @@ bool bdrv_op_is_blocked(BlockDriverState *bs, BlockOpType op, Error **errp)
     assert((int) op >= 0 && op < BLOCK_OP_TYPE_MAX);
     if (!QLIST_EMPTY(&bs->op_blockers[op])) {
         blocker = QLIST_FIRST(&bs->op_blockers[op]);
-        error_propagate(errp, error_copy(blocker->reason));
-        error_prepend(errp, "Node '%s' is busy: ",
-                      bdrv_get_device_or_node_name(bs));
+        error_propagate_prepend(errp, error_copy(blocker->reason),
+                                "Node '%s' is busy: ",
+                                bdrv_get_device_or_node_name(bs));
         return true;
     }
     return false;
@@ -4735,9 +4843,6 @@ void bdrv_img_create(const char *filename, const char *fmt,
     if (options) {
         qemu_opts_do_parse(opts, options, NULL, &local_err);
         if (local_err) {
-            error_report_err(local_err);
-            local_err = NULL;
-            error_setg(errp, "Invalid options for file format '%s'", fmt);
             goto out;
         }
     }
@@ -4864,11 +4969,6 @@ out:
 AioContext *bdrv_get_aio_context(BlockDriverState *bs)
 {
     return bs ? bs->aio_context : qemu_get_aio_context();
-}
-
-AioWait *bdrv_get_aio_wait(BlockDriverState *bs)
-{
-    return bs ? &bs->wait : NULL;
 }
 
 void bdrv_coroutine_enter(BlockDriverState *bs, Coroutine *co)
@@ -5124,26 +5224,12 @@ static bool append_open_options(QDict *d, BlockDriverState *bs)
 {
     const QDictEntry *entry;
     QemuOptDesc *desc;
-    BdrvChild *child;
     bool found_any = false;
-    const char *p;
 
     for (entry = qdict_first(bs->options); entry;
          entry = qdict_next(bs->options, entry))
     {
-        /* Exclude options for children */
-        QLIST_FOREACH(child, &bs->children, next) {
-            if (strstart(qdict_entry_key(entry), child->name, &p)
-                && (!*p || *p == '.'))
-            {
-                break;
-            }
-        }
-        if (child) {
-            continue;
-        }
-
-        /* And exclude all non-driver-specific options */
+        /* Exclude all non-driver-specific options */
         for (desc = bdrv_runtime_opts.desc; desc->name; desc++) {
             if (!strcmp(qdict_entry_key(entry), desc->name)) {
                 break;

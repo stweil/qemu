@@ -527,9 +527,22 @@ static int raw_open_common(BlockDriverState *bs, QDict *options,
 
     s->fd = -1;
     fd = qemu_open(filename, s->open_flags, 0644);
-    if (fd < 0) {
-        ret = -errno;
-        error_setg_errno(errp, errno, "Could not open '%s'", filename);
+    ret = fd < 0 ? -errno : 0;
+
+    if (ret == -EACCES || ret == -EROFS) {
+        /* Try to degrade to read-only, but if it doesn't work, still use the
+         * normal error message. */
+        if (bdrv_apply_auto_read_only(bs, NULL, NULL) == 0) {
+            bdrv_flags &= ~BDRV_O_RDWR;
+            raw_parse_flags(bdrv_flags, &s->open_flags);
+            assert(!(s->open_flags & O_CREAT));
+            fd = qemu_open(filename, s->open_flags);
+            ret = fd < 0 ? -errno : 0;
+        }
+    }
+
+    if (ret < 0) {
+        error_setg_errno(errp, -ret, "Could not open '%s'", filename);
         if (ret == -EROFS) {
             ret = -EACCES;
         }
@@ -741,8 +754,6 @@ static int raw_check_lock_bytes(int fd, uint64_t perm, uint64_t shared_perm,
                            "Failed to get \"%s\" lock",
                            perm_name);
                 g_free(perm_name);
-                error_append_hint(errp,
-                                  "Is another process using the image?\n");
                 return ret;
             }
         }
@@ -758,8 +769,6 @@ static int raw_check_lock_bytes(int fd, uint64_t perm, uint64_t shared_perm,
                            "Failed to get shared \"%s\" lock",
                            perm_name);
                 g_free(perm_name);
-                error_append_hint(errp,
-                                  "Is another process using the image?\n");
                 return ret;
             }
         }
@@ -796,6 +805,9 @@ static int raw_handle_perm_lock(BlockDriverState *bs,
             if (!ret) {
                 return 0;
             }
+            error_append_hint(errp,
+                              "Is another process using the image [%s]?\n",
+                              bs->filename);
         }
         op = RAW_PL_ABORT;
         /* fall through to unlock bytes. */
@@ -850,8 +862,13 @@ static int raw_reopen_prepare(BDRVReopenState *state,
         goto out;
     }
 
-    rs->check_cache_dropped = qemu_opt_get_bool(opts, "x-check-cache-dropped",
-                                                s->check_cache_dropped);
+    rs->check_cache_dropped =
+        qemu_opt_get_bool_del(opts, "x-check-cache-dropped", false);
+
+    /* This driver's reopen function doesn't currently allow changing
+     * other options, so let's put them back in the original QDict and
+     * bdrv_reopen_prepare() will detect changes and complain. */
+    qemu_opts_to_qdict(opts, state->options);
 
     if (s->type == FTYPE_CD) {
         rs->open_flags |= O_NONBLOCK;
@@ -2217,6 +2234,9 @@ raw_co_create(BlockdevCreateOptions *options, Error **errp)
     /* Step two: Check that nobody else has taken conflicting locks */
     result = raw_check_lock_bytes(fd, perm, shared, errp);
     if (result < 0) {
+        error_append_hint(errp,
+                          "Is another process using the image [%s]?\n",
+                          file_opts->filename);
         goto out_unlock;
     }
 

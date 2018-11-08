@@ -107,6 +107,7 @@ static int has_pit_state2;
 static bool has_msr_mcg_ext_ctl;
 
 static struct kvm_cpuid2 *cpuid_cache;
+static struct kvm_msr_list *kvm_feature_msrs;
 
 int kvm_has_pit_state2(void)
 {
@@ -420,6 +421,42 @@ uint32_t kvm_arch_get_supported_cpuid(KVMState *s, uint32_t function,
     return ret;
 }
 
+uint32_t kvm_arch_get_supported_msr_feature(KVMState *s, uint32_t index)
+{
+    struct {
+        struct kvm_msrs info;
+        struct kvm_msr_entry entries[1];
+    } msr_data;
+    uint32_t ret;
+
+    if (kvm_feature_msrs == NULL) { /* Host doesn't support feature MSRs */
+        return 0;
+    }
+
+    /* Check if requested MSR is supported feature MSR */
+    int i;
+    for (i = 0; i < kvm_feature_msrs->nmsrs; i++)
+        if (kvm_feature_msrs->indices[i] == index) {
+            break;
+        }
+    if (i == kvm_feature_msrs->nmsrs) {
+        return 0; /* if the feature MSR is not supported, simply return 0 */
+    }
+
+    msr_data.info.nmsrs = 1;
+    msr_data.entries[0].index = index;
+
+    ret = kvm_ioctl(s, KVM_GET_MSRS, &msr_data);
+    if (ret != 1) {
+        error_report("KVM get MSR (index=0x%x) feature failed, %s",
+            index, strerror(-ret));
+        exit(1);
+    }
+
+    return msr_data.entries[0].data;
+}
+
+
 typedef struct HWPoisonPage {
     ram_addr_t ram_addr;
     QLIST_ENTRY(HWPoisonPage) list;
@@ -608,7 +645,8 @@ static bool hyperv_enabled(X86CPU *cpu)
             cpu->hyperv_synic ||
             cpu->hyperv_stimer ||
             cpu->hyperv_reenlightenment ||
-            cpu->hyperv_tlbflush);
+            cpu->hyperv_tlbflush ||
+            cpu->hyperv_ipi);
 }
 
 static int kvm_arch_set_tsc_khz(CPUState *cs)
@@ -733,9 +771,20 @@ static int hyperv_handle_properties(CPUState *cs)
         env->features[FEAT_HYPERV_EAX] |= HV_VP_RUNTIME_AVAILABLE;
     }
     if (cpu->hyperv_synic) {
-        if (!has_msr_hv_synic ||
-            kvm_vcpu_enable_cap(cs, KVM_CAP_HYPERV_SYNIC, 0)) {
-            fprintf(stderr, "Hyper-V SynIC is not supported by kernel\n");
+        unsigned int cap = KVM_CAP_HYPERV_SYNIC;
+        if (!cpu->hyperv_synic_kvm_only) {
+            if (!cpu->hyperv_vpindex) {
+                fprintf(stderr, "Hyper-V SynIC "
+                        "(requested by 'hv-synic' cpu flag) "
+                        "requires Hyper-V VP_INDEX ('hv-vpindex')\n");
+            return -ENOSYS;
+            }
+            cap = KVM_CAP_HYPERV_SYNIC2;
+        }
+
+        if (!has_msr_hv_synic || !kvm_check_extension(cs->kvm_state, cap)) {
+            fprintf(stderr, "Hyper-V SynIC (requested by 'hv-synic' cpu flag) "
+                    "is not supported by kernel\n");
             return -ENOSYS;
         }
 
@@ -753,12 +802,14 @@ static int hyperv_handle_properties(CPUState *cs)
 
 static int hyperv_init_vcpu(X86CPU *cpu)
 {
+    CPUState *cs = CPU(cpu);
+    int ret;
+
     if (cpu->hyperv_vpindex && !hv_vpindex_settable) {
         /*
          * the kernel doesn't support setting vp_index; assert that its value
          * is in sync
          */
-        int ret;
         struct {
             struct kvm_msrs info;
             struct kvm_msr_entry entries[1];
@@ -767,15 +818,35 @@ static int hyperv_init_vcpu(X86CPU *cpu)
             .entries[0].index = HV_X64_MSR_VP_INDEX,
         };
 
-        ret = kvm_vcpu_ioctl(CPU(cpu), KVM_GET_MSRS, &msr_data);
+        ret = kvm_vcpu_ioctl(cs, KVM_GET_MSRS, &msr_data);
         if (ret < 0) {
             return ret;
         }
         assert(ret == 1);
 
-        if (msr_data.entries[0].data != hyperv_vp_index(cpu)) {
+        if (msr_data.entries[0].data != hyperv_vp_index(CPU(cpu))) {
             error_report("kernel's vp_index != QEMU's vp_index");
             return -ENXIO;
+        }
+    }
+
+    if (cpu->hyperv_synic) {
+        uint32_t synic_cap = cpu->hyperv_synic_kvm_only ?
+            KVM_CAP_HYPERV_SYNIC : KVM_CAP_HYPERV_SYNIC2;
+        ret = kvm_vcpu_enable_cap(cs, synic_cap, 0);
+        if (ret < 0) {
+            error_report("failed to turn on HyperV SynIC in KVM: %s",
+                         strerror(-ret));
+            return ret;
+        }
+
+        if (!cpu->hyperv_synic_kvm_only) {
+            ret = hyperv_x86_synic_add(cpu);
+            if (ret < 0) {
+                error_report("failed to create HyperV SynIC: %s",
+                             strerror(-ret));
+                return ret;
+            }
         }
     }
 
@@ -886,6 +957,17 @@ int kvm_arch_init_vcpu(CPUState *cs)
                 return -ENOSYS;
             }
             c->eax |= HV_REMOTE_TLB_FLUSH_RECOMMENDED;
+            c->eax |= HV_EX_PROCESSOR_MASKS_RECOMMENDED;
+        }
+        if (cpu->hyperv_ipi) {
+            if (kvm_check_extension(cs->kvm_state,
+                                    KVM_CAP_HYPERV_SEND_IPI) <= 0) {
+                fprintf(stderr, "Hyper-V IPI send support "
+                        "(requested by 'hv-ipi' cpu flag) "
+                        " is not supported by kernel\n");
+                return -ENOSYS;
+            }
+            c->eax |= HV_CLUSTER_IPI_RECOMMENDED;
             c->eax |= HV_EX_PROCESSOR_MASKS_RECOMMENDED;
         }
 
@@ -1155,7 +1237,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
             if (local_err) {
                 error_report_err(local_err);
                 error_free(invtsc_mig_blocker);
-                goto fail;
+                return r;
             }
             /* for savevm */
             vmstate_x86_cpu.unmigratable = 1;
@@ -1191,7 +1273,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
     }
 
     if (has_xsave) {
-        env->kvm_xsave_buf = qemu_memalign(4096, sizeof(struct kvm_xsave));
+        env->xsave_buf = qemu_memalign(4096, sizeof(struct kvm_xsave));
     }
     cpu->kvm_msr_buf = g_malloc0(MSR_BUF_SIZE);
 
@@ -1228,6 +1310,8 @@ void kvm_arch_reset_vcpu(X86CPU *cpu)
         for (i = 0; i < ARRAY_SIZE(env->msr_hv_synic_sint); i++) {
             env->msr_hv_synic_sint[i] = HV_SINT_MASKED;
         }
+
+        hyperv_x86_synic_reset(cpu);
     }
 }
 
@@ -1239,6 +1323,47 @@ void kvm_arch_do_init_vcpu(X86CPU *cpu)
     if (env->mp_state == KVM_MP_STATE_UNINITIALIZED) {
         env->mp_state = KVM_MP_STATE_INIT_RECEIVED;
     }
+}
+
+static int kvm_get_supported_feature_msrs(KVMState *s)
+{
+    int ret = 0;
+
+    if (kvm_feature_msrs != NULL) {
+        return 0;
+    }
+
+    if (!kvm_check_extension(s, KVM_CAP_GET_MSR_FEATURES)) {
+        return 0;
+    }
+
+    struct kvm_msr_list msr_list;
+
+    msr_list.nmsrs = 0;
+    ret = kvm_ioctl(s, KVM_GET_MSR_FEATURE_INDEX_LIST, &msr_list);
+    if (ret < 0 && ret != -E2BIG) {
+        error_report("Fetch KVM feature MSR list failed: %s",
+            strerror(-ret));
+        return ret;
+    }
+
+    assert(msr_list.nmsrs > 0);
+    kvm_feature_msrs = (struct kvm_msr_list *) \
+        g_malloc0(sizeof(msr_list) +
+                 msr_list.nmsrs * sizeof(msr_list.indices[0]));
+
+    kvm_feature_msrs->nmsrs = msr_list.nmsrs;
+    ret = kvm_ioctl(s, KVM_GET_MSR_FEATURE_INDEX_LIST, kvm_feature_msrs);
+
+    if (ret < 0) {
+        error_report("Fetch KVM feature MSR list failed: %s",
+            strerror(-ret));
+        g_free(kvm_feature_msrs);
+        kvm_feature_msrs = NULL;
+        return ret;
+    }
+
+    return 0;
 }
 
 static int kvm_get_supported_msrs(KVMState *s)
@@ -1383,17 +1508,9 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
     int ret;
     struct utsname utsname;
 
-#ifdef KVM_CAP_XSAVE
     has_xsave = kvm_check_extension(s, KVM_CAP_XSAVE);
-#endif
-
-#ifdef KVM_CAP_XCRS
     has_xcrs = kvm_check_extension(s, KVM_CAP_XCRS);
-#endif
-
-#ifdef KVM_CAP_PIT_STATE2
     has_pit_state2 = kvm_check_extension(s, KVM_CAP_PIT_STATE2);
-#endif
 
     hv_vpindex_settable = kvm_check_extension(s, KVM_CAP_HYPERV_VP_INDEX);
 
@@ -1401,6 +1518,8 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
     if (ret < 0) {
         return ret;
     }
+
+    kvm_get_supported_feature_msrs(s);
 
     uname(&utsname);
     lm_capable_kernel = strcmp(utsname.machine, "x86_64") == 0;
@@ -1649,7 +1768,7 @@ ASSERT_OFFSET(XSAVE_PKRU, pkru_state);
 static int kvm_put_xsave(X86CPU *cpu)
 {
     CPUX86State *env = &cpu->env;
-    X86XSaveArea *xsave = env->kvm_xsave_buf;
+    X86XSaveArea *xsave = env->xsave_buf;
 
     if (!has_xsave) {
         return kvm_put_fpu(cpu);
@@ -1858,6 +1977,17 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
     }
 #endif
 
+    /* If host supports feature MSR, write down. */
+    if (kvm_feature_msrs) {
+        int i;
+        for (i = 0; i < kvm_feature_msrs->nmsrs; i++)
+            if (kvm_feature_msrs->indices[i] == MSR_IA32_ARCH_CAPABILITIES) {
+                kvm_msr_entry_add(cpu, MSR_IA32_ARCH_CAPABILITIES,
+                              env->features[FEAT_ARCH_CAPABILITIES]);
+                break;
+            }
+    }
+
     /*
      * The following MSRs have side effects on the guest or are too heavy
      * for normal writeback. Limit them to reset or full state updates.
@@ -1947,7 +2077,8 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
             kvm_msr_entry_add(cpu, HV_X64_MSR_VP_RUNTIME, env->msr_hv_runtime);
         }
         if (cpu->hyperv_vpindex && hv_vpindex_settable) {
-            kvm_msr_entry_add(cpu, HV_X64_MSR_VP_INDEX, hyperv_vp_index(cpu));
+            kvm_msr_entry_add(cpu, HV_X64_MSR_VP_INDEX,
+                              hyperv_vp_index(CPU(cpu)));
         }
         if (cpu->hyperv_synic) {
             int j;
@@ -2091,7 +2222,7 @@ static int kvm_get_fpu(X86CPU *cpu)
 static int kvm_get_xsave(X86CPU *cpu)
 {
     CPUX86State *env = &cpu->env;
-    X86XSaveArea *xsave = env->kvm_xsave_buf;
+    X86XSaveArea *xsave = env->xsave_buf;
     int ret;
 
     if (!has_xsave) {
@@ -2696,7 +2827,6 @@ static int kvm_put_vcpu_events(X86CPU *cpu, int level)
     events.exception.nr = env->exception_injected;
     events.exception.has_error_code = env->has_error_code;
     events.exception.error_code = env->error_code;
-    events.exception.pad = 0;
 
     events.interrupt.injected = (env->interrupt_injected >= 0);
     events.interrupt.nr = env->interrupt_injected;
@@ -2705,7 +2835,6 @@ static int kvm_put_vcpu_events(X86CPU *cpu, int level)
     events.nmi.injected = env->nmi_injected;
     events.nmi.pending = env->nmi_pending;
     events.nmi.masked = !!(env->hflags2 & HF2_NMI_MASK);
-    events.nmi.pad = 0;
 
     events.sipi_vector = env->sipi_vector;
     events.flags = 0;
@@ -3678,6 +3807,10 @@ int kvm_arch_fixup_msi_route(struct kvm_irq_routing_entry *route,
         int ret;
         MSIMessage src, dst;
         X86IOMMUClass *class = X86_IOMMU_GET_CLASS(iommu);
+
+        if (!class->int_remap) {
+            return 0;
+        }
 
         src.address = route->u.msi.address_hi;
         src.address <<= VTD_MSI_ADDR_HI_SHIFT;

@@ -9,9 +9,6 @@ CONFIG_VLYNQ=y
 # Systems.
 CONFIG_AR7=y
 
-# Experimental interfaces.
-CONFIG_RUBY=n
-
 CONFIG_SCSI=y
 CONFIG_VGA_ISA=y
 CONFIG_VGA_ISA_MM=y
