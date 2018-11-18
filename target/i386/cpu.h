@@ -1393,6 +1393,7 @@ struct X86CPU {
     bool hyperv_frequencies;
     bool hyperv_reenlightenment;
     bool hyperv_tlbflush;
+    bool hyperv_evmcs;
     bool hyperv_ipi;
     bool check_cpuid;
     bool enforce_cpuid;
