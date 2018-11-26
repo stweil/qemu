@@ -160,6 +160,8 @@ SectionEnd
 
 Section "Tools" SectionTools
     SetOutPath "$INSTDIR"
+    File "${BINDIR}\qemu-edid.exe"
+    File "${BINDIR}\qemu-ga.exe"
     File "${BINDIR}\qemu-img.exe"
     File "${BINDIR}\qemu-io.exe"
 SectionEnd
@@ -237,8 +239,10 @@ Section "Uninstall"
     Delete "$INSTDIR\palcode-clipper"
     Delete "$INSTDIR\u-boot.e500"
     Delete "$INSTDIR\qemu_logo_no_text.svg"
-    Delete "$INSTDIR\qemu-img.exe"
     Delete "$INSTDIR\qemu-io.exe"
+    Delete "$INSTDIR\qemu-img.exe"
+    Delete "$INSTDIR\qemu-ga.exe"
+    Delete "$INSTDIR\qemu-edid.exe"
     Delete "$INSTDIR\qemu.exe"
     Delete "$INSTDIR\qemu-system-*.exe"
     Delete "$INSTDIR\qemu-doc.html"
