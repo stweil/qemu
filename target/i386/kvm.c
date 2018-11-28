@@ -95,6 +95,7 @@ static bool has_msr_xss;
 static bool has_msr_spec_ctrl;
 static bool has_msr_virt_ssbd;
 static bool has_msr_smi_count;
+static bool has_msr_arch_capabs;
 
 static uint32_t has_architectural_pmu_version;
 static uint32_t num_architectural_pmu_gp_counters;
@@ -854,6 +855,7 @@ static int hyperv_init_vcpu(X86CPU *cpu)
 }
 
 static Error *invtsc_mig_blocker;
+static Error *vmx_mig_blocker;
 
 #define KVM_MAX_CPUID_ENTRIES  100
 
@@ -1248,6 +1250,17 @@ int kvm_arch_init_vcpu(CPUState *cs)
                                   !!(c->ecx & CPUID_EXT_SMX);
     }
 
+    if ((env->features[FEAT_1_ECX] & CPUID_EXT_VMX) && !vmx_mig_blocker) {
+        error_setg(&vmx_mig_blocker,
+                   "Nested VMX virtualization does not support live migration yet");
+        r = migrate_add_blocker(vmx_mig_blocker, &local_err);
+        if (local_err) {
+            error_report_err(local_err);
+            error_free(vmx_mig_blocker);
+            return r;
+        }
+    }
+
     if (env->mcg_cap & MCG_LMCE_P) {
         has_msr_mcg_ext_ctl = has_msr_feature_control = true;
     }
@@ -1255,7 +1268,6 @@ int kvm_arch_init_vcpu(CPUState *cs)
     if (!env->user_tsc_khz) {
         if ((env->features[FEAT_8000_0007_EDX] & CPUID_APM_INVTSC) &&
             invtsc_mig_blocker == NULL) {
-            /* for migration */
             error_setg(&invtsc_mig_blocker,
                        "State blocked by non-migratable CPU device"
                        " (invtsc flag)");
@@ -1265,8 +1277,6 @@ int kvm_arch_init_vcpu(CPUState *cs)
                 error_free(invtsc_mig_blocker);
                 return r;
             }
-            /* for savevm */
-            vmstate_x86_cpu.unmigratable = 1;
         }
     }
 
@@ -1482,6 +1492,9 @@ static int kvm_get_supported_msrs(KVMState *s)
                     break;
                 case MSR_VIRT_SSBD:
                     has_msr_virt_ssbd = true;
+                    break;
+                case MSR_IA32_ARCH_CAPABILITIES:
+                    has_msr_arch_capabs = true;
                     break;
                 }
             }
@@ -2004,14 +2017,9 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
 #endif
 
     /* If host supports feature MSR, write down. */
-    if (kvm_feature_msrs) {
-        int i;
-        for (i = 0; i < kvm_feature_msrs->nmsrs; i++)
-            if (kvm_feature_msrs->indices[i] == MSR_IA32_ARCH_CAPABILITIES) {
-                kvm_msr_entry_add(cpu, MSR_IA32_ARCH_CAPABILITIES,
-                              env->features[FEAT_ARCH_CAPABILITIES]);
-                break;
-            }
+    if (has_msr_arch_capabs) {
+        kvm_msr_entry_add(cpu, MSR_IA32_ARCH_CAPABILITIES,
+                          env->features[FEAT_ARCH_CAPABILITIES]);
     }
 
     /*

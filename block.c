@@ -1137,7 +1137,7 @@ static int bdrv_open_flags(BlockDriverState *bs, int flags)
 
 static void update_flags_from_options(int *flags, QemuOpts *opts)
 {
-    *flags &= ~BDRV_O_CACHE_MASK;
+    *flags &= ~(BDRV_O_CACHE_MASK | BDRV_O_RDWR | BDRV_O_AUTO_RDONLY);
 
     assert(qemu_opt_find(opts, BDRV_OPT_CACHE_NO_FLUSH));
     if (qemu_opt_get_bool_del(opts, BDRV_OPT_CACHE_NO_FLUSH, false)) {
@@ -1148,8 +1148,6 @@ static void update_flags_from_options(int *flags, QemuOpts *opts)
     if (qemu_opt_get_bool_del(opts, BDRV_OPT_CACHE_DIRECT, false)) {
         *flags |= BDRV_O_NOCACHE;
     }
-
-    *flags &= ~BDRV_O_RDWR;
 
     assert(qemu_opt_find(opts, BDRV_OPT_READ_ONLY));
     if (!qemu_opt_get_bool_del(opts, BDRV_OPT_READ_ONLY, false)) {
@@ -2263,6 +2261,18 @@ static void bdrv_parent_cb_change_media(BlockDriverState *bs, bool load)
     }
 }
 
+/* Return true if you can reach parent going through child->inherits_from
+ * recursively. If parent or child are NULL, return false */
+static bool bdrv_inherits_from_recursive(BlockDriverState *child,
+                                         BlockDriverState *parent)
+{
+    while (child && child != parent) {
+        child = child->inherits_from;
+    }
+
+    return child != NULL;
+}
+
 /*
  * Sets the backing file link of a BDS. A new reference is created; callers
  * which don't need their own reference any more must call bdrv_unref().
@@ -2270,6 +2280,9 @@ static void bdrv_parent_cb_change_media(BlockDriverState *bs, bool load)
 void bdrv_set_backing_hd(BlockDriverState *bs, BlockDriverState *backing_hd,
                          Error **errp)
 {
+    bool update_inherits_from = bdrv_chain_contains(bs, backing_hd) &&
+        bdrv_inherits_from_recursive(backing_hd, bs);
+
     if (backing_hd) {
         bdrv_ref(backing_hd);
     }
@@ -2285,6 +2298,12 @@ void bdrv_set_backing_hd(BlockDriverState *bs, BlockDriverState *backing_hd,
 
     bs->backing = bdrv_attach_child(bs, backing_hd, "backing", &child_backing,
                                     errp);
+    /* If backing_hd was already part of bs's backing chain, and
+     * inherits_from pointed recursively to bs then let's update it to
+     * point directly to bs (else it will become NULL). */
+    if (update_inherits_from) {
+        backing_hd->inherits_from = bs;
+    }
     if (!bs->backing) {
         bdrv_unref(backing_hd);
     }
@@ -3837,6 +3856,8 @@ BlockDriverState *bdrv_find_base(BlockDriverState *bs)
 int bdrv_drop_intermediate(BlockDriverState *top, BlockDriverState *base,
                            const char *backing_file_str)
 {
+    BlockDriverState *explicit_top = top;
+    bool update_inherits_from;
     BdrvChild *c, *next;
     Error *local_err = NULL;
     int ret = -EIO;
@@ -3851,6 +3872,16 @@ int bdrv_drop_intermediate(BlockDriverState *top, BlockDriverState *base,
     if (!bdrv_chain_contains(top, base)) {
         goto exit;
     }
+
+    /* If 'base' recursively inherits from 'top' then we should set
+     * base->inherits_from to top->inherits_from after 'top' and all
+     * other intermediate nodes have been dropped.
+     * If 'top' is an implicit node (e.g. "commit_top") we should skip
+     * it because no one inherits from it. We use explicit_top for that. */
+    while (explicit_top && explicit_top->implicit) {
+        explicit_top = backing_bs(explicit_top);
+    }
+    update_inherits_from = bdrv_inherits_from_recursive(base, explicit_top);
 
     /* success - we can delete the intermediate states, and link top->base */
     /* TODO Check graph modification op blockers (BLK_PERM_GRAPH_MOD) once
@@ -3885,6 +3916,10 @@ int bdrv_drop_intermediate(BlockDriverState *top, BlockDriverState *base,
         bdrv_ref(base);
         bdrv_replace_child(c, base);
         bdrv_unref(top);
+    }
+
+    if (update_inherits_from) {
+        base->inherits_from = explicit_top->inherits_from;
     }
 
     ret = 0;
@@ -4578,45 +4613,68 @@ void bdrv_invalidate_cache_all(Error **errp)
     }
 }
 
-static int bdrv_inactivate_recurse(BlockDriverState *bs,
-                                   bool setting_flag)
+static bool bdrv_has_bds_parent(BlockDriverState *bs, bool only_active)
+{
+    BdrvChild *parent;
+
+    QLIST_FOREACH(parent, &bs->parents, next_parent) {
+        if (parent->role->parent_is_bds) {
+            BlockDriverState *parent_bs = parent->opaque;
+            if (!only_active || !(parent_bs->open_flags & BDRV_O_INACTIVE)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static int bdrv_inactivate_recurse(BlockDriverState *bs)
 {
     BdrvChild *child, *parent;
+    uint64_t perm, shared_perm;
     int ret;
 
     if (!bs->drv) {
         return -ENOMEDIUM;
     }
 
-    if (!setting_flag && bs->drv->bdrv_inactivate) {
+    /* Make sure that we don't inactivate a child before its parent.
+     * It will be covered by recursion from the yet active parent. */
+    if (bdrv_has_bds_parent(bs, true)) {
+        return 0;
+    }
+
+    assert(!(bs->open_flags & BDRV_O_INACTIVE));
+
+    /* Inactivate this node */
+    if (bs->drv->bdrv_inactivate) {
         ret = bs->drv->bdrv_inactivate(bs);
         if (ret < 0) {
             return ret;
         }
     }
 
-    if (setting_flag && !(bs->open_flags & BDRV_O_INACTIVE)) {
-        uint64_t perm, shared_perm;
-
-        QLIST_FOREACH(parent, &bs->parents, next_parent) {
-            if (parent->role->inactivate) {
-                ret = parent->role->inactivate(parent);
-                if (ret < 0) {
-                    return ret;
-                }
+    QLIST_FOREACH(parent, &bs->parents, next_parent) {
+        if (parent->role->inactivate) {
+            ret = parent->role->inactivate(parent);
+            if (ret < 0) {
+                return ret;
             }
         }
-
-        bs->open_flags |= BDRV_O_INACTIVE;
-
-        /* Update permissions, they may differ for inactive nodes */
-        bdrv_get_cumulative_perm(bs, &perm, &shared_perm);
-        bdrv_check_perm(bs, NULL, perm, shared_perm, NULL, &error_abort);
-        bdrv_set_perm(bs, perm, shared_perm);
     }
 
+    bs->open_flags |= BDRV_O_INACTIVE;
+
+    /* Update permissions, they may differ for inactive nodes */
+    bdrv_get_cumulative_perm(bs, &perm, &shared_perm);
+    bdrv_check_perm(bs, NULL, perm, shared_perm, NULL, &error_abort);
+    bdrv_set_perm(bs, perm, shared_perm);
+
+
+    /* Recursively inactivate children */
     QLIST_FOREACH(child, &bs->children, next) {
-        ret = bdrv_inactivate_recurse(child->bs, setting_flag);
+        ret = bdrv_inactivate_recurse(child->bs);
         if (ret < 0) {
             return ret;
         }
@@ -4630,7 +4688,6 @@ int bdrv_inactivate_all(void)
     BlockDriverState *bs = NULL;
     BdrvNextIterator it;
     int ret = 0;
-    int pass;
     GSList *aio_ctxs = NULL, *ctx;
 
     for (bs = bdrv_first(&it); bs; bs = bdrv_next(&it)) {
@@ -4642,17 +4699,17 @@ int bdrv_inactivate_all(void)
         }
     }
 
-    /* We do two passes of inactivation. The first pass calls to drivers'
-     * .bdrv_inactivate callbacks recursively so all cache is flushed to disk;
-     * the second pass sets the BDRV_O_INACTIVE flag so that no further write
-     * is allowed. */
-    for (pass = 0; pass < 2; pass++) {
-        for (bs = bdrv_first(&it); bs; bs = bdrv_next(&it)) {
-            ret = bdrv_inactivate_recurse(bs, pass);
-            if (ret < 0) {
-                bdrv_next_cleanup(&it);
-                goto out;
-            }
+    for (bs = bdrv_first(&it); bs; bs = bdrv_next(&it)) {
+        /* Nodes with BDS parents are covered by recursion from the last
+         * parent that gets inactivated. Don't inactivate them a second
+         * time if that has already happened. */
+        if (bdrv_has_bds_parent(bs, false)) {
+            continue;
+        }
+        ret = bdrv_inactivate_recurse(bs);
+        if (ret < 0) {
+            bdrv_next_cleanup(&it);
+            goto out;
         }
     }
 
