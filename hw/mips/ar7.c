@@ -3976,7 +3976,8 @@ static void ar7_common_init(MachineState *machine,
         };
         warn_report("could not load MIPS bios 'mips_bios.bin'");
         warn_report("QEMU added a jump instruction to flash start");
-        cpu_physical_memory_write_rom(&address_space_memory, PROM_ADDR, jump, sizeof(jump));
+        address_space_write_rom(&address_space_memory, PROM_ADDR,
+                                MEMTXATTRS_UNSPECIFIED, jump, sizeof(jump));
         rom_size = 4 * KiB;
     }
 
@@ -4018,11 +4019,10 @@ static void ar7_common_init(MachineState *machine,
     ar7_init(s, env);
 }
 
-static int ar7_sysbus_device_init(SysBusDevice *sysbusdev)
+static void ar7_sysbus_device_realize(DeviceState *dev, Error **errp)
 {
     /* TODO */
     //~ AR7State *s = AR7_STATE(sysbusdev);
-    return 0;
 }
 
 static void mips_ar7_init(MachineState *machine)
@@ -4283,12 +4283,11 @@ static Property ar7_properties[] = {
 static void ar7_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
     dc->desc = "TI TNETD7xxx (AR7)";
     dc->props = ar7_properties;
+    dc->realize = ar7_sysbus_device_realize;
     dc->reset = ar7_reset;
     dc->vmsd = &vmstate_ar7;
-    k->init = ar7_sysbus_device_init;
 }
 
 static const TypeInfo ar7_info = {
@@ -4299,17 +4298,16 @@ static const TypeInfo ar7_info = {
     .class_init = ar7_class_init,
 };
 
-static int cpmac_init(SysBusDevice *sbd)
+static void cpmac_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     CpmacState *s = CPMAC_STATE(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     logout("%s:%u", __FILE__, __LINE__);
 
     sysbus_init_irq(sbd, &s->irq);
     s->nic = qemu_new_nic(&ar7_net_info, &s->conf,
                           object_get_typename(OBJECT(dev)), dev->id, s);
-    return 0;
 }
 
 static const VMStateDescription cpmac_vmsd = {
@@ -4331,13 +4329,12 @@ static Property ar7_cpmac_properties[] = {
 static void ar7_cpmac_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
     dc->desc = "TI AR7 CPMAC";
     dc->props = ar7_cpmac_properties;
+    dc->realize = cpmac_realize;
     dc->reset = cpmac_reset;
     //~ dc->unplug = cpmac_unplug;
     dc->vmsd = &cpmac_vmsd;
-    k->init = cpmac_init;
     //~ k->exit = cpmac_exit;
 }
 

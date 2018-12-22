@@ -312,10 +312,10 @@ static const MemoryRegionOps ax88796_ops = {
     }
 };
 
-static int ax88796_init(SysBusDevice *sbd)
+static void ax88796_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     AX88796State *s = AX88796(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     logout("\n");
 
@@ -350,7 +350,6 @@ static int ax88796_init(SysBusDevice *sbd)
                           object_get_typename(OBJECT(dev)), dev->qdev.id, s);
     qemu_format_nic_info_str(qemu_get_queue(s->nic), s->c.macaddr.a);
 #endif
-    return 0;
 }
 
 static const VMStateDescription ax88796_vmsd = {
@@ -371,10 +370,9 @@ static Property ax88796_properties[] = {
 static void ax88796_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->realize= ax88796_realize;
     dc->vmsd = &ax88796_vmsd;
     dc->props = ax88796_properties;
-    k->init = ax88796_init;
 }
 
 static const TypeInfo ax88796_info = {

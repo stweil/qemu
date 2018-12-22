@@ -15,7 +15,6 @@
 #include "qemu/osdep.h"
 #include <glib/gstdio.h>
 #include "qemu-common.h"
-#include "hw/smbios/smbios.h"
 #include "qemu/bitmap.h"
 #include "acpi-utils.h"
 #include "boot-sector.h"
@@ -32,7 +31,7 @@ uint8_t acpi_calc_checksum(const uint8_t *data, int len)
     return sum;
 }
 
-uint32_t acpi_find_rsdp_address(void)
+uint32_t acpi_find_rsdp_address(QTestState *qts)
 {
     uint32_t off;
 
@@ -42,7 +41,7 @@ uint32_t acpi_find_rsdp_address(void)
         int i;
 
         for (i = 0; i < sizeof sig - 1; ++i) {
-            sig[i] = readb(off + i);
+            sig[i] = qtest_readb(qts, off + i);
         }
 
         if (!memcmp(sig, "RSD PTR ", sizeof sig)) {
@@ -52,14 +51,44 @@ uint32_t acpi_find_rsdp_address(void)
     return off;
 }
 
-void acpi_parse_rsdp_table(uint32_t addr, AcpiRsdpDescriptor *rsdp_table)
+uint32_t acpi_get_rsdt_address(uint8_t *rsdp_table)
 {
-    ACPI_READ_FIELD(rsdp_table->signature, addr);
-    ACPI_ASSERT_CMP64(rsdp_table->signature, "RSD PTR ");
+    uint32_t rsdt_physical_address;
 
-    ACPI_READ_FIELD(rsdp_table->checksum, addr);
-    ACPI_READ_ARRAY(rsdp_table->oem_id, addr);
-    ACPI_READ_FIELD(rsdp_table->revision, addr);
-    ACPI_READ_FIELD(rsdp_table->rsdt_physical_address, addr);
-    ACPI_READ_FIELD(rsdp_table->length, addr);
+    memcpy(&rsdt_physical_address, &rsdp_table[16 /* RsdtAddress offset */], 4);
+    return le32_to_cpu(rsdt_physical_address);
+}
+
+uint64_t acpi_get_xsdt_address(uint8_t *rsdp_table)
+{
+    uint64_t xsdt_physical_address;
+    uint8_t revision = rsdp_table[15 /* Revision offset */];
+
+    /* We must have revision 2 if we're looking for an XSDT pointer */
+    g_assert(revision == 2);
+
+    memcpy(&xsdt_physical_address, &rsdp_table[24 /* XsdtAddress offset */], 8);
+    return le64_to_cpu(xsdt_physical_address);
+}
+
+void acpi_parse_rsdp_table(QTestState *qts, uint32_t addr, uint8_t *rsdp_table)
+{
+    uint8_t revision;
+
+    /* Read mandatory revision 0 table data (20 bytes) first */
+    qtest_memread(qts, addr, rsdp_table, 20);
+    revision = rsdp_table[15 /* Revision offset */];
+
+    switch (revision) {
+    case 0: /* ACPI 1.0 RSDP */
+        break;
+    case 2: /* ACPI 2.0+ RSDP */
+        /* Read the rest of the RSDP table */
+        qtest_memread(qts, addr + 20, rsdp_table + 20, 16);
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    ACPI_ASSERT_CMP64(*((uint64_t *)(rsdp_table)), "RSD PTR ");
 }

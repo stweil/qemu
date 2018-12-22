@@ -1109,13 +1109,17 @@
 ##
 # @cpu-add:
 #
-# Adds CPU with specified ID
+# Adds CPU with specified ID.
 #
 # @id: ID of CPU to be created, valid values [0..max_cpus)
 #
 # Returns: Nothing on success
 #
 # Since: 1.5
+#
+# Note: This command is deprecated.  The `device_add` command should be
+#       used instead.  See the `query-hotpluggable-cpus` command for
+#       details.
 #
 # Example:
 #
@@ -1235,11 +1239,17 @@
 ##
 # @system_wakeup:
 #
-# Wakeup guest from suspend.  Does nothing in case the guest isn't suspended.
+# Wake up guest from suspend. If the guest has wake-up from suspend
+# support enabled (wakeup-suspend-support flag from
+# query-current-machine), wake-up guest from suspend if the guest is
+# in SUSPENDED state. Return an error otherwise.
 #
 # Since:  1.1
 #
 # Returns:  nothing.
+#
+# Note: prior to 4.0, this command does nothing in case the guest
+# isn't suspended.
 #
 # Example:
 #
@@ -2009,6 +2019,30 @@
 { 'command': 'query-machines', 'returns': ['MachineInfo'] }
 
 ##
+# @CurrentMachineParams:
+#
+# Information describing the running machine parameters.
+#
+# @wakeup-suspend-support: true if the machine supports wake up from
+#                          suspend
+#
+# Since: 4.0
+##
+{ 'struct': 'CurrentMachineParams',
+  'data': { 'wakeup-suspend-support': 'bool'} }
+
+##
+# @query-current-machine:
+#
+# Return information on the current virtual machine.
+#
+# Returns: CurrentMachineParams
+#
+# Since: 4.0
+##
+{ 'command': 'query-current-machine', 'returns': 'CurrentMachineParams' }
+
+##
 # @CpuDefinitionInfo:
 #
 # Virtual CPU definition.
@@ -2381,7 +2415,9 @@
 # <- { "return": { "fdset-id": 1, "fd": 3 } }
 #
 ##
-{ 'command': 'add-fd', 'data': {'*fdset-id': 'int', '*opaque': 'str'},
+{ 'command': 'add-fd',
+  'data': { '*fdset-id': 'int',
+            '*opaque': 'str' },
   'returns': 'AddfdInfo' }
 
 ##
@@ -2653,7 +2689,8 @@
 #    }
 #
 ##
-{'command': 'query-command-line-options', 'data': { '*option': 'str' },
+{'command': 'query-command-line-options',
+ 'data': { '*option': 'str' },
  'returns': ['CommandLineOptionInfo'],
  'allow-preconfig': true }
 
@@ -3219,6 +3256,8 @@
 ##
 # @query-hotpluggable-cpus:
 #
+# TODO: Better documentation; currently there is none.
+#
 # Returns: a list of HotpluggableCPU objects.
 #
 # Since: 2.7
@@ -3437,46 +3476,6 @@
 #
 ##
 { 'command': 'query-sev-capabilities', 'returns': 'SevCapability' }
-
-##
-# @CommandDropReason:
-#
-# Reasons that caused one command to be dropped.
-#
-# @queue-full: the command queue is full. This can only occur when
-#              the client sends a new non-oob command before the
-#              response to the previous non-oob command has been
-#              received.
-#
-# Since: 2.12
-##
-{ 'enum': 'CommandDropReason',
-  'data': [ 'queue-full' ] }
-
-##
-# @COMMAND_DROPPED:
-#
-# Emitted when a command is dropped due to some reason.  Commands can
-# only be dropped when the oob capability is enabled.
-#
-# @id: The dropped command's "id" field.
-# FIXME Broken by design.  Events are broadcast to all monitors.  If
-# another monitor's client has a command with the same ID in flight,
-# the event will incorrectly claim that command was dropped.
-#
-# @reason: The reason why the command is dropped.
-#
-# Since: 2.12
-#
-# Example:
-#
-# { "event": "COMMAND_DROPPED",
-#   "data": {"result": {"id": "libvirt-102",
-#                       "reason": "queue-full" } } }
-#
-##
-{ 'event': 'COMMAND_DROPPED' ,
-  'data': { 'id': 'any', 'reason': 'CommandDropReason' } }
 
 ##
 # @set-numa-node:

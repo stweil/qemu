@@ -149,7 +149,7 @@ static void ref405ep_init(MachineState *machine)
     MemoryRegion *bios;
     MemoryRegion *sram = g_new(MemoryRegion, 1);
     ram_addr_t bdloc;
-    MemoryRegion *ram_memories = g_malloc(2 * sizeof(*ram_memories));
+    MemoryRegion *ram_memories = g_new(MemoryRegion, 2);
     hwaddr ram_bases[2], ram_sizes[2];
     target_ulong sram_size;
     long bios_size;
@@ -219,9 +219,11 @@ static void ref405ep_init(MachineState *machine)
             bios_name = BIOS_FILENAME;
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
         if (filename) {
-            bios_size = load_image(filename, memory_region_get_ram_ptr(bios));
+            bios_size = load_image_size(filename,
+                                        memory_region_get_ram_ptr(bios),
+                                        BIOS_SIZE);
             g_free(filename);
-            if (bios_size < 0 || bios_size > BIOS_SIZE) {
+            if (bios_size < 0) {
                 error_report("Could not load PowerPC BIOS '%s'", bios_name);
                 exit(1);
             }
@@ -446,7 +448,7 @@ static void taihu_405ep_init(MachineState *machine)
     qemu_irq *pic;
     MemoryRegion *sysmem = get_system_memory();
     MemoryRegion *bios;
-    MemoryRegion *ram_memories = g_malloc(2 * sizeof(*ram_memories));
+    MemoryRegion *ram_memories = g_new(MemoryRegion, 2);
     MemoryRegion *ram = g_malloc0(sizeof(*ram));
     hwaddr ram_bases[2], ram_sizes[2];
     long bios_size;
@@ -515,9 +517,11 @@ static void taihu_405ep_init(MachineState *machine)
                                &error_fatal);
         filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
         if (filename) {
-            bios_size = load_image(filename, memory_region_get_ram_ptr(bios));
+            bios_size = load_image_size(filename,
+                                        memory_region_get_ram_ptr(bios),
+                                        BIOS_SIZE);
             g_free(filename);
-            if (bios_size < 0 || bios_size > BIOS_SIZE) {
+            if (bios_size < 0) {
                 error_report("Could not load PowerPC BIOS '%s'", bios_name);
                 exit(1);
             }

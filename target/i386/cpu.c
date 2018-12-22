@@ -1023,8 +1023,8 @@ static FeatureWordInfo feature_word_info[FEATURE_WORDS] = {
             "avx512bitalg", NULL, "avx512-vpopcntdq", NULL,
             "la57", NULL, NULL, NULL,
             NULL, NULL, "rdpid", NULL,
-            NULL, "cldemote", NULL, NULL,
-            NULL, NULL, NULL, NULL,
+            NULL, "cldemote", NULL, "movdiri",
+            "movdir64b", NULL, NULL, NULL,
         },
         .cpuid = {
             .eax = 7,
@@ -1042,7 +1042,7 @@ static FeatureWordInfo feature_word_info[FEATURE_WORDS] = {
             NULL, NULL, NULL, NULL,
             NULL, NULL, "pconfig", NULL,
             NULL, NULL, NULL, NULL,
-            NULL, NULL, "spec-ctrl", NULL,
+            NULL, NULL, "spec-ctrl", "stibp",
             NULL, "arch-capabilities", NULL, "ssbd",
         },
         .cpuid = {
@@ -4065,7 +4065,7 @@ arch_query_cpu_model_expansion(CpuModelExpansionType type,
         x86_cpu_to_dict_full(xc, props);
     break;
     default:
-        error_setg(&err, "Unsupportted expansion type");
+        error_setg(&err, "Unsupported expansion type");
         goto out;
     }
 

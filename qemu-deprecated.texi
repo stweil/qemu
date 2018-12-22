@@ -46,14 +46,6 @@ would automatically enable USB support on the machine type.
 If using the new syntax, USB support must be explicitly
 enabled via the ``-machine usb=on'' argument.
 
-@subsection -fsdev handle (since 2.12.0)
-
-The ``handle'' fsdev backend does not support symlinks and causes the 9p
-filesystem in the guest to fail a fair amount of tests from the PJD POSIX
-filesystem test suite. Also it requires the CAP_DAC_READ_SEARCH capability,
-which is not the recommended way to run QEMU. This backend should not be
-used and it will be removed with no replacement.
-
 @subsection -no-frame (since 2.12.0)
 
 The @code{--no-frame} argument works with SDL 1.2 only. The other user
@@ -121,6 +113,11 @@ replaced by the ``target'' output member.
 The @option{[hub_id name]} parameter tuple of the 'hostfwd_add' and
 'hostfwd_remove' HMP commands has been replaced by @option{netdev_id}.
 
+@subsection cpu-add (since 3.1)
+
+Use ``device_add'' for hotplugging vCPUs instead of ``cpu-add''.  See
+documentation of ``query-hotpluggable-cpus'' for additional details.
+
 @section System emulator devices
 
 @subsection ivshmem (since 2.6.0)
@@ -137,7 +134,7 @@ their usecases.
 
 @section System emulator machines
 
-@subsection pc-0.10 and pc-0.11 (since 3.0)
+@subsection pc-0.12, pc-0.13, pc-0.14 and pc-0.15 (since 4.0)
 
 These machine types are very old and likely can not be used for live migration
 from old QEMU versions anymore. A newer machine type should be used instead.

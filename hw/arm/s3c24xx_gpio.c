@@ -177,10 +177,10 @@ s3c24xx_gpio_irq_handler(void *opaque, int n, int level)
     s3c24xx_gpio_propagate_eint(s);
 }
 
-static int s3c24xx_gpio_init_(SysBusDevice *sbd)
+static void s3c24xx_gpio_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     S3C24xxGpioState *s = S3C24XX_GPIO(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     //~ qdev_init_gpio_in(&dev->qdev, mv88w8618_pic_set_irq, 32);
     //~ sysbus_init_irq(dev, &s->parent_irq);
@@ -202,8 +202,6 @@ static int s3c24xx_gpio_init_(SysBusDevice *sbd)
     GPR(S3C_GPIO_GSTATUS2) = 1;
     GPR(S3C_GPIO_GSTATUS3) = 0;
     GPR(S3C_GPIO_GSTATUS4) = 0;
-
-    return 0;
 }
 
 S3C24xxGpioState *
@@ -268,10 +266,9 @@ static Property s3c24xx_gpio_properties[] = {
 static void s3c24xx_gpio_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
     dc->props = s3c24xx_gpio_properties;
+    dc->realize = s3c24xx_gpio_realize;
     dc->vmsd = &s3c24xx_gpio_vmstate;
-    k->init = s3c24xx_gpio_init_;
 }
 
 static const TypeInfo s3c24xx_gpio_info = {

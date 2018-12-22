@@ -118,10 +118,10 @@ static const MemoryRegionOps s3c24xx_cam_ops = {
     }
 };
 
-static int s3c24xx_cam_init(SysBusDevice *sbd)
+static void s3c24xx_cam_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     S3C24xxCamState *s = S3C24XX_CAM(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     logout("\n");
     memory_region_init_io(&s->mmio, OBJECT(s), &s3c24xx_cam_ops, s, "s3c24xx-cam", 3 * 4);
@@ -129,7 +129,6 @@ static int s3c24xx_cam_init(SysBusDevice *sbd)
 
     //~ qdev_init_gpio_in(dev, mv88w8618_pic_set_irq, 32);
     //~ sysbus_init_irq(sbd, &s->parent_irq);
-    return 0;
 }
 
 static const VMStateDescription s3c24xx_cam_vmsd = {
@@ -145,10 +144,9 @@ static const VMStateDescription s3c24xx_cam_vmsd = {
 static void s3c24xx_cam_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->realize = s3c24xx_cam_realize;
     dc->reset = s3c24xx_cam_reset;
     dc->vmsd = &s3c24xx_cam_vmsd;
-    k->init = s3c24xx_cam_init;
 }
 
 static const TypeInfo s3c24xx_cam_info = {
@@ -215,10 +213,10 @@ static const MemoryRegionOps s3c24xx_wdg_ops = {
     }
 };
 
-static int s3c24xx_wdg_init(SysBusDevice *sbd)
+static void s3c24xx_wdg_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     S3C24xxWdgState *s = S3C24XX_WDG(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     logout("\n");
     memory_region_init_io(&s->mmio, OBJECT(s),
@@ -227,7 +225,6 @@ static int s3c24xx_wdg_init(SysBusDevice *sbd)
 
     //~ qdev_init_gpio_in(&dev->qdev, mv88w8618_pic_set_irq, 32);
     //~ sysbus_init_irq(dev, &s->parent_irq);
-    return 0;
 }
 
 static const VMStateDescription s3c24xx_wdg_vmsd = {
@@ -243,10 +240,9 @@ static const VMStateDescription s3c24xx_wdg_vmsd = {
 static void s3c24xx_wdg_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->realize = s3c24xx_wdg_realize;
     dc->reset = s3c24xx_wdg_reset;
     dc->vmsd = &s3c24xx_wdg_vmsd;
-    k->init = s3c24xx_wdg_init;
 }
 
 static const TypeInfo s3c24xx_wdg_info = {
@@ -325,10 +321,10 @@ static const MemoryRegionOps s3c24xx_adc_ops = {
     }
 };
 
-static int s3c24xx_adc_init(SysBusDevice *sbd)
+static void s3c24xx_adc_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     S3C24xxAdcState *s = S3C24XX_ADC(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     logout("\n");
     memory_region_init_io(&s->mmio, OBJECT(s),
@@ -337,7 +333,6 @@ static int s3c24xx_adc_init(SysBusDevice *sbd)
 
     //~ qdev_init_gpio_in(&dev->qdev, mv88w8618_pic_set_irq, 32);
     //~ sysbus_init_irq(dev, &s->parent_irq);
-    return 0;
 }
 
 static const VMStateDescription s3c24xx_adc_vmsd = {
@@ -353,10 +348,9 @@ static const VMStateDescription s3c24xx_adc_vmsd = {
 static void s3c24xx_adc_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->realize = s3c24xx_adc_realize;
     dc->reset = s3c24xx_adc_reset;
     dc->vmsd = &s3c24xx_adc_vmsd;
-    k->init = s3c24xx_adc_init;
 }
 
 static const TypeInfo s3c24xx_adc_info = {

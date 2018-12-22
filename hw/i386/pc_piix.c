@@ -30,7 +30,7 @@
 #include "hw/i386/pc.h"
 #include "hw/i386/apic.h"
 #include "hw/display/ramfb.h"
-#include "hw/smbios/smbios.h"
+#include "hw/firmware/smbios.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_ids.h"
 #include "hw/usb.h"
@@ -239,7 +239,8 @@ static void pc_init1(MachineState *machine,
 
     /* init basic PC hardware */
     pc_basic_device_init(isa_bus, pcms->gsi, &rtc_state, true,
-                         (pcms->vmport != ON_OFF_AUTO_ON), pcms->pit, 0x4);
+                         (pcms->vmport != ON_OFF_AUTO_ON), pcms->pit_enabled,
+                         0x4);
 
     pc_nic_init(pcmc, isa_bus, pci_bus);
 
@@ -320,7 +321,6 @@ static void pc_compat_2_3(MachineState *machine)
 static void pc_compat_2_2(MachineState *machine)
 {
     pc_compat_2_3(machine);
-    machine->suppress_vmdesc = true;
 }
 
 static void pc_compat_2_1(MachineState *machine)
@@ -368,7 +368,7 @@ static void pc_compat_1_2(MachineState *machine)
     x86_cpu_change_kvm_default("kvm-pv-eoi", NULL);
 }
 
-/* PC compat function for pc-0.10 to pc-0.13 */
+/* PC compat function for pc-0.12 and pc-0.13 */
 static void pc_compat_0_13(MachineState *machine)
 {
     pc_compat_1_2(machine);
@@ -428,11 +428,22 @@ static void pc_i440fx_machine_options(MachineClass *m)
     machine_class_allow_dynamic_sysbus_dev(m, TYPE_RAMFB_DEVICE);
 }
 
-static void pc_i440fx_3_1_machine_options(MachineClass *m)
+static void pc_i440fx_4_0_machine_options(MachineClass *m)
 {
     pc_i440fx_machine_options(m);
     m->alias = "pc";
     m->is_default = 1;
+}
+
+DEFINE_I440FX_MACHINE(v4_0, "pc-i440fx-4.0", NULL,
+                      pc_i440fx_4_0_machine_options);
+
+static void pc_i440fx_3_1_machine_options(MachineClass *m)
+{
+    pc_i440fx_4_0_machine_options(m);
+    m->is_default = 0;
+    m->alias = NULL;
+    SET_MACHINE_COMPAT(m, PC_COMPAT_3_1);
 }
 
 DEFINE_I440FX_MACHINE(v3_1, "pc-i440fx-3.1", NULL,
@@ -441,8 +452,6 @@ DEFINE_I440FX_MACHINE(v3_1, "pc-i440fx-3.1", NULL,
 static void pc_i440fx_3_0_machine_options(MachineClass *m)
 {
     pc_i440fx_3_1_machine_options(m);
-    m->is_default = 0;
-    m->alias = NULL;
     SET_MACHINE_COMPAT(m, PC_COMPAT_3_0);
 }
 
@@ -562,6 +571,7 @@ static void pc_i440fx_2_2_machine_options(MachineClass *m)
     PCMachineClass *pcmc = PC_MACHINE_CLASS(m);
     pc_i440fx_2_3_machine_options(m);
     m->hw_version = "2.2.0";
+    m->default_machine_opts = "firmware=bios-256k.bin,suppress-vmdesc=on";
     SET_MACHINE_COMPAT(m, PC_COMPAT_2_2);
     pcmc->rsdp_in_ram = false;
 }
@@ -824,6 +834,7 @@ static void pc_i440fx_0_15_machine_options(MachineClass *m)
 {
     pc_i440fx_1_0_machine_options(m);
     m->hw_version = "0.15";
+    m->deprecation_reason = "use a newer machine type instead";
     SET_MACHINE_COMPAT(m, PC_COMPAT_0_15);
 }
 
@@ -940,73 +951,6 @@ static void pc_i440fx_0_12_machine_options(MachineClass *m)
 
 DEFINE_I440FX_MACHINE(v0_12, "pc-0.12", pc_compat_0_13,
                       pc_i440fx_0_12_machine_options);
-
-
-#define PC_COMPAT_0_11 \
-        PC_CPU_MODEL_IDS("0.11") \
-        {\
-            .driver   = "virtio-blk-pci",\
-            .property = "vectors",\
-            .value    = stringify(0),\
-        },{\
-            .driver   = TYPE_PCI_DEVICE,\
-            .property = "rombar",\
-            .value    = stringify(0),\
-        },{\
-            .driver   = "ide-drive",\
-            .property = "ver",\
-            .value    = "0.11",\
-        },{\
-            .driver   = "scsi-disk",\
-            .property = "ver",\
-            .value    = "0.11",\
-        },
-
-static void pc_i440fx_0_11_machine_options(MachineClass *m)
-{
-    pc_i440fx_0_12_machine_options(m);
-    m->hw_version = "0.11";
-    m->deprecation_reason = "use a newer machine type instead";
-    SET_MACHINE_COMPAT(m, PC_COMPAT_0_11);
-}
-
-DEFINE_I440FX_MACHINE(v0_11, "pc-0.11", pc_compat_0_13,
-                      pc_i440fx_0_11_machine_options);
-
-
-#define PC_COMPAT_0_10 \
-    PC_CPU_MODEL_IDS("0.10") \
-    {\
-        .driver   = "virtio-blk-pci",\
-        .property = "class",\
-        .value    = stringify(PCI_CLASS_STORAGE_OTHER),\
-    },{\
-        .driver   = "virtio-serial-pci",\
-        .property = "class",\
-        .value    = stringify(PCI_CLASS_DISPLAY_OTHER),\
-    },{\
-        .driver   = "virtio-net-pci",\
-        .property = "vectors",\
-        .value    = stringify(0),\
-    },{\
-        .driver   = "ide-drive",\
-        .property = "ver",\
-        .value    = "0.10",\
-    },{\
-        .driver   = "scsi-disk",\
-        .property = "ver",\
-        .value    = "0.10",\
-    },
-
-static void pc_i440fx_0_10_machine_options(MachineClass *m)
-{
-    pc_i440fx_0_11_machine_options(m);
-    m->hw_version = "0.10";
-    SET_MACHINE_COMPAT(m, PC_COMPAT_0_10);
-}
-
-DEFINE_I440FX_MACHINE(v0_10, "pc-0.10", pc_compat_0_13,
-                      pc_i440fx_0_10_machine_options);
 
 typedef struct {
     uint16_t gpu_device_id;

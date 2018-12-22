@@ -306,10 +306,10 @@ static const GraphicHwOps tt_gfx_ops = {
     .gfx_update  = lcd_refresh,
 };
 
-static int tt_lcd_init(SysBusDevice *sbd)
+static void tt_lcd_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     tt_lcd_state *s = TT_LCD(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     s->brightness = 7;
 
@@ -321,8 +321,6 @@ static int tt_lcd_init(SysBusDevice *sbd)
     qemu_console_resize(s->con, 128*3, 64*3);
 
     qdev_init_gpio_in(dev, tt_lcd_gpio_brigthness_in, 3);
-
-    return 0;
 }
 
 static const VMStateDescription tt_lcd_vmsd = {
@@ -344,12 +342,11 @@ static const VMStateDescription tt_lcd_vmsd = {
 static void tt_lcd_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
     dc->desc = "TT LCD",
     //~ dc->props = dp8381x_properties;
+    dc->realize = tt_lcd_realize;
     //~ dc->reset = qdev_dp8381x_reset;
     dc->vmsd = &tt_lcd_vmsd;
-    k->init = tt_lcd_init;
 }
 
 static const TypeInfo tt_lcd_info = {
@@ -717,10 +714,10 @@ static void tt_gpio_reset(DeviceState *d)
     s->isr = 0;
 }
 
-static int tt_gpio_init(SysBusDevice *sbd)
+static void tt_gpio_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     tt_gpio_state *s = TT_GPIO(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     sysbus_init_irq(sbd, &s->irq);
 
@@ -731,8 +728,6 @@ static int tt_gpio_init(SysBusDevice *sbd)
     qdev_init_gpio_out(dev, s->out, ARRAY_SIZE(s->out));
 
     qdev_init_gpio_in(dev, tt_gpio_pin_event, 32);
-
-    return 0;
 }
 
 static const VMStateDescription tt_gpio_vmsd = {
@@ -754,10 +749,9 @@ static const VMStateDescription tt_gpio_vmsd = {
 static void tt_gpio_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->realize = tt_gpio_realize;
     dc->reset = tt_gpio_reset;
     dc->vmsd  = &tt_gpio_vmsd;
-    k->init = tt_gpio_init;
 }
 
 static const TypeInfo tt_gpio_info = {
@@ -880,10 +874,10 @@ static void tt_key_event(void *opaque, int keycode)
     s->kbd_extended = 0;
 }
 
-static int tt_key_init(SysBusDevice *sbd)
+static void tt_key_realize(DeviceState *dev, Error **errp)
 {
-    DeviceState *dev = DEVICE(sbd);
     tt_key_state *s = TT_KEY(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
 
     sysbus_init_mmio(sbd, &s->mmio);
 
@@ -893,8 +887,6 @@ static int tt_key_init(SysBusDevice *sbd)
     qdev_init_gpio_out(dev, s->out, ARRAY_SIZE(s->out));
 
     qemu_add_kbd_event_handler(tt_key_event, s);
-
-    return 0;
 }
 
 static const VMStateDescription tt_key_vmsd = {
@@ -912,9 +904,8 @@ static const VMStateDescription tt_key_vmsd = {
 static void tt_key_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
+    dc->realize = tt_key_realize;
     dc->vmsd = &tt_key_vmsd;
-    k->init = tt_key_init;
 }
 
 static const TypeInfo tt_key_info = {
