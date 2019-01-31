@@ -6032,7 +6032,7 @@ EOF
 fi
 
 # Check that the C++ compiler exists and works with the C compiler.
-# All the QEMU_CXXFLAGS are based on QEMU_CFLAGS. Keep this at the end to don't miss any other that could be added.
+# All the QEMU_CXXFLAGS are based on QEMU_CFLAGS. Keep this at the end to not miss any other that could be added.
 if has $cxx; then
     cat > $TMPC <<EOF
 int c_function(void);
