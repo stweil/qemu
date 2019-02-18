@@ -296,7 +296,7 @@ static void stcb_init(MachineState *machine)
         if (!serial_hd(i)) {
             char label[32];
             snprintf(label, sizeof(label), "serial%d", i);
-            serial_hd(i) = qemu_chr_new(label, "vc:80Cx24C");
+            serial_hd(i) = qemu_chr_new(label, "vc:80Cx24C", NULL);
         }
 #endif
     }
@@ -384,11 +384,11 @@ static void stcb_init(MachineState *machine)
         stcb->nand[2] = nand_init(NULL, 0xEC, 0x79); /* 128MiB small-page */
     }
 
-    chr = qemu_chr_new("uart0", "vc:80Cx24C");
+    chr = qemu_chr_new("uart0", "vc:80Cx24C", NULL);
     serial_mm_init(sysmem, SERIAL_BASE + 0x2f8, 0,
                    s3c24xx_get_eirq(stcb->soc->gpio, 15),
                    SERIAL_CLK, chr, DEVICE_NATIVE_ENDIAN);
-    chr = qemu_chr_new("uart1", "vc:80Cx24C");
+    chr = qemu_chr_new("uart1", "vc:80Cx24C", NULL);
     serial_mm_init(sysmem, SERIAL_BASE + 0x3f8, 0,
                    s3c24xx_get_eirq(stcb->soc->gpio, 14),
                    SERIAL_CLK, chr, DEVICE_NATIVE_ENDIAN);

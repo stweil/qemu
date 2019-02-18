@@ -28,7 +28,6 @@
 #define SIGNBIT (uint32_t)0x80000000
 #define SIGNBIT64 ((uint64_t)1 << 63)
 
-QEMU_NORETURN
 static CPUState *do_raise_exception(CPUARMState *env, uint32_t excp,
                                     uint32_t syndrome, uint32_t target_el)
 {

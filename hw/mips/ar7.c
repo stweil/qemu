@@ -1,7 +1,7 @@
 /*
  * QEMU AR7 support
  *
- * Copyright (C) 2006-2011 Stefan Weil
+ * Copyright (C) 2006-2019 Stefan Weil
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -3356,7 +3356,7 @@ static void ar7_serial_init(CPUMIPSState * env)
 #else
     if (serial_hd(1) == NULL) {
         /* TODO: This code no longer works. Remove or replace. */
-        serial_hd(1) = qemu_chr_new("serial1", "vc:80Cx24C");
+        serial_hd(1) = qemu_chr_new("serial1", "vc:80Cx24C", NULL);
     }
 #endif
     for (uart_index = 0; uart_index < 2; uart_index++) {
@@ -3633,13 +3633,13 @@ static void ar7_display_init(CPUMIPSState *env)
 {
     Chardev *chr;
 
-    chr = qemu_chr_new("gpio", "vc:400x300");
+    chr = qemu_chr_new("gpio", "vc:400x300", NULL);
     qemu_chr_fe_init(&ar7->gpio_display, chr, NULL);
     qemu_chr_fe_set_handlers(&ar7->gpio_display, ar7_display_can_receive,
                              ar7_display_receive, ar7_display_event, NULL, ar7,
                              NULL, true);
 
-    chr = qemu_chr_new("led-display", "vc:320x200");
+    chr = qemu_chr_new("led-display", "vc:320x200", NULL);
     qemu_chr_fe_init(&malta_display.display , chr, NULL);
     qemu_chr_fe_set_handlers(&malta_display.display, NULL, NULL,
                              malta_fpga_display_event, NULL, &malta_display,
@@ -3720,7 +3720,7 @@ static void kernel_load(CPUMIPSState *env)
     uint64_t kernel_addr = 0;
     uint64_t kernel_low, kernel_high;
     int kernel_size;
-    kernel_size = load_elf(loaderparams.kernel_filename,
+    kernel_size = load_elf(loaderparams.kernel_filename, NULL,
                            cpu_mips_kseg0_to_phys, NULL,
                            &kernel_addr, &kernel_low, &kernel_high,
                            first_cpu->bigendian, EM_MIPS, 1, 0);
