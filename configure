@@ -805,6 +805,7 @@ MINGW32*)
   else
     audio_drv_list=""
   fi
+  QEMU_INCLUDES="-I\$(SRC_PATH)/hosts/w32/include $QEMU_INCLUDES"
   supported_os="yes"
 ;;
 GNU/kFreeBSD)
@@ -937,7 +938,6 @@ if test "$mingw32" = "yes" ; then
   QEMU_CFLAGS="-D_POSIX=1 $QEMU_CFLAGS"
   # MinGW needs -mthreads for TLS and macro _MT.
   QEMU_CFLAGS="-mthreads $QEMU_CFLAGS"
-  QEMU_CFLAGS="-I\$(SRC_PATH)/hosts/w32/include $QEMU_CFLAGS"
   LIBS="-lwinmm -lws2_32 -liphlpapi $LIBS"
   write_c_skeleton;
   if compile_prog "" "-liberty" ; then
