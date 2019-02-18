@@ -44,6 +44,7 @@
 #include "keymaps.h"
 #include "vnc-palette.h"
 #include "vnc-enc-zrle.h"
+#include "ui/kbd-state.h"
 
 // #define _VNC_DEBUG 1
 
@@ -154,7 +155,7 @@ struct VncDisplay
     int lock_key_sync;
     QEMUPutLEDEntry *led;
     int ledstate;
-    int key_delay_ms;
+    QKbdState *kbd;
     QemuMutex mutex;
 
     QEMUCursor *cursor;
@@ -325,8 +326,6 @@ struct VncState
 
     VncReadEvent *read_handler;
     size_t read_handler_expect;
-    /* input */
-    uint8_t modifiers_state[256];
 
     bool abort;
     QemuMutex output_mutex;

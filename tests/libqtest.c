@@ -232,9 +232,9 @@ QTestState *qtest_init_without_qmp_handshake(const char *extra_args)
     qtest_add_abrt_handler(kill_qemu_hook_func, s);
 
     command = g_strdup_printf("exec %s "
-                              "-qtest unix:%s,nowait "
+                              "-qtest unix:%s "
                               "-qtest-log %s "
-                              "-chardev socket,path=%s,nowait,id=char0 "
+                              "-chardev socket,path=%s,id=char0 "
                               "-mon chardev=char0,mode=control "
                               "-machine accel=qtest "
                               "-display none "
@@ -313,6 +313,31 @@ QTestState *qtest_initf(const char *fmt, ...)
     s = qtest_vinitf(fmt, ap);
     va_end(ap);
     return s;
+}
+
+QTestState *qtest_init_with_serial(const char *extra_args, int *sock_fd)
+{
+    int sock_fd_init;
+    char *sock_path, sock_dir[] = "/tmp/qtest-serial-XXXXXX";
+    QTestState *qts;
+
+    g_assert_true(mkdtemp(sock_dir) != NULL);
+    sock_path = g_strdup_printf("%s/sock", sock_dir);
+
+    sock_fd_init = init_socket(sock_path);
+
+    qts = qtest_initf("-chardev socket,id=s0,path=%s -serial chardev:s0 %s",
+                      sock_path, extra_args);
+
+    *sock_fd = socket_accept(sock_fd_init);
+
+    unlink(sock_path);
+    g_free(sock_path);
+    rmdir(sock_dir);
+
+    g_assert_true(*sock_fd >= 0);
+
+    return qts;
 }
 
 void qtest_quit(QTestState *s)
@@ -750,6 +775,16 @@ void qtest_irq_intercept_out(QTestState *s, const char *qom_path)
 void qtest_irq_intercept_in(QTestState *s, const char *qom_path)
 {
     qtest_sendf(s, "irq_intercept_in %s\n", qom_path);
+    qtest_rsp(s, 0);
+}
+
+void qtest_set_irq_in(QTestState *s, const char *qom_path, const char *name,
+                      int num, int level)
+{
+    if (!name) {
+        name = "unnamed-gpio-in";
+    }
+    qtest_sendf(s, "set_irq_in %s %s %d %d\n", qom_path, name, num, level);
     qtest_rsp(s, 0);
 }
 

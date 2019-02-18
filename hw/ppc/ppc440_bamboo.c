@@ -49,7 +49,7 @@
 
 #define PPC440EP_SDRAM_NR_BANKS 4
 
-static const unsigned int ppc440ep_sdram_bank_sizes[] = {
+static const ram_addr_t ppc440ep_sdram_bank_sizes[] = {
     256 * MiB, 128 * MiB, 64 * MiB, 32 * MiB, 16 * MiB, 8 * MiB, 0
 };
 
@@ -179,7 +179,7 @@ static void bamboo_init(MachineState *machine)
     CPUPPCState *env;
     uint64_t elf_entry;
     uint64_t elf_lowaddr;
-    hwaddr loadaddr = 0;
+    hwaddr loadaddr = LOAD_UIMAGE_LOADADDR_INVALID;
     target_long initrd_size = 0;
     DeviceState *dev;
     int success;
@@ -256,7 +256,7 @@ static void bamboo_init(MachineState *machine)
         success = load_uimage(kernel_filename, &entry, &loadaddr, NULL,
                               NULL, NULL);
         if (success < 0) {
-            success = load_elf(kernel_filename, NULL, NULL, &elf_entry,
+            success = load_elf(kernel_filename, NULL, NULL, NULL, &elf_entry,
                                &elf_lowaddr, NULL, 1, PPC_ELF_MACHINE,
                                0, 0);
             entry = elf_entry;

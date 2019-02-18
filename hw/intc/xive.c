@@ -320,8 +320,7 @@ static const XiveTmOp *xive_tm_find_op(hwaddr offset, unsigned size, bool write)
 static void xive_tm_write(void *opaque, hwaddr offset,
                           uint64_t value, unsigned size)
 {
-    PowerPCCPU *cpu = POWERPC_CPU(current_cpu);
-    XiveTCTX *tctx = XIVE_TCTX(cpu->intc);
+    XiveTCTX *tctx = xive_router_get_tctx(XIVE_ROUTER(opaque), current_cpu);
     const XiveTmOp *xto;
 
     /*
@@ -359,8 +358,7 @@ static void xive_tm_write(void *opaque, hwaddr offset,
 
 static uint64_t xive_tm_read(void *opaque, hwaddr offset, unsigned size)
 {
-    PowerPCCPU *cpu = POWERPC_CPU(current_cpu);
-    XiveTCTX *tctx = XIVE_TCTX(cpu->intc);
+    XiveTCTX *tctx = xive_router_get_tctx(XIVE_ROUTER(opaque), current_cpu);
     const XiveTmOp *xto;
 
     /*
@@ -845,7 +843,7 @@ static const MemoryRegionOps xive_source_esb_ops = {
     },
 };
 
-static void xive_source_set_irq(void *opaque, int srcno, int val)
+void xive_source_set_irq(void *opaque, int srcno, int val)
 {
     XiveSource *xsrc = XIVE_SOURCE(opaque);
     bool notify = false;
@@ -931,9 +929,6 @@ static void xive_source_realize(DeviceState *dev, Error **errp)
     memory_region_init_io(&xsrc->esb_mmio, OBJECT(xsrc),
                           &xive_source_esb_ops, xsrc, "xive.esb",
                           (1ull << xsrc->esb_shift) * xsrc->nr_irqs);
-
-    xsrc->qirqs = qemu_allocate_irqs(xive_source_set_irq, xsrc,
-                                     xsrc->nr_irqs);
 
     qemu_register_reset(xive_source_reset, dev);
 }
@@ -1110,6 +1105,13 @@ int xive_router_write_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
    return xrc->write_nvt(xrtr, nvt_blk, nvt_idx, nvt, word_number);
 }
 
+XiveTCTX *xive_router_get_tctx(XiveRouter *xrtr, CPUState *cs)
+{
+    XiveRouterClass *xrc = XIVE_ROUTER_GET_CLASS(xrtr);
+
+    return xrc->get_tctx(xrtr, cs);
+}
+
 /*
  * The thread context register words are in big-endian format.
  */
@@ -1185,8 +1187,7 @@ static bool xive_presenter_match(XiveRouter *xrtr, uint8_t format,
      */
 
     CPU_FOREACH(cs) {
-        PowerPCCPU *cpu = POWERPC_CPU(cs);
-        XiveTCTX *tctx = XIVE_TCTX(cpu->intc);
+        XiveTCTX *tctx = xive_router_get_tctx(xrtr, cs);
         int ring;
 
         /*
@@ -1579,9 +1580,9 @@ static const TypeInfo xive_end_source_info = {
 };
 
 /*
- * XIVE Fabric
+ * XIVE Notifier
  */
-static const TypeInfo xive_fabric_info = {
+static const TypeInfo xive_notifier_info = {
     .name = TYPE_XIVE_NOTIFIER,
     .parent = TYPE_INTERFACE,
     .class_size = sizeof(XiveNotifierClass),
@@ -1590,7 +1591,7 @@ static const TypeInfo xive_fabric_info = {
 static void xive_register_types(void)
 {
     type_register_static(&xive_source_info);
-    type_register_static(&xive_fabric_info);
+    type_register_static(&xive_notifier_info);
     type_register_static(&xive_router_info);
     type_register_static(&xive_end_source_info);
     type_register_static(&xive_tctx_info);

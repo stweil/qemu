@@ -62,7 +62,7 @@ static void hmp_handle_error(Monitor *mon, Error **errp)
 {
     assert(errp);
     if (*errp) {
-        error_report_err(*errp);
+        error_reportf_err(*errp, "Error: ");
     }
 }
 
@@ -236,6 +236,8 @@ void hmp_info_migrate(Monitor *mon, const QDict *qdict)
                        info->ram->page_size >> 10);
         monitor_printf(mon, "multifd bytes: %" PRIu64 " kbytes\n",
                        info->ram->multifd_bytes >> 10);
+        monitor_printf(mon, "pages-per-second: %" PRIu64 "\n",
+                       info->ram->pages_per_second);
 
         if (info->ram->dirty_pages_rate) {
             monitor_printf(mon, "dirty pages rate: %" PRIu64 " pages\n",
@@ -2326,7 +2328,7 @@ void hmp_nbd_server_start(Monitor *mon, const QDict *qdict)
         }
 
         qmp_nbd_server_add(info->value->device, false, NULL,
-                           true, writable, &local_err);
+                           true, writable, false, NULL, &local_err);
 
         if (local_err != NULL) {
             qmp_nbd_server_stop(NULL);
@@ -2347,7 +2349,8 @@ void hmp_nbd_server_add(Monitor *mon, const QDict *qdict)
     bool writable = qdict_get_try_bool(qdict, "writable", false);
     Error *local_err = NULL;
 
-    qmp_nbd_server_add(device, !!name, name, true, writable, &local_err);
+    qmp_nbd_server_add(device, !!name, name, true, writable,
+                       false, NULL, &local_err);
     hmp_handle_error(mon, &local_err);
 }
 
@@ -2392,7 +2395,7 @@ void hmp_chardev_add(Monitor *mon, const QDict *qdict)
     if (opts == NULL) {
         error_setg(&err, "Parsing chardev args failed");
     } else {
-        qemu_chr_new_from_opts(opts, &err);
+        qemu_chr_new_from_opts(opts, NULL, &err);
         qemu_opts_del(opts);
     }
     hmp_handle_error(mon, &err);

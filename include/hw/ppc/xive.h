@@ -145,7 +145,7 @@
 #include "hw/ppc/xive_regs.h"
 
 /*
- * XIVE Fabric (Interface between Source and Router)
+ * XIVE Notifier (Interface between Source and Router)
  */
 
 typedef struct XiveNotifier {
@@ -184,7 +184,6 @@ typedef struct XiveSource {
 
     /* IRQs */
     uint32_t        nr_irqs;
-    qemu_irq        *qirqs;
     unsigned long   *lsi_map;
 
     /* PQ bits and LSI assertion bit */
@@ -278,12 +277,6 @@ uint8_t xive_source_esb_set(XiveSource *xsrc, uint32_t srcno, uint8_t pq);
 void xive_source_pic_print_info(XiveSource *xsrc, uint32_t offset,
                                 Monitor *mon);
 
-static inline qemu_irq xive_source_qirq(XiveSource *xsrc, uint32_t srcno)
-{
-    assert(srcno < xsrc->nr_irqs);
-    return xsrc->qirqs[srcno];
-}
-
 static inline bool xive_source_irq_is_lsi(XiveSource *xsrc, uint32_t srcno)
 {
     assert(srcno < xsrc->nr_irqs);
@@ -298,6 +291,35 @@ static inline void xive_source_irq_set(XiveSource *xsrc, uint32_t srcno,
         bitmap_set(xsrc->lsi_map, srcno, 1);
     }
 }
+
+void xive_source_set_irq(void *opaque, int srcno, int val);
+
+/*
+ * XIVE Thread interrupt Management (TM) context
+ */
+
+#define TYPE_XIVE_TCTX "xive-tctx"
+#define XIVE_TCTX(obj) OBJECT_CHECK(XiveTCTX, (obj), TYPE_XIVE_TCTX)
+
+/*
+ * XIVE Thread interrupt Management register rings :
+ *
+ *   QW-0  User       event-based exception state
+ *   QW-1  O/S        OS context for priority management, interrupt acks
+ *   QW-2  Pool       hypervisor pool context for virtual processors dispatched
+ *   QW-3  Physical   physical thread context and security context
+ */
+#define XIVE_TM_RING_COUNT      4
+#define XIVE_TM_RING_SIZE       0x10
+
+typedef struct XiveTCTX {
+    DeviceState parent_obj;
+
+    CPUState    *cs;
+    qemu_irq    output;
+
+    uint8_t     regs[XIVE_TM_RING_COUNT * XIVE_TM_RING_SIZE];
+} XiveTCTX;
 
 /*
  * XIVE Router
@@ -329,6 +351,7 @@ typedef struct XiveRouterClass {
                    XiveNVT *nvt);
     int (*write_nvt)(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
                      XiveNVT *nvt, uint8_t word_number);
+    XiveTCTX *(*get_tctx)(XiveRouter *xrtr, CPUState *cs);
 } XiveRouterClass;
 
 void xive_eas_pic_print_info(XiveEAS *eas, uint32_t lisn, Monitor *mon);
@@ -343,7 +366,7 @@ int xive_router_get_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
                         XiveNVT *nvt);
 int xive_router_write_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
                           XiveNVT *nvt, uint8_t word_number);
-
+XiveTCTX *xive_router_get_tctx(XiveRouter *xrtr, CPUState *cs);
 
 /*
  * XIVE END ESBs
@@ -375,33 +398,6 @@ typedef struct XiveENDSource {
 
 void xive_end_pic_print_info(XiveEND *end, uint32_t end_idx, Monitor *mon);
 void xive_end_queue_pic_print_info(XiveEND *end, uint32_t width, Monitor *mon);
-
-/*
- * XIVE Thread interrupt Management (TM) context
- */
-
-#define TYPE_XIVE_TCTX "xive-tctx"
-#define XIVE_TCTX(obj) OBJECT_CHECK(XiveTCTX, (obj), TYPE_XIVE_TCTX)
-
-/*
- * XIVE Thread interrupt Management register rings :
- *
- *   QW-0  User       event-based exception state
- *   QW-1  O/S        OS context for priority management, interrupt acks
- *   QW-2  Pool       hypervisor pool context for virtual processors dispatched
- *   QW-3  Physical   physical thread context and security context
- */
-#define XIVE_TM_RING_COUNT      4
-#define XIVE_TM_RING_SIZE       0x10
-
-typedef struct XiveTCTX {
-    DeviceState parent_obj;
-
-    CPUState    *cs;
-    qemu_irq    output;
-
-    uint8_t     regs[XIVE_TM_RING_COUNT * XIVE_TM_RING_SIZE];
-} XiveTCTX;
 
 /*
  * XIVE Thread Interrupt Management Aera (TIMA)

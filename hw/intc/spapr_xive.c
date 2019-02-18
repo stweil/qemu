@@ -16,6 +16,7 @@
 #include "monitor/monitor.h"
 #include "hw/ppc/fdt.h"
 #include "hw/ppc/spapr.h"
+#include "hw/ppc/spapr_cpu_core.h"
 #include "hw/ppc/spapr_xive.h"
 #include "hw/ppc/xive.h"
 #include "hw/ppc/xive_regs.h"
@@ -177,6 +178,15 @@ static void spapr_xive_map_mmio(sPAPRXive *xive)
     sysbus_mmio_map(SYS_BUS_DEVICE(xive), 0, xive->vc_base);
     sysbus_mmio_map(SYS_BUS_DEVICE(xive), 1, xive->end_base);
     sysbus_mmio_map(SYS_BUS_DEVICE(xive), 2, xive->tm_base);
+}
+
+void spapr_xive_mmio_set_enabled(sPAPRXive *xive, bool enable)
+{
+    memory_region_set_enabled(&xive->source.esb_mmio, enable);
+    memory_region_set_enabled(&xive->tm_mmio, enable);
+
+    /* Disable the END ESBs until a guest OS makes use of them */
+    memory_region_set_enabled(&xive->end_source.esb_mmio, false);
 }
 
 /*
@@ -381,6 +391,13 @@ static int spapr_xive_write_nvt(XiveRouter *xrtr, uint8_t nvt_blk,
     g_assert_not_reached();
 }
 
+static XiveTCTX *spapr_xive_get_tctx(XiveRouter *xrtr, CPUState *cs)
+{
+    PowerPCCPU *cpu = POWERPC_CPU(cs);
+
+    return spapr_cpu_state(cpu)->tctx;
+}
+
 static const VMStateDescription vmstate_spapr_xive_end = {
     .name = TYPE_SPAPR_XIVE "/end",
     .version_id = 1,
@@ -445,6 +462,7 @@ static void spapr_xive_class_init(ObjectClass *klass, void *data)
     xrc->write_end = spapr_xive_write_end;
     xrc->get_nvt = spapr_xive_get_nvt;
     xrc->write_nvt = spapr_xive_write_nvt;
+    xrc->get_tctx = spapr_xive_get_tctx;
 }
 
 static const TypeInfo spapr_xive_info = {
@@ -486,20 +504,6 @@ bool spapr_xive_irq_free(sPAPRXive *xive, uint32_t lisn)
     xive->eat[lisn].w &= cpu_to_be64(~EAS_VALID);
     xive_source_irq_set(xsrc, lisn, false);
     return true;
-}
-
-qemu_irq spapr_xive_qirq(sPAPRXive *xive, uint32_t lisn)
-{
-    XiveSource *xsrc = &xive->source;
-
-    if (lisn >= xive->nr_irqs) {
-        return NULL;
-    }
-
-    /* The sPAPR machine/device should have claimed the IRQ before */
-    assert(xive_eas_is_valid(&xive->eat[lisn]));
-
-    return xive_source_qirq(xsrc, lisn);
 }
 
 /*
