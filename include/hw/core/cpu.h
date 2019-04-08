@@ -556,7 +556,7 @@ struct CPUState {
 
     /* TODO Move common fields from CPUArchState here. */
     int cpu_index;
-    int cluster_index;
+    uint32_t cluster_index;
     uint32_t tcg_cflags;
     uint32_t halted;
     int32_t exception_index;
@@ -1195,7 +1195,7 @@ void cpu_exec_reset_hold(CPUState *cpu);
 extern const VMStateDescription vmstate_cpu_common;
 
 #define UNASSIGNED_CPU_INDEX -1
-#define UNASSIGNED_CLUSTER_INDEX -1
+#define UNASSIGNED_CLUSTER_INDEX UINT32_MAX
 
 enum CacheType {
     DATA_CACHE,
