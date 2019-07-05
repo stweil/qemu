@@ -102,6 +102,8 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "French"
 !insertmacro MUI_LANGUAGE "German"
+!insertmacro MUI_LANGUAGE "Italian"
+!insertmacro MUI_LANGUAGE "Spanish"
 
 ;--------------------------------
 
@@ -263,14 +265,14 @@ SectionEnd
     !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "System emulation."
     !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "Alpha system emulation."
     !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "PC i386 system emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools} "Tools."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools}   "Tools."
 !ifdef DLLDIR
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}   "Runtime Libraries (DLL)."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}     "Runtime Libraries (DLL)."
 !endif
 !ifdef CONFIG_DOCUMENTATION
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}   "Documentation."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}     "Documentation."
 !endif
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}  "Menu entries."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}    "Menu entries."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
