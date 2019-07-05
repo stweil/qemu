@@ -70,6 +70,42 @@ InstallDirRegKey HKLM "Software\qemu32" "Install_Dir"
 RequestExecutionLevel admin
 
 ;--------------------------------
+; define language strings
+LangString QEMU_Wiki_online_Text ${LANG_English} "Visit the QEMU Wiki online!"
+LangString QEMU_Wiki_online_Text ${LANG_Italian} "Visit the QEMU Wiki online!"
+LangString Required_Text ${LANG_English} "(required)"
+LangString Required_Text ${LANG_Italian} "(necessario)"
+LangString Tools_Section_Text ${LANG_English} "Tools"
+LangString Tools_Section_Text ${LANG_Italian} "Strumenti"
+LangString System_Emulations_Section_Text ${LANG_English} "System Emulations"
+LangString System_Emulations_Section_Text ${LANG_Italian} "Emulazioni sistema"
+LangString Desktop_icons_Text ${LANG_English} "Desktop icons"
+LangString Desktop_icons_Text ${LANG_Italian} "Icone desktop"
+LangString Libraries_DLL_Section_Text ${LANG_English} "Libraries (DLL)"
+LangString Libraries_DLL_Section_Text ${LANG_Italian} "Librerie (DLL)"
+LangString Documentation_Section_Text ${LANG_English} "Documentation"
+LangString Documentation_Section_Text ${LANG_Italian} "Documentazione"
+LangString User_Documentation_Link_Text ${LANG_English} "User Documentation"
+LangString User_Documentation_Link_Text ${LANG_Italian} "Documentazione utente (Inglese)"
+LangString Start_Menu_Shortcuts_Section_Text ${LANG_English} "Start Menu Shortcuts"
+LangString Start_Menu_Shortcuts_Section_Text ${LANG_Italian} "Collegamenti nel menu Start"
+LangString Uninstall_Link_Text ${LANG_English} "Uninstall"
+LangString Uninstall_Link_Text ${LANG_Italian} "Disinstalla"
+LangString Uninstall_Section_Text ${LANG_English} "Uninstall"
+LangString Uninstall_Section_Text ${LANG_Italian} "Disinstalla"
+LangString Technical_Documentation_Link_Text ${LANG_English} "Technical Documentation"
+LangString Technical_Documentation_Link_Text ${LANG_Italian} "Documentazione tecnica"
+LangString GNOME_desktop_icon_theme_Section_Text ${LANG_English} "GNOME desktop icon theme"
+LangString GNOME_desktop_icon_theme_Section_Text ${LANG_Italian} "Tema icon edesktop Gnome"
+LangString Alpha_system_emulation_Section_Text ${LANG_English} "Alpha system emulation"
+LangString Alpha_system_emulation_Section_Text ${LANG_Italian} "Emulazione sistema alpha"
+LangString PC_i386_system_emulation_Section_Text ${LANG_English} "PC i386 system emulation"
+LangString PC_i386_system_emulation_Section_Text ${LANG_Italian} "Emulazione sistema PC i386"
+LangString Menu_entries_Section_Text ${LANG_English} "Menu entries"
+LangString Menu_entries_Section_Text ${LANG_Italian} "Voci menu"
+
+
+;--------------------------------
 ; Interface Settings.
 ;!define MUI_HEADERIMAGE "qemu-nsis.bmp"
 ; !define MUI_SPECIALBITMAP "qemu.bmp"
@@ -89,7 +125,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_LINK "Visit the QEMU Wiki online!"
+!define MUI_FINISHPAGE_LINK "$(QEMU_Wiki_online_Text)"
 !define MUI_FINISHPAGE_LINK_LOCATION "${URL}"
 !insertmacro MUI_PAGE_FINISH
 
@@ -102,11 +138,12 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "French"
 !insertmacro MUI_LANGUAGE "German"
+!insertmacro MUI_LANGUAGE "Italian"
 
 ;--------------------------------
 
 ; The stuff to install.
-Section "${PRODUCT} (required)"
+Section "${PRODUCT} "$(Required_Text)""
 
     SectionIn RO
 
@@ -158,7 +195,7 @@ Section "${PRODUCT} (required)"
     WriteUninstaller "qemu-uninstall.exe"
 SectionEnd
 
-Section "Tools" SectionTools
+Section "$(Tools_Section_Text)" SectionTools
     SetOutPath "$INSTDIR"
     File "${BINDIR}\qemu-edid.exe"
     File "${BINDIR}\qemu-ga.exe"
@@ -166,13 +203,13 @@ Section "Tools" SectionTools
     File "${BINDIR}\qemu-io.exe"
 SectionEnd
 
-SectionGroup "System Emulations" SectionSystem
+SectionGroup "$(System_Emulations_Section_Text)" SectionSystem
 
 !include "${BINDIR}\system-emulations.nsh"
 
 SectionGroupEnd
 
-Section "Desktop icons" SectionGnome
+Section "$(Desktop_icons_Text)" SectionGnome
     SetOutPath "$INSTDIR\share"
 !ifdef W64
     File /r /usr/x86_64-w64-mingw32/sys-root/mingw/share/icons
@@ -182,32 +219,32 @@ Section "Desktop icons" SectionGnome
 SectionEnd
 
 !ifdef DLLDIR
-Section "Libraries (DLL)" SectionDll
+Section "$(Libraries_DLL_Section_Text)" SectionDll
     SetOutPath "$INSTDIR"
     File "${DLLDIR}\*.dll"
 SectionEnd
 !endif
 
 !ifdef CONFIG_DOCUMENTATION
-Section "Documentation" SectionDoc
+Section "$(Documentation_Section_Text)" SectionDoc
     SetOutPath "$INSTDIR"
     File "${BINDIR}\qemu-doc.html"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\User Documentation.lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(User_Documentation_Link_Text).lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
 SectionEnd
 !endif
 
 ; Optional section (can be disabled by the user)
-Section "Start Menu Shortcuts" SectionMenu
+Section "$(Start_Menu_Shortcuts_Section_Text)" SectionMenu
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\Uninstall.lnk" "${UNINST_EXE}" "" "${UNINST_EXE}" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Uninstall_Link_Text).lnk" "${UNINST_EXE}" "" "${UNINST_EXE}" 0
 SectionEnd
 
 ;--------------------------------
 
 ; Uninstaller
 
-Section "Uninstall"
+Section "$(Uninstall_Section_Text)"
     ; Remove registry keys
 !ifdef W64
     SetRegView 64
@@ -216,9 +253,9 @@ Section "Uninstall"
     DeleteRegKey HKLM SOFTWARE\${PRODUCT}
 
     ; Remove shortcuts, if any
-    Delete "$SMPROGRAMS\${PRODUCT}\User Documentation.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT}\Technical Documentation.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT}\Uninstall.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\$(User_Documentation_Link_Text).lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\$(Technical_Documentation_Link_Text).lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\$(Uninstall_Link_Text).lnk"
     RMDir "$SMPROGRAMS\${PRODUCT}"
 
     ; Remove files and directories used
@@ -261,18 +298,18 @@ SectionEnd
 
 ; Descriptions (mouse-over).
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionGnome}   "GNOME desktop icon theme."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "System emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "Alpha system emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "PC i386 system emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools} "Tools."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionGnome}   "$(GNOME_desktop_icon_theme_Section_Text)"
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "$(System_Emulations_Section_Text)"
+    !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "$(Alpha_system_emulation_Section_Text)"
+    !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "$(PC_i386_system_emulation_Section_Text)"
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools}   "$(Tools_Section_Text)"
 !ifdef DLLDIR
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}   "Runtime Libraries (DLL)."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}     "$(Libraries_DLL_Section_Text)"
 !endif
 !ifdef CONFIG_DOCUMENTATION
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}   "Documentation."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}     "$(Documentation_Section_Text)"
 !endif
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}  "Menu entries."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}    "$(Menu_entries_Section_Text)"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
