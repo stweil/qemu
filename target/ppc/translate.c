@@ -24,6 +24,7 @@
 #include "disas/disas.h"
 #include "exec/exec-all.h"
 #include "tcg-op.h"
+#include "tcg-op-gvec.h"
 #include "qemu/host-utils.h"
 #include "exec/cpu_ldst.h"
 
@@ -287,26 +288,22 @@ static void gen_exception_nip(DisasContext *ctx, uint32_t excp,
     ctx->exception = (excp);
 }
 
-/* Translates the EXCP_TRACE/BRANCH exceptions used on most PowerPCs to
- * EXCP_DEBUG, if we are running on cores using the debug enable bit (e.g.
- * BookE).
+/*
+ * Tells the caller what is the appropriate exception to generate and prepares
+ * SPR registers for this exception.
+ *
+ * The exception can be either POWERPC_EXCP_TRACE (on most PowerPCs) or
+ * POWERPC_EXCP_DEBUG (on BookE).
  */
-static uint32_t gen_prep_dbgex(DisasContext *ctx, uint32_t excp)
+static uint32_t gen_prep_dbgex(DisasContext *ctx)
 {
-    if ((ctx->singlestep_enabled & CPU_SINGLE_STEP)
-        && (excp == POWERPC_EXCP_BRANCH)) {
-        /* Trace excpt. has priority */
-        excp = POWERPC_EXCP_TRACE;
-    }
     if (ctx->flags & POWERPC_FLAG_DE) {
         target_ulong dbsr = 0;
-        switch (excp) {
-        case POWERPC_EXCP_TRACE:
+        if (ctx->singlestep_enabled & CPU_SINGLE_STEP) {
             dbsr = DBCR0_ICMP;
-            break;
-        case POWERPC_EXCP_BRANCH:
+        } else {
+            /* Must have been branch */
             dbsr = DBCR0_BRT;
-            break;
         }
         TCGv t0 = tcg_temp_new();
         gen_load_spr(t0, SPR_BOOKE_DBSR);
@@ -315,7 +312,7 @@ static uint32_t gen_prep_dbgex(DisasContext *ctx, uint32_t excp)
         tcg_temp_free(t0);
         return POWERPC_EXCP_DEBUG;
     } else {
-        return excp;
+        return POWERPC_EXCP_TRACE;
     }
 }
 
@@ -3569,7 +3566,8 @@ static void gen_doze(DisasContext *ctx)
     t = tcg_const_i32(PPC_PM_DOZE);
     gen_helper_pminsn(cpu_env, t);
     tcg_temp_free_i32(t);
-    gen_stop_exception(ctx);
+    /* Stop translation, as the CPU is supposed to sleep from now */
+    gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
 #endif /* defined(CONFIG_USER_ONLY) */
 }
 
@@ -3584,13 +3582,25 @@ static void gen_nap(DisasContext *ctx)
     t = tcg_const_i32(PPC_PM_NAP);
     gen_helper_pminsn(cpu_env, t);
     tcg_temp_free_i32(t);
-    gen_stop_exception(ctx);
+    /* Stop translation, as the CPU is supposed to sleep from now */
+    gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
 #endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_stop(DisasContext *ctx)
 {
-    gen_nap(ctx);
+#if defined(CONFIG_USER_ONLY)
+    GEN_PRIV;
+#else
+    TCGv_i32 t;
+
+    CHK_HV;
+    t = tcg_const_i32(PPC_PM_STOP);
+    gen_helper_pminsn(cpu_env, t);
+    tcg_temp_free_i32(t);
+    /* Stop translation, as the CPU is supposed to sleep from now */
+    gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
+#endif /* defined(CONFIG_USER_ONLY) */
 }
 
 static void gen_sleep(DisasContext *ctx)
@@ -3604,7 +3614,8 @@ static void gen_sleep(DisasContext *ctx)
     t = tcg_const_i32(PPC_PM_SLEEP);
     gen_helper_pminsn(cpu_env, t);
     tcg_temp_free_i32(t);
-    gen_stop_exception(ctx);
+    /* Stop translation, as the CPU is supposed to sleep from now */
+    gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
 #endif /* defined(CONFIG_USER_ONLY) */
 }
 
@@ -3619,7 +3630,8 @@ static void gen_rvwinkle(DisasContext *ctx)
     t = tcg_const_i32(PPC_PM_RVWINKLE);
     gen_helper_pminsn(cpu_env, t);
     tcg_temp_free_i32(t);
-    gen_stop_exception(ctx);
+    /* Stop translation, as the CPU is supposed to sleep from now */
+    gen_exception_nip(ctx, EXCP_HLT, ctx->base.pc_next);
 #endif /* defined(CONFIG_USER_ONLY) */
 }
 #endif /* #if defined(TARGET_PPC64) */
@@ -3652,10 +3664,8 @@ static void gen_lookup_and_goto_ptr(DisasContext *ctx)
         if (sse & GDBSTUB_SINGLE_STEP) {
             gen_debug_exception(ctx);
         } else if (sse & (CPU_SINGLE_STEP | CPU_BRANCH_STEP)) {
-            uint32_t excp = gen_prep_dbgex(ctx, POWERPC_EXCP_BRANCH);
-            if (excp != POWERPC_EXCP_NONE) {
-                gen_exception(ctx, excp);
-            }
+            uint32_t excp = gen_prep_dbgex(ctx);
+            gen_exception(ctx, excp);
         }
         tcg_gen_exit_tb(NULL, 0);
     } else {
@@ -6476,7 +6486,12 @@ static void gen_mbar(DisasContext *ctx)
 /* msync replaces sync on 440 */
 static void gen_msync_4xx(DisasContext *ctx)
 {
-    /* interpreted as no-op */
+    /* Only e500 seems to treat reserved bits as invalid */
+    if ((ctx->insns_flags2 & PPC2_BOOKE206) &&
+        (ctx->opcode & 0x03FFF801)) {
+        gen_inval_exception(ctx, POWERPC_EXCP_INVAL_INVAL);
+    }
+    /* otherwise interpreted as no-op */
 }
 
 /* icbt */
@@ -6662,34 +6677,22 @@ GEN_TM_PRIV_NOOP(trechkpt);
 
 static inline void get_fpr(TCGv_i64 dst, int regno)
 {
-    tcg_gen_ld_i64(dst, cpu_env, offsetof(CPUPPCState, vsr[regno].u64[0]));
+    tcg_gen_ld_i64(dst, cpu_env, fpr_offset(regno));
 }
 
 static inline void set_fpr(int regno, TCGv_i64 src)
 {
-    tcg_gen_st_i64(src, cpu_env, offsetof(CPUPPCState, vsr[regno].u64[0]));
+    tcg_gen_st_i64(src, cpu_env, fpr_offset(regno));
 }
 
 static inline void get_avr64(TCGv_i64 dst, int regno, bool high)
 {
-#ifdef HOST_WORDS_BIGENDIAN
-    tcg_gen_ld_i64(dst, cpu_env, offsetof(CPUPPCState,
-                                          vsr[32 + regno].u64[(high ? 0 : 1)]));
-#else
-    tcg_gen_ld_i64(dst, cpu_env, offsetof(CPUPPCState,
-                                          vsr[32 + regno].u64[(high ? 1 : 0)]));
-#endif
+    tcg_gen_ld_i64(dst, cpu_env, avr64_offset(regno, high));
 }
 
 static inline void set_avr64(int regno, TCGv_i64 src, bool high)
 {
-#ifdef HOST_WORDS_BIGENDIAN
-    tcg_gen_st_i64(src, cpu_env, offsetof(CPUPPCState,
-                                          vsr[32 + regno].u64[(high ? 0 : 1)]));
-#else
-    tcg_gen_st_i64(src, cpu_env, offsetof(CPUPPCState,
-                                          vsr[32 + regno].u64[(high ? 1 : 0)]));
-#endif
+    tcg_gen_st_i64(src, cpu_env, avr64_offset(regno, high));
 }
 
 #include "translate/fp-impl.inc.c"
@@ -7054,11 +7057,11 @@ GEN_HANDLER(wrteei, 0x1F, 0x03, 0x05, 0x000E7C01, PPC_WRTEE),
 GEN_HANDLER(dlmzb, 0x1F, 0x0E, 0x02, 0x00000000, PPC_440_SPEC),
 GEN_HANDLER_E(mbar, 0x1F, 0x16, 0x1a, 0x001FF801,
               PPC_BOOKE, PPC2_BOOKE206),
-GEN_HANDLER(msync_4xx, 0x1F, 0x16, 0x12, 0x03FFF801, PPC_BOOKE),
+GEN_HANDLER(msync_4xx, 0x1F, 0x16, 0x12, 0x039FF801, PPC_BOOKE),
 GEN_HANDLER2_E(icbt_440, "icbt", 0x1F, 0x16, 0x00, 0x03E00001,
                PPC_BOOKE, PPC2_BOOKE206),
 GEN_HANDLER2(icbt_440, "icbt", 0x1F, 0x06, 0x08, 0x03E00001,
-               PPC_440_SPEC),
+             PPC_440_SPEC),
 GEN_HANDLER(lvsl, 0x1f, 0x06, 0x00, 0x00000001, PPC_ALTIVEC),
 GEN_HANDLER(lvsr, 0x1f, 0x06, 0x01, 0x00000001, PPC_ALTIVEC),
 GEN_HANDLER(mfvscr, 0x04, 0x2, 0x18, 0x001ff800, PPC_ALTIVEC),
@@ -7402,7 +7405,7 @@ void ppc_cpu_dump_state(CPUState *cs, FILE *f, fprintf_function cpu_fprintf,
 #if !defined(NO_TIMER_DUMP)
     cpu_fprintf(f, "TB %08" PRIu32 " %08" PRIu64
 #if !defined(CONFIG_USER_ONLY)
-                " DECR %08" PRIu32
+                " DECR " TARGET_FMT_lu
 #endif
                 "\n",
                 cpu_ppc_load_tbu(env), cpu_ppc_load_tbl(env)
@@ -7466,7 +7469,8 @@ void ppc_cpu_dump_state(CPUState *cs, FILE *f, fprintf_function cpu_fprintf,
 
 #if defined(TARGET_PPC64)
     if (env->excp_model == POWERPC_EXCP_POWER7 ||
-        env->excp_model == POWERPC_EXCP_POWER8) {
+        env->excp_model == POWERPC_EXCP_POWER8 ||
+        env->excp_model == POWERPC_EXCP_POWER9)  {
         cpu_fprintf(f, "HSRR0 " TARGET_FMT_lx " HSRR1 " TARGET_FMT_lx "\n",
                     env->spr[SPR_HSRR0], env->spr[SPR_HSRR1]);
     }
@@ -7785,9 +7789,8 @@ static void ppc_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
                  ctx->exception != POWERPC_SYSCALL &&
                  ctx->exception != POWERPC_EXCP_TRAP &&
                  ctx->exception != POWERPC_EXCP_BRANCH)) {
-        uint32_t excp = gen_prep_dbgex(ctx, POWERPC_EXCP_TRACE);
-        if (excp != POWERPC_EXCP_NONE)
-            gen_exception_nip(ctx, excp, ctx->base.pc_next);
+        uint32_t excp = gen_prep_dbgex(ctx);
+        gen_exception_nip(ctx, excp, ctx->base.pc_next);
     }
 
     if (tcg_check_temp_count()) {

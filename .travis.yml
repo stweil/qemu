@@ -85,16 +85,28 @@ matrix:
         - CONFIG="--disable-user"
 
 
+    # Just build tools and run minimal unit and softfloat checks
     - env:
-        - CONFIG="--enable-debug --enable-debug-tcg"
-
-
-    - env:
-        - CONFIG="--disable-linux-aio --disable-cap-ng --disable-attr --disable-brlapi --disable-uuid --disable-libusb --disable-user"
-
+        - BASE_CONFIG="--enable-tools"
+        - CONFIG="--disable-user --disable-system"
+        - TEST_CMD="make check-unit check-softfloat -j3"
 
     - env:
-        - CONFIG="--enable-modules --disable-linux-user"
+        - CONFIG="--enable-debug --enable-debug-tcg --disable-user"
+
+
+    # TCG debug can be run just on it's own and is mostly agnostic to user/softmmu distinctions
+    - env:
+        - CONFIG="--enable-debug-tcg --disable-system"
+
+
+    - env:
+        - CONFIG="--disable-linux-aio --disable-cap-ng --disable-attr --disable-brlapi --disable-libusb --disable-user --disable-replication"
+
+
+    # Module builds are mostly of interest to major distros
+    - env:
+        - CONFIG="--enable-modules --target-list=aarch64-softmmu,arm-softmmu,i386-softmmu,mips-softmmu,mips64-softmmu,ppc64-softmmu,riscv64-softmmu,s390x-softmmu,x86_64-softmmu"
 
 
     # Alternate coroutines implementations are only really of interest to KVM users
@@ -109,8 +121,9 @@ matrix:
         - TEST_CMD="make check-unit -j3 V=1"
 
 
-    # Check we can build docs and tools
+    # Check we can build docs and tools (out of tree)
     - env:
+        - BUILD_DIR="out-of-tree/build/dir" SRC_DIR="../../.."
         - BASE_CONFIG="--enable-tools --enable-docs"
         - CONFIG="--target-list=x86_64-softmmu,aarch64-linux-user"
       addons:
@@ -119,11 +132,6 @@ matrix:
             - python-sphinx
             - texinfo
             - perl
-
-    # Test out-of-tree builds
-    - env:
-        - CONFIG="--enable-debug --enable-debug-tcg"
-        - BUILD_DIR="out-of-tree/build/dir" SRC_DIR="../../.."
 
 
     # Test with Clang for compile portability (Travis uses clang-5.0)
@@ -142,6 +150,12 @@ matrix:
         - CONFIG="--enable-gprof --enable-gcov --disable-pie --target-list=aarch64-softmmu,arm-softmmu,i386-softmmu,mips-softmmu,mips64-softmmu,ppc64-softmmu,riscv64-softmmu,s390x-softmmu,x86_64-softmmu"
       after_success:
         - ${SRC_DIR}/scripts/travis/coverage-summary.sh
+
+
+    # We manually include builds which we disable "make check" for
+    - env:
+        - CONFIG="--without-default-devices"
+        - TEST_CMD=""
 
 
     # We manually include builds which we disable "make check" for
@@ -177,7 +191,7 @@ matrix:
     - env:
         - CONFIG="--target-list=i386-softmmu,ppc-softmmu,ppc64-softmmu,m68k-softmmu,x86_64-softmmu"
       os: osx
-      osx_image: xcode10
+      osx_image: xcode10.2
       compiler: clang
 
 
@@ -251,6 +265,12 @@ matrix:
         - ./configure ${CONFIG} --extra-cflags="-g3 -O0 -fsanitize=thread -fuse-ld=gold" || { cat config.log && exit 1; }
 
 
+    # Run check-tcg against linux-user
     - env:
         - CONFIG="--disable-system"
+        - TEST_CMD="make -j3 check-tcg V=1"
+
+    # Run check-tcg against softmmu targets
+    - env:
+        - CONFIG="--target-list=xtensa-softmmu,arm-softmmu"
         - TEST_CMD="make -j3 check-tcg V=1"

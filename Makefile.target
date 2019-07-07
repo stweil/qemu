@@ -4,8 +4,11 @@ BUILD_DIR?=$(CURDIR)/..
 
 include ../config-host.mak
 include config-target.mak
-include config-devices.mak
 include $(SRC_PATH)/rules.mak
+
+ifdef CONFIG_SOFTMMU
+include config-devices.mak
+endif
 
 $(call set-vpath, $(SRC_PATH):$(BUILD_DIR))
 ifdef CONFIG_LINUX
@@ -37,9 +40,7 @@ PROGS=$(QEMU_PROG) $(QEMU_PROGW)
 STPFILES=
 
 # Makefile Tests
-ifdef CONFIG_USER_ONLY
 include $(SRC_PATH)/tests/tcg/Makefile.include
-endif
 
 config-target.h: config-target.h-timestamp
 config-target.h-timestamp: config-target.mak
@@ -101,6 +102,8 @@ all: $(PROGS) stap
 
 # Dummy command so that make thinks it has done something
 	@true
+
+obj-y += trace/
 
 #########################################################
 # cpu emulator library
@@ -170,15 +173,9 @@ endif # CONFIG_SOFTMMU
 dummy := $(call unnest-vars,,obj-y)
 all-obj-y := $(obj-y)
 
-target-obj-y :=
-block-obj-y :=
-common-obj-y :=
-chardev-obj-y :=
-slirp-obj-y :=
 include $(SRC_PATH)/Makefile.objs
-dummy := $(call unnest-vars,,target-obj-y)
-target-obj-y-save := $(target-obj-y)
 dummy := $(call unnest-vars,.., \
+               authz-obj-y \
                block-obj-y \
                block-obj-m \
                chardev-obj-y \
@@ -187,19 +184,18 @@ dummy := $(call unnest-vars,.., \
                qom-obj-y \
                io-obj-y \
                common-obj-y \
-               common-obj-m \
-               slirp-obj-y)
-target-obj-y := $(target-obj-y-save)
+               common-obj-m)
 all-obj-y += $(common-obj-y)
-all-obj-y += $(target-obj-y)
 all-obj-y += $(qom-obj-y)
+all-obj-$(CONFIG_SOFTMMU) += $(authz-obj-y)
 all-obj-$(CONFIG_SOFTMMU) += $(block-obj-y) $(chardev-obj-y)
 all-obj-$(CONFIG_USER_ONLY) += $(crypto-aes-obj-y)
 all-obj-$(CONFIG_SOFTMMU) += $(crypto-obj-y)
 all-obj-$(CONFIG_SOFTMMU) += $(io-obj-y)
-all-obj-$(CONFIG_SOFTMMU) += $(slirp-obj-y)
 
+ifdef CONFIG_SOFTMMU
 $(QEMU_PROG_BUILD): config-devices.mak
+endif
 
 COMMON_LDADDS = ../libqemuutil.a
 
@@ -224,6 +220,7 @@ clean: clean-target
 	rm -f *.a *~ $(PROGS)
 	rm -f $(shell find . -name '*.[od]')
 	rm -f hmp-commands.h gdbstub-xml.c
+	rm -f trace/generated-helpers.c trace/generated-helpers.c-timestamp
 ifdef CONFIG_TRACE_SYSTEMTAP
 	rm -f *.stp
 endif

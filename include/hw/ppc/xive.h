@@ -283,13 +283,10 @@ static inline bool xive_source_irq_is_lsi(XiveSource *xsrc, uint32_t srcno)
     return test_bit(srcno, xsrc->lsi_map);
 }
 
-static inline void xive_source_irq_set(XiveSource *xsrc, uint32_t srcno,
-                                       bool lsi)
+static inline void xive_source_irq_set_lsi(XiveSource *xsrc, uint32_t srcno)
 {
     assert(srcno < xsrc->nr_irqs);
-    if (lsi) {
-        bitmap_set(xsrc->lsi_map, srcno, 1);
-    }
+    bitmap_set(xsrc->lsi_map, srcno, 1);
 }
 
 void xive_source_set_irq(void *opaque, int srcno, int val);
@@ -367,6 +364,7 @@ int xive_router_get_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
 int xive_router_write_nvt(XiveRouter *xrtr, uint8_t nvt_blk, uint32_t nvt_idx,
                           XiveNVT *nvt, uint8_t word_number);
 XiveTCTX *xive_router_get_tctx(XiveRouter *xrtr, CPUState *cs);
+void xive_router_notify(XiveNotifier *xn, uint32_t lisn);
 
 /*
  * XIVE END ESBs
@@ -413,6 +411,9 @@ void xive_end_queue_pic_print_info(XiveEND *end, uint32_t width, Monitor *mon);
 #define XIVE_TM_USER_PAGE       0x3
 
 extern const MemoryRegionOps xive_tm_ops;
+void xive_tctx_tm_write(XiveTCTX *tctx, hwaddr offset, uint64_t value,
+                        unsigned size);
+uint64_t xive_tctx_tm_read(XiveTCTX *tctx, hwaddr offset, unsigned size);
 
 void xive_tctx_pic_print_info(XiveTCTX *tctx, Monitor *mon);
 Object *xive_tctx_create(Object *cpu, XiveRouter *xrtr, Error **errp);

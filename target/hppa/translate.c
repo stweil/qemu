@@ -347,6 +347,7 @@ static int expand_shl11(int val)
 /* Similarly, but we want to return to the main loop immediately
    to recognize unmasked interrupts.  */
 #define DISAS_IAQ_N_STALE_EXIT      DISAS_TARGET_2
+#define DISAS_EXIT                  DISAS_TARGET_3
 
 /* global register indexes */
 static TCGv_reg cpu_gr[32];
@@ -816,12 +817,10 @@ static bool gen_illegal(DisasContext *ctx)
 
 static bool use_goto_tb(DisasContext *ctx, target_ureg dest)
 {
-    /* Suppress goto_tb in the case of single-steping and IO.  */
-    if ((tb_cflags(ctx->base.tb) & CF_LAST_IO)
-        || ctx->base.singlestep_enabled) {
-        return false;
-    }
-    return true;
+    /* Suppress goto_tb for page crossing, IO, or single-steping.  */
+    return !(((ctx->base.pc_first ^ dest) & TARGET_PAGE_MASK)
+             || (tb_cflags(ctx->base.tb) & CF_LAST_IO)
+             || ctx->base.singlestep_enabled);
 }
 
 /* If the next insn is to be nullified, and it's on the same page,
@@ -2007,16 +2006,15 @@ static TCGv_reg do_ibranch_priv(DisasContext *ctx, TCGv_reg offset)
         /* Privilege 0 is maximum and is allowed to decrease.  */
         return offset;
     case 3:
-        /* Privilege 3 is minimum and is never allowed increase.  */
+        /* Privilege 3 is minimum and is never allowed to increase.  */
         dest = get_temp(ctx);
         tcg_gen_ori_reg(dest, offset, 3);
         break;
     default:
-        dest = tcg_temp_new();
+        dest = get_temp(ctx);
         tcg_gen_andi_reg(dest, offset, -4);
         tcg_gen_ori_reg(dest, dest, ctx->privilege);
         tcg_gen_movcond_reg(TCG_COND_GTU, dest, dest, offset, dest, offset);
-        tcg_temp_free(dest);
         break;
     }
     return dest;
@@ -2259,6 +2257,16 @@ static bool trans_mtctl(DisasContext *ctx, arg_mtctl *a)
                        offsetof(CPUHPPAState, cr_back[ctl - CR_IIASQ]));
         break;
 
+    case CR_PID1:
+    case CR_PID2:
+    case CR_PID3:
+    case CR_PID4:
+        tcg_gen_st_reg(reg, cpu_env, offsetof(CPUHPPAState, cr[ctl]));
+#ifndef CONFIG_USER_ONLY
+        gen_helper_change_prot_id(cpu_env);
+#endif
+        break;
+
     default:
         tcg_gen_st_reg(reg, cpu_env, offsetof(CPUHPPAState, cr[ctl]));
         break;
@@ -2475,9 +2483,8 @@ static bool trans_ixtlbx(DisasContext *ctx, arg_ixtlbx *a)
         gen_helper_itlbp(cpu_env, addr, reg);
     }
 
-    /* Exit TB for ITLB change if mmu is enabled.  This *should* not be
-       the case, since the OS TLB fill handler runs with mmu disabled.  */
-    if (!a->data && (ctx->tb_flags & PSW_C)) {
+    /* Exit TB for TLB change if mmu is enabled.  */
+    if (ctx->tb_flags & PSW_C) {
         ctx->base.is_jmp = DISAS_IAQ_N_STALE;
     }
     return nullify_end(ctx);
@@ -2504,7 +2511,7 @@ static bool trans_pxtlbx(DisasContext *ctx, arg_pxtlbx *a)
     }
 
     /* Exit TB for TLB change if mmu is enabled.  */
-    if (!a->data && (ctx->tb_flags & PSW_C)) {
+    if (ctx->tb_flags & PSW_C) {
         ctx->base.is_jmp = DISAS_IAQ_N_STALE;
     }
     return nullify_end(ctx);
@@ -3034,7 +3041,7 @@ static bool do_addb(DisasContext *ctx, unsigned r, TCGv_reg in1,
     DisasCond cond;
 
     in2 = load_gpr(ctx, r);
-    dest = dest_gpr(ctx, r);
+    dest = tcg_temp_new();
     sv = NULL;
     cb_msb = NULL;
 
@@ -3050,6 +3057,8 @@ static bool do_addb(DisasContext *ctx, unsigned r, TCGv_reg in1,
     }
 
     cond = do_cond(c * 2 + f, dest, cb_msb, sv);
+    save_gpr(ctx, r, dest);
+    tcg_temp_free(dest);
     return do_cbranch(ctx, disp, n, &cond);
 }
 
@@ -3447,6 +3456,8 @@ static bool trans_b_gate(DisasContext *ctx, arg_b_gate *a)
 {
     target_ureg dest = iaoq_dest(ctx, a->disp);
 
+    nullify_over(ctx);
+
     /* Make sure the caller hasn't done something weird with the queue.
      * ??? This is not quite the same as the PSW[B] bit, which would be
      * expensive to track.  Real hardware will trap for
@@ -3484,17 +3495,30 @@ static bool trans_b_gate(DisasContext *ctx, arg_b_gate *a)
     }
 #endif
 
-    return do_dbranch(ctx, dest, a->l, a->n);
+    if (a->l) {
+        TCGv_reg tmp = dest_gpr(ctx, a->l);
+        if (ctx->privilege < 3) {
+            tcg_gen_andi_reg(tmp, tmp, -4);
+        }
+        tcg_gen_ori_reg(tmp, tmp, ctx->privilege);
+        save_gpr(ctx, a->l, tmp);
+    }
+
+    return do_dbranch(ctx, dest, 0, a->n);
 }
 
 static bool trans_blr(DisasContext *ctx, arg_blr *a)
 {
-    TCGv_reg tmp = get_temp(ctx);
-
-    tcg_gen_shli_reg(tmp, load_gpr(ctx, a->x), 3);
-    tcg_gen_addi_reg(tmp, tmp, ctx->iaoq_f + 8);
-    /* The computation here never changes privilege level.  */
-    return do_ibranch(ctx, tmp, a->l, a->n);
+    if (a->x) {
+        TCGv_reg tmp = get_temp(ctx);
+        tcg_gen_shli_reg(tmp, load_gpr(ctx, a->x), 3);
+        tcg_gen_addi_reg(tmp, tmp, ctx->iaoq_f + 8);
+        /* The computation here never changes privilege level.  */
+        return do_ibranch(ctx, tmp, a->l, a->n);
+    } else {
+        /* BLR R0,RX is a good way to load PC+8 into RX.  */
+        return do_dbranch(ctx, ctx->iaoq_f + 8, a->l, a->n);
+    }
 }
 
 static bool trans_bv(DisasContext *ctx, arg_bv *a)
@@ -4045,6 +4069,13 @@ static bool trans_fmpyfadd_d(DisasContext *ctx, arg_fmpyfadd_d *a)
     return nullify_end(ctx);
 }
 
+static bool trans_diag(DisasContext *ctx, arg_diag *a)
+{
+    qemu_log_mask(LOG_UNIMP, "DIAG opcode ignored\n");
+    cond_free(&ctx->null_cond);
+    return true;
+}
+
 static void hppa_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
@@ -4188,19 +4219,31 @@ static void hppa_tr_translate_insn(DisasContextBase *dcbase, CPUState *cs)
     ctx->iaoq_b = ctx->iaoq_n;
     ctx->base.pc_next += 4;
 
-    if (ret == DISAS_NORETURN || ret == DISAS_IAQ_N_UPDATED) {
-        return;
-    }
-    if (ctx->iaoq_f == -1) {
-        tcg_gen_mov_reg(cpu_iaoq_f, cpu_iaoq_b);
-        copy_iaoq_entry(cpu_iaoq_b, ctx->iaoq_n, ctx->iaoq_n_var);
+    switch (ret) {
+    case DISAS_NORETURN:
+    case DISAS_IAQ_N_UPDATED:
+        break;
+
+    case DISAS_NEXT:
+    case DISAS_IAQ_N_STALE:
+    case DISAS_IAQ_N_STALE_EXIT:
+        if (ctx->iaoq_f == -1) {
+            tcg_gen_mov_reg(cpu_iaoq_f, cpu_iaoq_b);
+            copy_iaoq_entry(cpu_iaoq_b, ctx->iaoq_n, ctx->iaoq_n_var);
 #ifndef CONFIG_USER_ONLY
-        tcg_gen_mov_i64(cpu_iasq_f, cpu_iasq_b);
+            tcg_gen_mov_i64(cpu_iasq_f, cpu_iasq_b);
 #endif
-        nullify_save(ctx);
-        ctx->base.is_jmp = DISAS_IAQ_N_UPDATED;
-    } else if (ctx->iaoq_b == -1) {
-        tcg_gen_mov_reg(cpu_iaoq_b, ctx->iaoq_n_var);
+            nullify_save(ctx);
+            ctx->base.is_jmp = (ret == DISAS_IAQ_N_STALE_EXIT
+                                ? DISAS_EXIT
+                                : DISAS_IAQ_N_UPDATED);
+        } else if (ctx->iaoq_b == -1) {
+            tcg_gen_mov_reg(cpu_iaoq_b, ctx->iaoq_n_var);
+        }
+        break;
+
+    default:
+        g_assert_not_reached();
     }
 }
 
@@ -4222,11 +4265,12 @@ static void hppa_tr_tb_stop(DisasContextBase *dcbase, CPUState *cs)
     case DISAS_IAQ_N_UPDATED:
         if (ctx->base.singlestep_enabled) {
             gen_excp_1(EXCP_DEBUG);
-        } else if (is_jmp == DISAS_IAQ_N_STALE_EXIT) {
-            tcg_gen_exit_tb(NULL, 0);
-        } else {
+        } else if (is_jmp != DISAS_IAQ_N_STALE_EXIT) {
             tcg_gen_lookup_and_goto_ptr();
         }
+        /* FALLTHRU */
+    case DISAS_EXIT:
+        tcg_gen_exit_tb(NULL, 0);
         break;
     default:
         g_assert_not_reached();

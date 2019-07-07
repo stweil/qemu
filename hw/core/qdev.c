@@ -59,6 +59,8 @@ static void bus_remove_child(BusState *bus, DeviceState *child)
             snprintf(name, sizeof(name), "child[%d]", kid->index);
             QTAILQ_REMOVE(&bus->children, kid, sibling);
 
+            bus->num_children--;
+
             /* This gives back ownership of kid->child back to us.  */
             object_property_del(OBJECT(bus), name, NULL);
             object_unref(OBJECT(kid->child));
@@ -73,6 +75,7 @@ static void bus_add_child(BusState *bus, DeviceState *child)
     char name[32];
     BusChild *kid = g_malloc0(sizeof(*kid));
 
+    bus->num_children++;
     kid->index = bus->max_index++;
     kid->child = child;
     object_ref(OBJECT(kid->child));
@@ -233,14 +236,20 @@ HotplugHandler *qdev_get_machine_hotplug_handler(DeviceState *dev)
     return NULL;
 }
 
+HotplugHandler *qdev_get_bus_hotplug_handler(DeviceState *dev)
+{
+    if (dev->parent_bus) {
+        return dev->parent_bus->hotplug_handler;
+    }
+    return NULL;
+}
+
 HotplugHandler *qdev_get_hotplug_handler(DeviceState *dev)
 {
-    HotplugHandler *hotplug_ctrl;
+    HotplugHandler *hotplug_ctrl = qdev_get_machine_hotplug_handler(dev);
 
-    if (dev->parent_bus && dev->parent_bus->hotplug_handler) {
-        hotplug_ctrl = dev->parent_bus->hotplug_handler;
-    } else {
-        hotplug_ctrl = qdev_get_machine_hotplug_handler(dev);
+    if (hotplug_ctrl == NULL && dev->parent_bus) {
+        hotplug_ctrl = qdev_get_bus_hotplug_handler(dev);
     }
     return hotplug_ctrl;
 }
@@ -286,8 +295,7 @@ void qbus_reset_all_fn(void *opaque)
 void qdev_simple_device_unplug_cb(HotplugHandler *hotplug_dev,
                                   DeviceState *dev, Error **errp)
 {
-    /* just zap it */
-    object_unparent(OBJECT(dev));
+    object_property_set_bool(OBJECT(dev), false, "realized", NULL);
 }
 
 /*
@@ -970,25 +978,12 @@ static void device_initfn(Object *obj)
     QLIST_INIT(&dev->gpios);
 }
 
-void object_apply_compat_props(Object *obj)
-{
-    if (object_dynamic_cast(qdev_get_machine(), TYPE_MACHINE)) {
-        MachineState *m = MACHINE(qdev_get_machine());
-        MachineClass *mc = MACHINE_GET_CLASS(m);
-
-        if (m->accelerator) {
-            AccelClass *ac = ACCEL_GET_CLASS(m->accelerator);
-
-            if (ac->compat_props) {
-                object_apply_global_props(obj, ac->compat_props, &error_abort);
-            }
-        }
-        object_apply_global_props(obj, mc->compat_props, &error_abort);
-    }
-}
-
 static void device_post_init(Object *obj)
 {
+    /*
+     * Note: ordered so that the user's global properties take
+     * precedence.
+     */
     object_apply_compat_props(obj);
     qdev_prop_set_globals(DEVICE(obj));
 }

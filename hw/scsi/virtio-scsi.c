@@ -262,7 +262,13 @@ static int virtio_scsi_do_tmf(VirtIOSCSI *s, VirtIOSCSIReq *req)
     /* Here VIRTIO_SCSI_S_OK means "FUNCTION COMPLETE".  */
     req->resp.tmf.response = VIRTIO_SCSI_S_OK;
 
-    virtio_tswap32s(VIRTIO_DEVICE(s), &req->req.tmf.subtype);
+    /*
+     * req->req.tmf has the QEMU_PACKED attribute. Don't use virtio_tswap32s()
+     * to avoid compiler errors.
+     */
+    req->req.tmf.subtype =
+        virtio_tswap32(VIRTIO_DEVICE(s), req->req.tmf.subtype);
+
     switch (req->req.tmf.subtype) {
     case VIRTIO_SCSI_T_TMF_ABORT_TASK:
     case VIRTIO_SCSI_T_TMF_QUERY_TASK:
@@ -906,7 +912,7 @@ static void virtio_scsi_device_realize(DeviceState *dev, Error **errp)
     scsi_bus_new(&s->bus, sizeof(s->bus), dev,
                  &virtio_scsi_scsi_info, vdev->bus_name);
     /* override default SCSI bus hotplug-handler, with virtio-scsi's one */
-    qbus_set_hotplug_handler(BUS(&s->bus), dev, &error_abort);
+    qbus_set_hotplug_handler(BUS(&s->bus), OBJECT(dev), &error_abort);
 
     virtio_scsi_dataplane_setup(s, errp);
 }

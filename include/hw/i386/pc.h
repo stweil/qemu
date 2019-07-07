@@ -6,6 +6,7 @@
 #include "hw/boards.h"
 #include "hw/isa/isa.h"
 #include "hw/block/fdc.h"
+#include "hw/block/flash.h"
 #include "net/net.h"
 #include "hw/i386/ioapic.h"
 
@@ -39,13 +40,12 @@ struct PCMachineState {
     PCIBus *bus;
     FWCfgState *fw_cfg;
     qemu_irq *gsi;
+    PFlashCFI01 *flash[2];
 
     /* Configuration options: */
     uint64_t max_ram_below_4g;
     OnOffAuto vmport;
     OnOffAuto smm;
-
-    AcpiNVDIMMState acpi_nvdimm_state;
 
     bool acpi_build_enabled;
     bool smbus_enabled;
@@ -74,8 +74,6 @@ struct PCMachineState {
 #define PC_MACHINE_MAX_RAM_BELOW_4G "max-ram-below-4g"
 #define PC_MACHINE_VMPORT           "vmport"
 #define PC_MACHINE_SMM              "smm"
-#define PC_MACHINE_NVDIMM           "nvdimm"
-#define PC_MACHINE_NVDIMM_PERSIST   "nvdimm-persistence"
 #define PC_MACHINE_SMBUS            "smbus"
 #define PC_MACHINE_SATA             "sata"
 #define PC_MACHINE_PIT              "pit"
@@ -189,7 +187,6 @@ void pc_acpi_smi_interrupt(void *opaque, int irq, int level);
 
 void pc_cpus_init(PCMachineState *pcms);
 void pc_hot_add_cpu(const int64_t id, Error **errp);
-void pc_acpi_init(const char *default_dsdt);
 
 void pc_guest_info_init(PCMachineState *pcms);
 
@@ -278,8 +275,8 @@ extern PCIDevice *piix4_dev;
 int piix4_init(PCIBus *bus, ISABus **isa_bus, int devfn);
 
 /* pc_sysfw.c */
-void pc_system_firmware_init(MemoryRegion *rom_memory,
-                             bool isapc_ram_fw);
+void pc_system_flash_create(PCMachineState *pcms);
+void pc_system_firmware_init(PCMachineState *pcms, MemoryRegion *rom_memory);
 
 /* acpi-build.c */
 void pc_madt_cpu_entry(AcpiDeviceIf *adev, int uid,

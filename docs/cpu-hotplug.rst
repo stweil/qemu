@@ -60,7 +60,7 @@ vCPU hotplug
     hot-plugged (no "qom-path" member).  From its output in step (3), we
     can see that ``IvyBridge-IBRS-x86_64-cpu`` is present in socket 0,
     while hot-plugging a CPU into socket 1 requires passing the listed
-    properties to QMP ``device_add``:
+    properties to QMP ``device_add``::
 
       (QEMU) device_add id=cpu-2 driver=IvyBridge-IBRS-x86_64-cpu socket-id=1 core-id=0 thread-id=0
       {
@@ -137,6 +137,6 @@ From the 'qmp-shell', invoke the QMP ``device_del`` command::
     vCPU hot-unplug requires guest cooperation; so the ``device_del``
     command above does not guarantee vCPU removal -- it's a "request to
     unplug".  At this point, the guest will get a System Control
-    Interupt (SCI) and calls the ACPI handler for the affected vCPU
+    Interrupt (SCI) and calls the ACPI handler for the affected vCPU
     device.  Then the guest kernel will bring the vCPU offline and tell
     QEMU to unplug it.

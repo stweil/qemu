@@ -160,8 +160,10 @@ enum {
     /* Server doorbell variants */
     POWERPC_EXCP_SDOOR    = 99,
     POWERPC_EXCP_SDOOR_HV = 100,
+    /* ISA 3.00 additions */
+    POWERPC_EXCP_HVIRT    = 101,
     /* EOL                                                                   */
-    POWERPC_EXCP_NB       = 101,
+    POWERPC_EXCP_NB       = 102,
     /* QEMU exceptions: used internally during code translation              */
     POWERPC_EXCP_STOP         = 0x200, /* stop translation                   */
     POWERPC_EXCP_BRANCH       = 0x201, /* branch instruction                 */
@@ -230,6 +232,7 @@ struct ppc_spr_t {
     void (*oea_write)(DisasContext *ctx, int spr_num, int gpr_num);
     void (*hea_read)(DisasContext *ctx, int gpr_num, int spr_num);
     void (*hea_write)(DisasContext *ctx, int spr_num, int gpr_num);
+    unsigned int gdb_id;
 #endif
     const char *name;
     target_ulong default_value;
@@ -317,6 +320,10 @@ struct ppc_slb_t {
 #define SEGMENT_SHIFT_1T        40
 #define SEGMENT_MASK_1T         (~((1ULL << SEGMENT_SHIFT_1T) - 1))
 
+typedef struct ppc_v3_pate_t {
+    uint64_t dw0;
+    uint64_t dw1;
+} ppc_v3_pate_t;
 
 /*****************************************************************************/
 /* Machine state register bits definition                                    */
@@ -385,6 +392,7 @@ struct ppc_slb_t {
 #define LPCR_AIL          (3ull << LPCR_AIL_SHIFT)
 #define LPCR_UPRT         PPC_BIT(41) /* Use Process Table */
 #define LPCR_EVIRT        PPC_BIT(42) /* Enhanced Virtualisation */
+#define LPCR_HR           PPC_BIT(43) /* Host Radix */
 #define LPCR_ONL          PPC_BIT(45)
 #define LPCR_LD           PPC_BIT(46) /* Large Decrementer */
 #define LPCR_P7_PECE0     PPC_BIT(49)
@@ -412,6 +420,10 @@ struct ppc_slb_t {
 #define LPCR_RMI          PPC_BIT(62)
 #define LPCR_HVICE        PPC_BIT(62) /* HV Virtualisation Int Enable */
 #define LPCR_HDICE        PPC_BIT(63)
+
+/* PSSCR bits */
+#define PSSCR_ESL         PPC_BIT(42) /* Enable State Loss */
+#define PSSCR_EC          PPC_BIT(43) /* Exit Criterion */
 
 #define msr_sf   ((env->msr >> MSR_SF)   & 1)
 #define msr_isf  ((env->msr >> MSR_ISF)  & 1)
@@ -688,8 +700,6 @@ enum {
 /* Vector status and control register */
 #define VSCR_NJ		16 /* Vector non-java */
 #define VSCR_SAT	0 /* Vector saturation */
-#define vscr_nj		(((env->vscr) >> VSCR_NJ)	& 0x1)
-#define vscr_sat	(((env->vscr) >> VSCR_SAT)	& 0x1)
 
 /*****************************************************************************/
 /* BookE e500 MMU registers */
@@ -1053,10 +1063,12 @@ struct CPUPPCState {
     /* Special purpose registers */
     target_ulong spr[1024];
     ppc_spr_t spr_cb[1024];
-    /* Vector status and control register */
+    /* Vector status and control register, minus VSCR_SAT.  */
     uint32_t vscr;
     /* VSX registers (including FP and AVR) */
     ppc_vsr_t vsr[64] QEMU_ALIGNED(16);
+    /* Non-zero if and only if VSCR_SAT should be set.  */
+    ppc_vsr_t vscr_sat QEMU_ALIGNED(16);
     /* SPE registers */
     uint64_t spe_acc;
     uint32_t spe_fscr;
@@ -1109,11 +1121,13 @@ struct CPUPPCState {
      * instructions and SPRs are diallowed if MSR:HV is 0
      */
     bool has_hv_mode;
-    /* On P7/P8, set when in PM state, we need to handle resume
-     * in a special way (such as routing some resume causes to
-     * 0x100), so flag this here.
+
+    /*
+     * On P7/P8/P9, set when in PM state, we need to handle resume in
+     * a special way (such as routing some resume causes to 0x100, ie,
+     * sreset), so flag this here.
      */
-    bool in_pm_state;
+    bool resume_as_sreset;
 #endif
 
     /* Those resources are used only during code translation */
@@ -1238,7 +1252,7 @@ struct PPCVirtualHypervisorClass {
                         hwaddr ptex, int n);
     void (*store_hpte)(PPCVirtualHypervisor *vhyp, hwaddr ptex,
                        uint64_t pte0, uint64_t pte1);
-    uint64_t (*get_patbe)(PPCVirtualHypervisor *vhyp);
+    void (*get_pate)(PPCVirtualHypervisor *vhyp, ppc_v3_pate_t *entry);
     target_ulong (*encode_hpt_for_kvm_pr)(PPCVirtualHypervisor *vhyp);
 };
 
@@ -1263,6 +1277,10 @@ int ppc_cpu_gdb_read_register(CPUState *cpu, uint8_t *buf, int reg);
 int ppc_cpu_gdb_read_register_apple(CPUState *cpu, uint8_t *buf, int reg);
 int ppc_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 int ppc_cpu_gdb_write_register_apple(CPUState *cpu, uint8_t *buf, int reg);
+#ifndef CONFIG_USER_ONLY
+void ppc_gdb_gen_spr_xml(PowerPCCPU *cpu);
+const char *ppc_gdb_get_dynamic_xml(CPUState *cs, const char *xml_name);
+#endif
 int ppc64_cpu_write_elf64_note(WriteCoreDumpFunction f, CPUState *cs,
                                int cpuid, void *opaque);
 int ppc32_cpu_write_elf32_note(WriteCoreDumpFunction f, CPUState *cs,
@@ -1303,10 +1321,10 @@ uint32_t cpu_ppc_load_atbu (CPUPPCState *env);
 void cpu_ppc_store_atbl (CPUPPCState *env, uint32_t value);
 void cpu_ppc_store_atbu (CPUPPCState *env, uint32_t value);
 bool ppc_decr_clear_on_delivery(CPUPPCState *env);
-uint32_t cpu_ppc_load_decr (CPUPPCState *env);
-void cpu_ppc_store_decr (CPUPPCState *env, uint32_t value);
-uint32_t cpu_ppc_load_hdecr (CPUPPCState *env);
-void cpu_ppc_store_hdecr (CPUPPCState *env, uint32_t value);
+target_ulong cpu_ppc_load_decr(CPUPPCState *env);
+void cpu_ppc_store_decr(CPUPPCState *env, target_ulong value);
+target_ulong cpu_ppc_load_hdecr(CPUPPCState *env);
+void cpu_ppc_store_hdecr(CPUPPCState *env, target_ulong value);
 uint64_t cpu_ppc_load_purr (CPUPPCState *env);
 uint32_t cpu_ppc601_load_rtcl (CPUPPCState *env);
 uint32_t cpu_ppc601_load_rtcu (CPUPPCState *env);
@@ -2314,6 +2332,13 @@ enum {
      * them */
     POWER7_INPUT_NB,
 };
+
+enum {
+    /* POWER9 input pins */
+    POWER9_INPUT_INT        = 0,
+    POWER9_INPUT_HINT       = 1,
+    POWER9_INPUT_NB,
+};
 #endif
 
 /* Hardware exceptions definitions */
@@ -2338,6 +2363,7 @@ enum {
     PPC_INTERRUPT_PERFM,          /* Performance monitor interrupt        */
     PPC_INTERRUPT_HMI,            /* Hypervisor Maintainance interrupt    */
     PPC_INTERRUPT_HDOORBELL,      /* Hypervisor Doorbell interrupt        */
+    PPC_INTERRUPT_HVIRT,          /* Hypervisor virtualization interrupt  */
 };
 
 /* Processor Compatibility mask (PCR) */
@@ -2537,19 +2563,64 @@ static inline bool lsw_reg_in_range(int start, int nregs, int rx)
 }
 
 /* Accessors for FP, VMX and VSX registers */
+#if defined(HOST_WORDS_BIGENDIAN)
+#define VsrB(i) u8[i]
+#define VsrSB(i) s8[i]
+#define VsrH(i) u16[i]
+#define VsrSH(i) s16[i]
+#define VsrW(i) u32[i]
+#define VsrSW(i) s32[i]
+#define VsrD(i) u64[i]
+#define VsrSD(i) s64[i]
+#else
+#define VsrB(i) u8[15 - (i)]
+#define VsrSB(i) s8[15 - (i)]
+#define VsrH(i) u16[7 - (i)]
+#define VsrSH(i) s16[7 - (i)]
+#define VsrW(i) u32[3 - (i)]
+#define VsrSW(i) s32[3 - (i)]
+#define VsrD(i) u64[1 - (i)]
+#define VsrSD(i) s64[1 - (i)]
+#endif
+
+static inline int vsr64_offset(int i, bool high)
+{
+    return offsetof(CPUPPCState, vsr[i].VsrD(high ? 0 : 1));
+}
+
+static inline int vsr_full_offset(int i)
+{
+    return offsetof(CPUPPCState, vsr[i].u64[0]);
+}
+
+static inline int fpr_offset(int i)
+{
+    return vsr64_offset(i, true);
+}
+
 static inline uint64_t *cpu_fpr_ptr(CPUPPCState *env, int i)
 {
-    return &env->vsr[i].u64[0];
+    return (uint64_t *)((uintptr_t)env + fpr_offset(i));
 }
 
 static inline uint64_t *cpu_vsrl_ptr(CPUPPCState *env, int i)
 {
-    return &env->vsr[i].u64[1];
+    return (uint64_t *)((uintptr_t)env + vsr64_offset(i, false));
+}
+
+static inline long avr64_offset(int i, bool high)
+{
+    return vsr64_offset(i + 32, high);
+}
+
+static inline int avr_full_offset(int i)
+{
+    return vsr_full_offset(i + 32);
 }
 
 static inline ppc_avr_t *cpu_avr_ptr(CPUPPCState *env, int i)
 {
-    return &env->vsr[32 + i];
+    return (ppc_avr_t *)((uintptr_t)env + avr_full_offset(i));
 }
 
 void dump_mmu(FILE *f, fprintf_function cpu_fprintf, CPUPPCState *env);

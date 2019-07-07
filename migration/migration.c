@@ -31,6 +31,8 @@
 #include "migration/vmstate.h"
 #include "block/block.h"
 #include "qapi/error.h"
+#include "qapi/clone-visitor.h"
+#include "qapi/qapi-visit-sockets.h"
 #include "qapi/qapi-commands-migration.h"
 #include "qapi/qapi-events-migration.h"
 #include "qapi/qmp/qerror.h"
@@ -45,6 +47,7 @@
 #include "migration/colo.h"
 #include "hw/boards.h"
 #include "monitor/monitor.h"
+#include "net/announce.h"
 
 #define MAX_THROTTLE  (32 << 20)      /* Migration transfer speed throttling */
 
@@ -86,6 +89,15 @@
  */
 #define DEFAULT_MIGRATE_MAX_POSTCOPY_BANDWIDTH 0
 
+/*
+ * Parameters for self_announce_delay giving a stream of RARP/ARP
+ * packets after migration.
+ */
+#define DEFAULT_MIGRATE_ANNOUNCE_INITIAL  50
+#define DEFAULT_MIGRATE_ANNOUNCE_MAX     550
+#define DEFAULT_MIGRATE_ANNOUNCE_ROUNDS    5
+#define DEFAULT_MIGRATE_ANNOUNCE_STEP    100
+
 static NotifierList migration_state_notifiers =
     NOTIFIER_LIST_INITIALIZER(migration_state_notifiers);
 
@@ -116,6 +128,7 @@ static bool migration_object_check(MigrationState *ms, Error **errp);
 static int migration_maybe_pause(MigrationState *s,
                                  int *current_active_state,
                                  int new_state);
+static void migrate_fd_cancel(MigrationState *s);
 
 void migration_object_init(void)
 {
@@ -157,8 +170,13 @@ void migration_object_init(void)
     }
 }
 
-void migration_object_finalize(void)
+void migration_shutdown(void)
 {
+    /*
+     * Cancel the current migration - that will (eventually)
+     * stop the migration using this structure
+     */
+    migrate_fd_cancel(current_migration);
     object_unref(OBJECT(current_migration));
 }
 
@@ -197,6 +215,11 @@ void migration_incoming_state_destroy(void)
     }
 
     qemu_event_reset(&mis->main_thread_load_event);
+
+    if (mis->socket_address_list) {
+        qapi_free_SocketAddressList(mis->socket_address_list);
+        mis->socket_address_list = NULL;
+    }
 }
 
 static void migrate_generate_event(int new_state)
@@ -312,6 +335,17 @@ void migration_incoming_enable_colo(void)
     migration_colo_enabled = true;
 }
 
+void migrate_add_address(SocketAddress *address)
+{
+    MigrationIncomingState *mis = migration_incoming_get_current();
+    SocketAddressList *addrs;
+
+    addrs = g_new0(SocketAddressList, 1);
+    addrs->next = mis->socket_address_list;
+    mis->socket_address_list = addrs;
+    addrs->value = QAPI_CLONE(SocketAddress, address);
+}
+
 void qemu_start_incoming_migration(const char *uri, Error **errp)
 {
     const char *p;
@@ -364,7 +398,7 @@ static void process_incoming_migration_bh(void *opaque)
      * This must happen after all error conditions are dealt with and
      * we're sure the VM is going to be running on this host.
      */
-    qemu_announce_self();
+    qemu_announce_self(&mis->announce_timer, migrate_announce_params());
 
     if (multifd_load_cleanup(&local_err) != 0) {
         error_report_err(local_err);
@@ -383,6 +417,9 @@ static void process_incoming_migration_bh(void *opaque)
         } else {
             runstate_set(RUN_STATE_PAUSED);
         }
+    } else if (migration_incoming_colo_enabled()) {
+        migration_incoming_disable_colo();
+        vm_start();
     } else {
         runstate_set(global_state_get_runstate());
     }
@@ -739,8 +776,30 @@ MigrationParameters *qmp_query_migrate_parameters(Error **errp)
     params->max_postcopy_bandwidth = s->parameters.max_postcopy_bandwidth;
     params->has_max_cpu_throttle = true;
     params->max_cpu_throttle = s->parameters.max_cpu_throttle;
+    params->has_announce_initial = true;
+    params->announce_initial = s->parameters.announce_initial;
+    params->has_announce_max = true;
+    params->announce_max = s->parameters.announce_max;
+    params->has_announce_rounds = true;
+    params->announce_rounds = s->parameters.announce_rounds;
+    params->has_announce_step = true;
+    params->announce_step = s->parameters.announce_step;
 
     return params;
+}
+
+AnnounceParameters *migrate_announce_params(void)
+{
+    static AnnounceParameters ap;
+
+    MigrationState *s = migrate_get_current();
+
+    ap.initial = s->parameters.announce_initial;
+    ap.max = s->parameters.announce_max;
+    ap.rounds = s->parameters.announce_rounds;
+    ap.step = s->parameters.announce_step;
+
+    return &ap;
 }
 
 /*
@@ -957,6 +1016,11 @@ static bool migrate_caps_check(bool *cap_list,
             error_setg(errp, "Postcopy is not supported");
             return false;
         }
+
+        if (cap_list[MIGRATION_CAPABILITY_X_IGNORE_SHARED]) {
+            error_setg(errp, "Postcopy is not compatible with ignore-shared");
+            return false;
+        }
     }
 
     return true;
@@ -965,6 +1029,12 @@ static bool migrate_caps_check(bool *cap_list,
 static void fill_destination_migration_info(MigrationInfo *info)
 {
     MigrationIncomingState *mis = migration_incoming_get_current();
+
+    if (mis->socket_address_list) {
+        info->has_socket_address = true;
+        info->socket_address =
+            QAPI_CLONE(SocketAddressList, mis->socket_address_list);
+    }
 
     switch (mis->state) {
     case MIGRATION_STATUS_NONE:
@@ -1116,6 +1186,35 @@ static bool migrate_params_check(MigrationParameters *params, Error **errp)
         return false;
     }
 
+    if (params->has_announce_initial &&
+        params->announce_initial > 100000) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
+                   "announce_initial",
+                   "is invalid, it must be less than 100000 ms");
+        return false;
+    }
+    if (params->has_announce_max &&
+        params->announce_max > 100000) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
+                   "announce_max",
+                   "is invalid, it must be less than 100000 ms");
+       return false;
+    }
+    if (params->has_announce_rounds &&
+        params->announce_rounds > 1000) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
+                   "announce_rounds",
+                   "is invalid, it must be in the range of 0 to 1000");
+       return false;
+    }
+    if (params->has_announce_step &&
+        (params->announce_step < 1 ||
+        params->announce_step > 10000)) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
+                   "announce_step",
+                   "is invalid, it must be in the range of 1 to 10000 ms");
+       return false;
+    }
     return true;
 }
 
@@ -1189,6 +1288,18 @@ static void migrate_params_test_apply(MigrateSetParameters *params,
     }
     if (params->has_max_cpu_throttle) {
         dest->max_cpu_throttle = params->max_cpu_throttle;
+    }
+    if (params->has_announce_initial) {
+        dest->announce_initial = params->announce_initial;
+    }
+    if (params->has_announce_max) {
+        dest->announce_max = params->announce_max;
+    }
+    if (params->has_announce_rounds) {
+        dest->announce_rounds = params->announce_rounds;
+    }
+    if (params->has_announce_step) {
+        dest->announce_step = params->announce_step;
     }
 }
 
@@ -1271,6 +1382,18 @@ static void migrate_params_apply(MigrateSetParameters *params, Error **errp)
     }
     if (params->has_max_cpu_throttle) {
         s->parameters.max_cpu_throttle = params->max_cpu_throttle;
+    }
+    if (params->has_announce_initial) {
+        s->parameters.announce_initial = params->announce_initial;
+    }
+    if (params->has_announce_max) {
+        s->parameters.announce_max = params->announce_max;
+    }
+    if (params->has_announce_rounds) {
+        s->parameters.announce_rounds = params->announce_rounds;
+    }
+    if (params->has_announce_step) {
+        s->parameters.announce_step = params->announce_step;
     }
 }
 
@@ -1981,6 +2104,15 @@ bool migrate_dirty_bitmaps(void)
     s = migrate_get_current();
 
     return s->enabled_capabilities[MIGRATION_CAPABILITY_DIRTY_BITMAPS];
+}
+
+bool migrate_ignore_shared(void)
+{
+    MigrationState *s;
+
+    s = migrate_get_current();
+
+    return s->enabled_capabilities[MIGRATION_CAPABILITY_X_IGNORE_SHARED];
 }
 
 bool migrate_use_events(void)
@@ -2826,6 +2958,13 @@ static MigThrError postcopy_pause(MigrationState *s)
 static MigThrError migration_detect_error(MigrationState *s)
 {
     int ret;
+    int state = s->state;
+
+    if (state == MIGRATION_STATUS_CANCELLING ||
+        state == MIGRATION_STATUS_CANCELLED) {
+        /* End the migration, but don't set the state to failed */
+        return MIG_THR_ERR_FATAL;
+    }
 
     /* Try to detect any file errors */
     ret = qemu_file_get_error(s->to_dst_file);
@@ -2835,7 +2974,7 @@ static MigThrError migration_detect_error(MigrationState *s)
         return MIG_THR_ERR_NONE;
     }
 
-    if (s->state == MIGRATION_STATUS_POSTCOPY_ACTIVE && ret == -EIO) {
+    if (state == MIGRATION_STATUS_POSTCOPY_ACTIVE && ret == -EIO) {
         /*
          * For postcopy, we allow the network to be down for a
          * while. After that, it can be continued by a
@@ -2847,7 +2986,7 @@ static MigThrError migration_detect_error(MigrationState *s)
          * For precopy (or postcopy with error outside IO), we fail
          * with no time.
          */
-        migrate_set_state(&s->state, s->state, MIGRATION_STATUS_FAILED);
+        migrate_set_state(&s->state, state, MIGRATION_STATUS_FAILED);
         trace_migration_thread_file_err();
 
         /* Time to stop the migration, now. */
@@ -3042,6 +3181,7 @@ static void *migration_thread(void *opaque)
 
     rcu_register_thread();
 
+    object_ref(OBJECT(s));
     s->iteration_start_time = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
 
     qemu_savevm_state_header(s->to_dst_file);
@@ -3138,6 +3278,7 @@ static void *migration_thread(void *opaque)
 
     trace_migration_thread_after_loop();
     migration_iteration_finish(s);
+    object_unref(OBJECT(s));
     rcu_unregister_thread();
     return NULL;
 }
@@ -3274,6 +3415,18 @@ static Property migration_properties[] = {
     DEFINE_PROP_UINT8("max-cpu-throttle", MigrationState,
                       parameters.max_cpu_throttle,
                       DEFAULT_MIGRATE_MAX_CPU_THROTTLE),
+    DEFINE_PROP_SIZE("announce-initial", MigrationState,
+                      parameters.announce_initial,
+                      DEFAULT_MIGRATE_ANNOUNCE_INITIAL),
+    DEFINE_PROP_SIZE("announce-max", MigrationState,
+                      parameters.announce_max,
+                      DEFAULT_MIGRATE_ANNOUNCE_MAX),
+    DEFINE_PROP_SIZE("announce-rounds", MigrationState,
+                      parameters.announce_rounds,
+                      DEFAULT_MIGRATE_ANNOUNCE_ROUNDS),
+    DEFINE_PROP_SIZE("announce-step", MigrationState,
+                      parameters.announce_step,
+                      DEFAULT_MIGRATE_ANNOUNCE_STEP),
 
     /* Migration capabilities */
     DEFINE_PROP_MIG_CAP("x-xbzrle", MIGRATION_CAPABILITY_XBZRLE),
@@ -3346,6 +3499,10 @@ static void migration_instance_init(Object *obj)
     params->has_xbzrle_cache_size = true;
     params->has_max_postcopy_bandwidth = true;
     params->has_max_cpu_throttle = true;
+    params->has_announce_initial = true;
+    params->has_announce_max = true;
+    params->has_announce_rounds = true;
+    params->has_announce_step = true;
 
     qemu_sem_init(&ms->postcopy_pause_sem, 0);
     qemu_sem_init(&ms->postcopy_pause_rp_sem, 0);

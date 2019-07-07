@@ -39,6 +39,7 @@ typedef struct CommitBlockJob {
     BlockDriverState *base_bs;
     BlockdevOnError on_error;
     bool base_read_only;
+    bool chain_frozen;
     char *backing_file_str;
 } CommitBlockJob;
 
@@ -47,14 +48,9 @@ static int coroutine_fn commit_populate(BlockBackend *bs, BlockBackend *base,
                                         void *buf)
 {
     int ret = 0;
-    QEMUIOVector qiov;
-    struct iovec iov = {
-        .iov_base = buf,
-        .iov_len = bytes,
-    };
+    QEMUIOVector qiov = QEMU_IOVEC_INIT_BUF(qiov, buf, bytes);
 
     assert(bytes < SIZE_MAX);
-    qemu_iovec_init_external(&qiov, &iov, 1);
 
     ret = blk_co_preadv(bs, offset, qiov.size, &qiov, 0);
     if (ret < 0) {
@@ -73,6 +69,9 @@ static int commit_prepare(Job *job)
 {
     CommitBlockJob *s = container_of(job, CommitBlockJob, common.job);
 
+    bdrv_unfreeze_backing_chain(s->commit_top_bs, s->base_bs);
+    s->chain_frozen = false;
+
     /* Remove base node parent that still uses BLK_PERM_WRITE/RESIZE before
      * the normal backing chain can be restored. */
     blk_unref(s->base);
@@ -88,6 +87,10 @@ static void commit_abort(Job *job)
 {
     CommitBlockJob *s = container_of(job, CommitBlockJob, common.job);
     BlockDriverState *top_bs = blk_bs(s->top);
+
+    if (s->chain_frozen) {
+        bdrv_unfreeze_backing_chain(s->commit_top_bs, s->base_bs);
+    }
 
     /* Make sure commit_top_bs and top stay around until bdrv_replace_node() */
     bdrv_ref(top_bs);
@@ -230,9 +233,8 @@ static int coroutine_fn bdrv_commit_top_preadv(BlockDriverState *bs,
     return bdrv_co_preadv(bs->backing, offset, bytes, qiov, flags);
 }
 
-static void bdrv_commit_top_refresh_filename(BlockDriverState *bs, QDict *opts)
+static void bdrv_commit_top_refresh_filename(BlockDriverState *bs)
 {
-    bdrv_refresh_filename(bs->backing->bs);
     pstrcpy(bs->exact_filename, sizeof(bs->exact_filename),
             bs->backing->bs->filename);
 }
@@ -336,6 +338,11 @@ void commit_start(const char *job_id, BlockDriverState *bs,
         }
     }
 
+    if (bdrv_freeze_backing_chain(commit_top_bs, base, errp) < 0) {
+        goto fail;
+    }
+    s->chain_frozen = true;
+
     ret = block_job_add_bdrv(&s->common, "base", base, 0, BLK_PERM_ALL, errp);
     if (ret < 0) {
         goto fail;
@@ -368,16 +375,21 @@ void commit_start(const char *job_id, BlockDriverState *bs,
     return;
 
 fail:
+    if (s->chain_frozen) {
+        bdrv_unfreeze_backing_chain(commit_top_bs, base);
+    }
     if (s->base) {
         blk_unref(s->base);
     }
     if (s->top) {
         blk_unref(s->top);
     }
+    job_early_fail(&s->common.job);
+    /* commit_top_bs has to be replaced after deleting the block job,
+     * otherwise this would fail because of lack of permissions. */
     if (commit_top_bs) {
         bdrv_replace_node(commit_top_bs, top, &error_abort);
     }
-    job_early_fail(&s->common.job);
 }
 
 

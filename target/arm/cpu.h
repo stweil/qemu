@@ -1060,7 +1060,8 @@ void pmu_init(ARMCPU *cpu);
 #define SCTLR_R       (1U << 9) /* up to v6; RAZ in v7 */
 #define SCTLR_UMA     (1U << 9) /* v8 onward, AArch64 only */
 #define SCTLR_F       (1U << 10) /* up to v6 */
-#define SCTLR_SW      (1U << 10) /* v7, RES0 in v8 */
+#define SCTLR_SW      (1U << 10) /* v7 */
+#define SCTLR_EnRCTX  (1U << 10) /* in v8.0-PredInv */
 #define SCTLR_Z       (1U << 11) /* in v7, RES1 in v8 */
 #define SCTLR_EOS     (1U << 11) /* v8.5-ExS */
 #define SCTLR_I       (1U << 12)
@@ -1730,6 +1731,27 @@ FIELD(ID_DFR0, MPROFDBG, 20, 4)
 FIELD(ID_DFR0, PERFMON, 24, 4)
 FIELD(ID_DFR0, TRACEFILT, 28, 4)
 
+FIELD(MVFR0, SIMDREG, 0, 4)
+FIELD(MVFR0, FPSP, 4, 4)
+FIELD(MVFR0, FPDP, 8, 4)
+FIELD(MVFR0, FPTRAP, 12, 4)
+FIELD(MVFR0, FPDIVIDE, 16, 4)
+FIELD(MVFR0, FPSQRT, 20, 4)
+FIELD(MVFR0, FPSHVEC, 24, 4)
+FIELD(MVFR0, FPROUND, 28, 4)
+
+FIELD(MVFR1, FPFTZ, 0, 4)
+FIELD(MVFR1, FPDNAN, 4, 4)
+FIELD(MVFR1, SIMDLS, 8, 4)
+FIELD(MVFR1, SIMDINT, 12, 4)
+FIELD(MVFR1, SIMDSP, 16, 4)
+FIELD(MVFR1, SIMDHP, 20, 4)
+FIELD(MVFR1, FPHP, 24, 4)
+FIELD(MVFR1, SIMDFMAC, 28, 4)
+
+FIELD(MVFR2, SIMDMISC, 0, 4)
+FIELD(MVFR2, FPMISC, 4, 4)
+
 QEMU_BUILD_BUG_ON(ARRAY_SIZE(((ARMCPU *)0)->ccsidr) <= R_V7M_CSSELR_INDEX_MASK);
 
 /* If adding a feature bit which corresponds to a Linux ELF
@@ -1750,7 +1772,6 @@ enum arm_features {
     ARM_FEATURE_THUMB2,
     ARM_FEATURE_PMSA,   /* no MMU; may have Memory Protection Unit */
     ARM_FEATURE_VFP3,
-    ARM_FEATURE_VFP_FP16,
     ARM_FEATURE_NEON,
     ARM_FEATURE_M, /* Microcontroller profile.  */
     ARM_FEATURE_OMAPCP, /* OMAP specific CP15 ops handling.  */
@@ -2544,25 +2565,18 @@ bool write_list_to_cpustate(ARMCPU *cpu);
 /**
  * write_cpustate_to_list:
  * @cpu: ARMCPU
- * @kvm_sync: true if this is for syncing back to KVM
  *
  * For each register listed in the ARMCPU cpreg_indexes list, write
  * its value from the ARMCPUState structure into the cpreg_values list.
  * This is used to copy info from TCG's working data structures into
  * KVM or for outbound migration.
  *
- * @kvm_sync is true if we are doing this in order to sync the
- * register state back to KVM. In this case we will only update
- * values in the list if the previous list->cpustate sync actually
- * successfully wrote the CPU state. Otherwise we will keep the value
- * that is in the list.
- *
  * Returns: true if all register values were read correctly,
  * false if some register was unknown or could not be read.
  * Note that we do not stop early on failure -- we will attempt
  * reading all registers in the list.
  */
-bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync);
+bool write_cpustate_to_list(ARMCPU *cpu);
 
 #define ARM_CPUID_TI915T      0x54029152
 #define ARM_CPUID_TI925T      0x54029252
@@ -3035,11 +3049,20 @@ static inline bool arm_sctlr_b(CPUARMState *env)
         (env->cp15.sctlr_el[1] & SCTLR_B) != 0;
 }
 
+static inline uint64_t arm_sctlr(CPUARMState *env, int el)
+{
+    if (el == 0) {
+        /* FIXME: ARMv8.1-VHE S2 translation regime.  */
+        return env->cp15.sctlr_el[1];
+    } else {
+        return env->cp15.sctlr_el[el];
+    }
+}
+
+
 /* Return true if the processor is in big-endian mode. */
 static inline bool arm_cpu_data_is_big_endian(CPUARMState *env)
 {
-    int cur_el;
-
     /* In 32bit endianness is determined by looking at CPSR's E bit */
     if (!is_a64(env)) {
         return
@@ -3058,15 +3081,12 @@ static inline bool arm_cpu_data_is_big_endian(CPUARMState *env)
             arm_sctlr_b(env) ||
 #endif
                 ((env->uncached_cpsr & CPSR_E) ? 1 : 0);
+    } else {
+        int cur_el = arm_current_el(env);
+        uint64_t sctlr = arm_sctlr(env, cur_el);
+
+        return (sctlr & (cur_el ? SCTLR_EE : SCTLR_E0E)) != 0;
     }
-
-    cur_el = arm_current_el(env);
-
-    if (cur_el == 0) {
-        return (env->cp15.sctlr_el[1] & SCTLR_E0E) != 0;
-    }
-
-    return (env->cp15.sctlr_el[cur_el] & SCTLR_EE) != 0;
 }
 
 #include "exec/cpu-all.h"
@@ -3295,9 +3315,29 @@ static inline bool isar_feature_aa32_vcma(const ARMISARegisters *id)
     return FIELD_EX32(id->id_isar5, ID_ISAR5, VCMA) != 0;
 }
 
+static inline bool isar_feature_aa32_jscvt(const ARMISARegisters *id)
+{
+    return FIELD_EX32(id->id_isar6, ID_ISAR6, JSCVT) != 0;
+}
+
 static inline bool isar_feature_aa32_dp(const ARMISARegisters *id)
 {
     return FIELD_EX32(id->id_isar6, ID_ISAR6, DP) != 0;
+}
+
+static inline bool isar_feature_aa32_fhm(const ARMISARegisters *id)
+{
+    return FIELD_EX32(id->id_isar6, ID_ISAR6, FHM) != 0;
+}
+
+static inline bool isar_feature_aa32_sb(const ARMISARegisters *id)
+{
+    return FIELD_EX32(id->id_isar6, ID_ISAR6, SB) != 0;
+}
+
+static inline bool isar_feature_aa32_predinv(const ARMISARegisters *id)
+{
+    return FIELD_EX32(id->id_isar6, ID_ISAR6, SPECRES) != 0;
 }
 
 static inline bool isar_feature_aa32_fp16_arith(const ARMISARegisters *id)
@@ -3308,6 +3348,41 @@ static inline bool isar_feature_aa32_fp16_arith(const ARMISARegisters *id)
      * At which point we can properly set and check MVFR1.FPHP.
      */
     return FIELD_EX64(id->id_aa64pfr0, ID_AA64PFR0, FP) == 1;
+}
+
+/*
+ * We always set the FP and SIMD FP16 fields to indicate identical
+ * levels of support (assuming SIMD is implemented at all), so
+ * we only need one set of accessors.
+ */
+static inline bool isar_feature_aa32_fp16_spconv(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->mvfr1, MVFR1, FPHP) > 0;
+}
+
+static inline bool isar_feature_aa32_fp16_dpconv(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->mvfr1, MVFR1, FPHP) > 1;
+}
+
+static inline bool isar_feature_aa32_vsel(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->mvfr2, MVFR2, FPMISC) >= 1;
+}
+
+static inline bool isar_feature_aa32_vcvt_dr(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->mvfr2, MVFR2, FPMISC) >= 2;
+}
+
+static inline bool isar_feature_aa32_vrint(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->mvfr2, MVFR2, FPMISC) >= 3;
+}
+
+static inline bool isar_feature_aa32_vminmaxnm(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->mvfr2, MVFR2, FPMISC) >= 4;
 }
 
 /*
@@ -3373,6 +3448,26 @@ static inline bool isar_feature_aa64_dp(const ARMISARegisters *id)
     return FIELD_EX64(id->id_aa64isar0, ID_AA64ISAR0, DP) != 0;
 }
 
+static inline bool isar_feature_aa64_fhm(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar0, ID_AA64ISAR0, FHM) != 0;
+}
+
+static inline bool isar_feature_aa64_condm_4(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar0, ID_AA64ISAR0, TS) != 0;
+}
+
+static inline bool isar_feature_aa64_condm_5(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar0, ID_AA64ISAR0, TS) >= 2;
+}
+
+static inline bool isar_feature_aa64_jscvt(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar1, ID_AA64ISAR1, JSCVT) != 0;
+}
+
 static inline bool isar_feature_aa64_fcma(const ARMISARegisters *id)
 {
     return FIELD_EX64(id->id_aa64isar1, ID_AA64ISAR1, FCMA) != 0;
@@ -3391,6 +3486,21 @@ static inline bool isar_feature_aa64_pauth(const ARMISARegisters *id)
              FIELD_DP64(0, ID_AA64ISAR1, API, 0xf) |
              FIELD_DP64(0, ID_AA64ISAR1, GPA, 0xf) |
              FIELD_DP64(0, ID_AA64ISAR1, GPI, 0xf))) != 0;
+}
+
+static inline bool isar_feature_aa64_sb(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar1, ID_AA64ISAR1, SB) != 0;
+}
+
+static inline bool isar_feature_aa64_predinv(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar1, ID_AA64ISAR1, SPECRES) != 0;
+}
+
+static inline bool isar_feature_aa64_frint(const ARMISARegisters *id)
+{
+    return FIELD_EX64(id->id_aa64isar1, ID_AA64ISAR1, FRINTTS) != 0;
 }
 
 static inline bool isar_feature_aa64_fp16(const ARMISARegisters *id)

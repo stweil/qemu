@@ -41,10 +41,12 @@ struct HostMemoryBackendFile {
 static void
 file_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
 {
+#ifndef CONFIG_POSIX
+    error_setg(errp, "backend '%s' not supported on this host",
+               object_get_typename(OBJECT(backend)));
+#else
     HostMemoryBackendFile *fb = MEMORY_BACKEND_FILE(backend);
-#ifdef CONFIG_POSIX
     gchar *name;
-#endif
 
     if (!backend->size) {
         error_setg(errp, "can't create backend with size 0");
@@ -54,9 +56,29 @@ file_backend_memory_alloc(HostMemoryBackend *backend, Error **errp)
         error_setg(errp, "mem-path property not set");
         return;
     }
-#ifndef CONFIG_POSIX
-    error_setg(errp, "-mem-path not supported on this host");
-#else
+
+    /*
+     * Verify pmem file size since starting a guest with an incorrect size
+     * leads to confusing failures inside the guest.
+     */
+    if (fb->is_pmem) {
+        Error *local_err = NULL;
+        uint64_t size;
+
+        size = qemu_get_pmem_size(fb->mem_path, &local_err);
+        if (!size) {
+            error_propagate(errp, local_err);
+            return;
+        }
+
+        if (backend->size > size) {
+            error_setg(errp, "size property %" PRIu64 " is larger than "
+                       "pmem file \"%s\" size %" PRIu64, backend->size,
+                       fb->mem_path, size);
+            return;
+        }
+    }
+
     backend->force_prealloc = mem_prealloc;
     name = host_memory_backend_get_name(backend);
     memory_region_init_ram_from_file(&backend->mr, OBJECT(backend),

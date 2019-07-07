@@ -450,7 +450,7 @@ void pcie_cap_slot_plug_cb(HotplugHandler *hotplug_dev, DeviceState *dev,
 void pcie_cap_slot_unplug_cb(HotplugHandler *hotplug_dev, DeviceState *dev,
                              Error **errp)
 {
-    object_unparent(OBJECT(dev));
+    object_property_set_bool(OBJECT(dev), false, "realized", NULL);
 }
 
 static void pcie_unplug_device(PCIBus *bus, PCIDevice *dev, void *opaque)
@@ -458,6 +458,7 @@ static void pcie_unplug_device(PCIBus *bus, PCIDevice *dev, void *opaque)
     HotplugHandler *hotplug_ctrl = qdev_get_hotplug_handler(DEVICE(dev));
 
     hotplug_handler_unplug(hotplug_ctrl, DEVICE(dev), &error_abort);
+    object_unparent(OBJECT(dev));
 }
 
 void pcie_cap_slot_unplug_request_cb(HotplugHandler *hotplug_dev,
@@ -543,7 +544,7 @@ void pcie_cap_slot_init(PCIDevice *dev, uint16_t slot)
     dev->exp.hpev_notified = false;
 
     qbus_set_hotplug_handler(BUS(pci_bridge_get_sec_bus(PCI_BRIDGE(dev))),
-                             DEVICE(dev), NULL);
+                             OBJECT(dev), NULL);
 }
 
 void pcie_cap_slot_reset(PCIDevice *dev)
@@ -834,9 +835,12 @@ void pcie_add_capability(PCIDevice *dev,
 /*
  * Sync the PCIe Link Status negotiated speed and width of a bridge with the
  * downstream device.  If downstream device is not present, re-write with the
- * Link Capability fields.  Limit width and speed to bridge capabilities for
- * compatibility.  Use config_read to access the downstream device since it
- * could be an assigned device with volatile link information.
+ * Link Capability fields.  If downstream device reports invalid width or
+ * speed, replace with minimum values (LnkSta fields are RsvdZ on VFs but such
+ * values interfere with PCIe native hotplug detecting new devices).  Limit
+ * width and speed to bridge capabilities for compatibility.  Use config_read
+ * to access the downstream device since it could be an assigned device with
+ * volatile link information.
  */
 void pcie_sync_bridge_lnk(PCIDevice *bridge_dev)
 {
@@ -856,11 +860,15 @@ void pcie_sync_bridge_lnk(PCIDevice *bridge_dev)
         if ((lnksta & PCI_EXP_LNKSTA_NLW) > (lnkcap & PCI_EXP_LNKCAP_MLW)) {
             lnksta &= ~PCI_EXP_LNKSTA_NLW;
             lnksta |= lnkcap & PCI_EXP_LNKCAP_MLW;
+        } else if (!(lnksta & PCI_EXP_LNKSTA_NLW)) {
+            lnksta |= QEMU_PCI_EXP_LNKSTA_NLW(QEMU_PCI_EXP_LNK_X1);
         }
 
         if ((lnksta & PCI_EXP_LNKSTA_CLS) > (lnkcap & PCI_EXP_LNKCAP_SLS)) {
             lnksta &= ~PCI_EXP_LNKSTA_CLS;
             lnksta |= lnkcap & PCI_EXP_LNKCAP_SLS;
+        } else if (!(lnksta & PCI_EXP_LNKSTA_CLS)) {
+            lnksta |= QEMU_PCI_EXP_LNKSTA_CLS(QEMU_PCI_EXP_LNK_2_5GT);
         }
     }
 
@@ -905,4 +913,42 @@ void pcie_ats_init(PCIDevice *dev, uint16_t offset)
     pci_set_word(dev->config + offset + PCI_ATS_CTRL, 0);
 
     pci_set_word(dev->wmask + dev->exp.ats_cap + PCI_ATS_CTRL, 0x800f);
+}
+
+/* ACS (Access Control Services) */
+void pcie_acs_init(PCIDevice *dev, uint16_t offset)
+{
+    bool is_downstream = pci_is_express_downstream_port(dev);
+    uint16_t cap_bits = 0;
+
+    /* For endpoints, only multifunction devs may have an ACS capability: */
+    assert(is_downstream ||
+           (dev->cap_present & QEMU_PCI_CAP_MULTIFUNCTION) ||
+           PCI_FUNC(dev->devfn));
+
+    pcie_add_capability(dev, PCI_EXT_CAP_ID_ACS, PCI_ACS_VER, offset,
+                        PCI_ACS_SIZEOF);
+    dev->exp.acs_cap = offset;
+
+    if (is_downstream) {
+        /*
+         * Downstream ports must implement SV, TB, RR, CR, UF, and DT (with
+         * caveats on the latter four that we ignore for simplicity).
+         * Endpoints may also implement a subset of ACS capabilities,
+         * but these are optional if the endpoint does not support
+         * peer-to-peer between functions and thus omitted here.
+         */
+        cap_bits = PCI_ACS_SV | PCI_ACS_TB | PCI_ACS_RR |
+            PCI_ACS_CR | PCI_ACS_UF | PCI_ACS_DT;
+    }
+
+    pci_set_word(dev->config + offset + PCI_ACS_CAP, cap_bits);
+    pci_set_word(dev->wmask + offset + PCI_ACS_CTRL, cap_bits);
+}
+
+void pcie_acs_reset(PCIDevice *dev)
+{
+    if (dev->exp.acs_cap) {
+        pci_set_word(dev->config + dev->exp.acs_cap + PCI_ACS_CTRL, 0);
+    }
 }

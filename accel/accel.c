@@ -66,6 +66,7 @@ static int accel_init_machine(AccelClass *acc, MachineState *ms)
         *(acc->allowed) = false;
         object_unref(OBJECT(accel));
     }
+    object_set_accelerator_compat_props(acc->compat_props);
     return ret;
 }
 
@@ -91,7 +92,9 @@ void configure_accelerator(MachineState *ms, const char *progname)
 #elif defined(CONFIG_KVM)
             accel = "kvm";
 #else
-#error "No default accelerator available"
+            error_report("No accelerator selected and"
+                         " no default accelerator available");
+            exit(1);
 #endif
         }
     }

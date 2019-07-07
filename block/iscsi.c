@@ -145,6 +145,8 @@ static const unsigned iscsi_retry_times[] = {8, 32, 128, 512, 2048, 8192, 32768}
  * unallocated. */
 #define ISCSI_CHECKALLOC_THRES 64
 
+#ifdef __linux__
+
 static void
 iscsi_bh_cb(void *p)
 {
@@ -171,6 +173,8 @@ iscsi_schedule_bh(IscsiAIOCB *acb)
     acb->bh = aio_bh_new(acb->iscsilun->aio_context, iscsi_bh_cb, acb);
     qemu_bh_schedule(acb->bh);
 }
+
+#endif
 
 static void iscsi_co_generic_bh_cb(void *opaque)
 {
@@ -290,6 +294,8 @@ static void iscsi_co_init_iscsitask(IscsiLun *iscsilun, struct IscsiTask *iTask)
     };
 }
 
+#ifdef __linux__
+
 /* Called (via iscsi_service) with QemuMutex held. */
 static void
 iscsi_abort_task_cb(struct iscsi_context *iscsi, int status, void *command_data,
@@ -338,6 +344,7 @@ static const AIOCBInfo iscsi_aiocb_info = {
     .cancel_async       = iscsi_aio_cancel,
 };
 
+#endif
 
 static void iscsi_process_read(void *arg);
 static void iscsi_process_write(void *arg);
@@ -2448,6 +2455,20 @@ static QemuOptsList iscsi_create_opts = {
     }
 };
 
+static const char *const iscsi_strong_runtime_opts[] = {
+    "transport",
+    "portal",
+    "target",
+    "user",
+    "password",
+    "password-secret",
+    "lun",
+    "initiator-name",
+    "header-digest",
+
+    NULL
+};
+
 static BlockDriver bdrv_iscsi = {
     .format_name     = "iscsi",
     .protocol_name   = "iscsi",
@@ -2482,6 +2503,8 @@ static BlockDriver bdrv_iscsi = {
 
     .bdrv_detach_aio_context = iscsi_detach_aio_context,
     .bdrv_attach_aio_context = iscsi_attach_aio_context,
+
+    .strong_runtime_opts = iscsi_strong_runtime_opts,
 };
 
 #if LIBISCSI_API_VERSION >= (20160603)
@@ -2519,6 +2542,8 @@ static BlockDriver bdrv_iser = {
 
     .bdrv_detach_aio_context = iscsi_detach_aio_context,
     .bdrv_attach_aio_context = iscsi_attach_aio_context,
+
+    .strong_runtime_opts = iscsi_strong_runtime_opts,
 };
 #endif
 

@@ -42,7 +42,7 @@
 #include "sysemu/sysemu.h"
 #include "hw/sysbus.h"
 #include "sysemu/arch_init.h"
-#include "hw/i2c/smbus.h"
+#include "hw/i2c/smbus_eeprom.h"
 #include "hw/xen/xen.h"
 #include "exec/memory.h"
 #include "exec/address-spaces.h"
@@ -297,8 +297,8 @@ static void pc_init1(MachineState *machine,
                                  PC_MACHINE_ACPI_DEVICE_PROP, &error_abort);
     }
 
-    if (pcms->acpi_nvdimm_state.is_enabled) {
-        nvdimm_init_acpi_state(&pcms->acpi_nvdimm_state, system_io,
+    if (machine->nvdimms_state->is_enabled) {
+        nvdimm_init_acpi_state(machine->nvdimms_state, system_io,
                                pcms->fw_cfg, OBJECT(pcms));
     }
 }
@@ -444,6 +444,7 @@ static void pc_i440fx_3_1_machine_options(MachineClass *m)
 
     pc_i440fx_4_0_machine_options(m);
     m->is_default = 0;
+    m->smbus_no_migration_support = true;
     m->alias = NULL;
     pcmc->pvh_enabled = false;
     compat_props_add(m->compat_props, hw_compat_3_1, hw_compat_3_1_len);

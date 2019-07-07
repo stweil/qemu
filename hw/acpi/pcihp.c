@@ -174,6 +174,7 @@ static void acpi_pcihp_eject_slot(AcpiPciHpState *s, unsigned bsel, unsigned slo
             if (!acpi_pcihp_pc_no_hotplug(s, dev)) {
                 hotplug_ctrl = qdev_get_hotplug_handler(qdev);
                 hotplug_handler_unplug(hotplug_ctrl, qdev, &error_abort);
+                object_unparent(OBJECT(qdev));
             }
         }
     }
@@ -251,7 +252,7 @@ void acpi_pcihp_device_plug_cb(HotplugHandler *hotplug_dev, AcpiPciHpState *s,
             object_dynamic_cast(OBJECT(dev), TYPE_PCI_BRIDGE)) {
             PCIBus *sec = pci_bridge_get_sec_bus(PCI_BRIDGE(pdev));
 
-            qbus_set_hotplug_handler(BUS(sec), DEVICE(hotplug_dev),
+            qbus_set_hotplug_handler(BUS(sec), OBJECT(hotplug_dev),
                                      &error_abort);
             /* We don't have to overwrite any other hotplug handler yet */
             assert(QLIST_EMPTY(&sec->child));
@@ -269,7 +270,7 @@ void acpi_pcihp_device_plug_cb(HotplugHandler *hotplug_dev, AcpiPciHpState *s,
 void acpi_pcihp_device_unplug_cb(HotplugHandler *hotplug_dev, AcpiPciHpState *s,
                                  DeviceState *dev, Error **errp)
 {
-    object_unparent(OBJECT(dev));
+    object_property_set_bool(OBJECT(dev), false, "realized", NULL);
 }
 
 void acpi_pcihp_device_unplug_request_cb(HotplugHandler *hotplug_dev,

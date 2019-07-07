@@ -11,6 +11,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "qemu/bitops.h"
 #include "qapi/error.h"
 #include "trace.h"
 #include "hw/sysbus.h"
@@ -29,6 +30,7 @@ struct ARMSSEInfo {
     int sram_banks;
     int num_cpus;
     uint32_t sys_version;
+    uint32_t cpuwait_rst;
     SysConfigFormat sys_config_format;
     bool has_mhus;
     bool has_ppus;
@@ -43,6 +45,7 @@ static const ARMSSEInfo armsse_variants[] = {
         .sram_banks = 1,
         .num_cpus = 1,
         .sys_version = 0x41743,
+        .cpuwait_rst = 0,
         .sys_config_format = IoTKitFormat,
         .has_mhus = false,
         .has_ppus = false,
@@ -55,6 +58,7 @@ static const ARMSSEInfo armsse_variants[] = {
         .sram_banks = 4,
         .num_cpus = 2,
         .sys_version = 0x22041743,
+        .cpuwait_rst = 2,
         .sys_config_format = SSE200Format,
         .has_mhus = true,
         .has_ppus = true,
@@ -110,15 +114,16 @@ static bool irq_is_common[32] = {
     /* 30, 31: reserved */
 };
 
-/* Create an alias region of @size bytes starting at @base
+/*
+ * Create an alias region in @container of @size bytes starting at @base
  * which mirrors the memory starting at @orig.
  */
-static void make_alias(ARMSSE *s, MemoryRegion *mr, const char *name,
-                       hwaddr base, hwaddr size, hwaddr orig)
+static void make_alias(ARMSSE *s, MemoryRegion *mr, MemoryRegion *container,
+                       const char *name, hwaddr base, hwaddr size, hwaddr orig)
 {
-    memory_region_init_alias(mr, NULL, name, &s->container, orig, size);
+    memory_region_init_alias(mr, NULL, name, container, orig, size);
     /* The alias is even lower priority than unimplemented_device regions */
-    memory_region_add_subregion_overlap(&s->container, base, mr, -1500);
+    memory_region_add_subregion_overlap(container, base, mr, -1500);
 }
 
 static void irq_status_forwarder(void *opaque, int n, int level)
@@ -281,9 +286,9 @@ static void armsse_init(Object *obj)
                           sizeof(s->sysinfo), TYPE_IOTKIT_SYSINFO);
     if (info->has_mhus) {
         sysbus_init_child_obj(obj, "mhu0", &s->mhu[0], sizeof(s->mhu[0]),
-                              TYPE_UNIMPLEMENTED_DEVICE);
+                              TYPE_ARMSSE_MHU);
         sysbus_init_child_obj(obj, "mhu1", &s->mhu[1], sizeof(s->mhu[1]),
-                              TYPE_UNIMPLEMENTED_DEVICE);
+                              TYPE_ARMSSE_MHU);
     }
     if (info->has_ppus) {
         for (i = 0; i < info->num_cpus; i++) {
@@ -494,31 +499,33 @@ static void armsse_realize(DeviceState *dev, Error **errp)
 
         qdev_prop_set_uint32(cpudev, "num-irq", s->exp_numirq + 32);
         /*
-         * In real hardware the initial Secure VTOR is set from the INITSVTOR0
-         * register in the IoT Kit System Control Register block, and the
-         * initial value of that is in turn specifiable by the FPGA that
-         * instantiates the IoT Kit. In QEMU we don't implement this wrinkle,
-         * and simply set the CPU's init-svtor to the IoT Kit default value.
-         * In SSE-200 the situation is similar, except that the default value
-         * is a reset-time signal input. Typically a board using the SSE-200
-         * will have a system control processor whose boot firmware initializes
-         * the INITSVTOR* registers before powering up the CPUs in any case,
-         * so the hardware's default value doesn't matter. QEMU doesn't emulate
+         * In real hardware the initial Secure VTOR is set from the INITSVTOR*
+         * registers in the IoT Kit System Control Register block. In QEMU
+         * we set the initial value here, and also the reset value of the
+         * sysctl register, from this object's QOM init-svtor property.
+         * If the guest changes the INITSVTOR* registers at runtime then the
+         * code in iotkit-sysctl.c will update the CPU init-svtor property
+         * (which will then take effect on the next CPU warm-reset).
+         *
+         * Note that typically a board using the SSE-200 will have a system
+         * control processor whose boot firmware initializes the INITSVTOR*
+         * registers before powering up the CPUs. QEMU doesn't emulate
          * the control processor, so instead we behave in the way that the
-         * firmware does. All boards currently known about have firmware that
-         * sets the INITSVTOR0 and INITSVTOR1 registers to 0x10000000, like the
-         * IoTKit default. We can make this more configurable if necessary.
+         * firmware does: the initial value should be set by the board code
+         * (using the init-svtor property on the ARMSSE object) to match
+         * whatever its firmware does.
          */
-        qdev_prop_set_uint32(cpudev, "init-svtor", 0x10000000);
+        qdev_prop_set_uint32(cpudev, "init-svtor", s->init_svtor);
         /*
-         * Start all CPUs except CPU0 powered down. In real hardware it is
-         * a configurable property of the SSE-200 which CPUs start powered up
-         * (via the CPUWAIT0_RST and CPUWAIT1_RST parameters), but since all
-         * the boards we care about start CPU0 and leave CPU1 powered off,
-         * we hard-code that for now. We can add QOM properties for this
+         * CPUs start powered down if the corresponding bit in the CPUWAIT
+         * register is 1. In real hardware the CPUWAIT register reset value is
+         * a configurable property of the SSE-200 (via the CPUWAIT0_RST and
+         * CPUWAIT1_RST parameters), but since all the boards we care about
+         * start CPU0 and leave CPU1 powered off, we hard-code that in
+         * info->cpuwait_rst for now. We can add QOM properties for this
          * later if necessary.
          */
-        if (i > 0) {
+        if (extract32(info->cpuwait_rst, i, 1)) {
             object_property_set_bool(cpuobj, true, "start-powered-off", &err);
             if (err) {
                 error_propagate(errp, err);
@@ -608,16 +615,21 @@ static void armsse_realize(DeviceState *dev, Error **errp)
     }
 
     /* Set up the big aliases first */
-    make_alias(s, &s->alias1, "alias 1", 0x10000000, 0x10000000, 0x00000000);
-    make_alias(s, &s->alias2, "alias 2", 0x30000000, 0x10000000, 0x20000000);
+    make_alias(s, &s->alias1, &s->container, "alias 1",
+               0x10000000, 0x10000000, 0x00000000);
+    make_alias(s, &s->alias2, &s->container,
+               "alias 2", 0x30000000, 0x10000000, 0x20000000);
     /* The 0x50000000..0x5fffffff region is not a pure alias: it has
      * a few extra devices that only appear there (generally the
      * control interfaces for the protection controllers).
      * We implement this by mapping those devices over the top of this
-     * alias MR at a higher priority.
+     * alias MR at a higher priority. Some of the devices in this range
+     * are per-CPU, so we must put this alias in the per-cpu containers.
      */
-    make_alias(s, &s->alias3, "alias 3", 0x50000000, 0x10000000, 0x40000000);
-
+    for (i = 0; i < info->num_cpus; i++) {
+        make_alias(s, &s->alias3[i], &s->cpu_container[i],
+                   "alias 3", 0x50000000, 0x10000000, 0x40000000);
+    }
 
     /* Security controller */
     object_property_set_bool(OBJECT(&s->secctl), true, "realized", &err);
@@ -761,27 +773,49 @@ static void armsse_realize(DeviceState *dev, Error **errp)
     }
 
     if (info->has_mhus) {
-        for (i = 0; i < ARRAY_SIZE(s->mhu); i++) {
-            char *name = g_strdup_printf("MHU%d", i);
-            char *port = g_strdup_printf("port[%d]", i + 3);
+        /*
+         * An SSE-200 with only one CPU should have only one MHU created,
+         * with the region where the second MHU usually is being RAZ/WI.
+         * We don't implement that SSE-200 config; if we want to support
+         * it then this code needs to be enhanced to handle creating the
+         * RAZ/WI region instead of the second MHU.
+         */
+        assert(info->num_cpus == ARRAY_SIZE(s->mhu));
 
-            qdev_prop_set_string(DEVICE(&s->mhu[i]), "name", name);
-            qdev_prop_set_uint64(DEVICE(&s->mhu[i]), "size", 0x1000);
+        for (i = 0; i < ARRAY_SIZE(s->mhu); i++) {
+            char *port;
+            int cpunum;
+            SysBusDevice *mhu_sbd = SYS_BUS_DEVICE(&s->mhu[i]);
+
             object_property_set_bool(OBJECT(&s->mhu[i]), true,
                                      "realized", &err);
             if (err) {
                 error_propagate(errp, err);
                 return;
             }
-            mr = sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->mhu[i]), 0);
+            port = g_strdup_printf("port[%d]", i + 3);
+            mr = sysbus_mmio_get_region(mhu_sbd, 0);
             object_property_set_link(OBJECT(&s->apb_ppc0), OBJECT(mr),
                                      port, &err);
+            g_free(port);
             if (err) {
                 error_propagate(errp, err);
                 return;
             }
-            g_free(name);
-            g_free(port);
+
+            /*
+             * Each MHU has an irq line for each CPU:
+             *  MHU 0 irq line 0 -> CPU 0 IRQ 6
+             *  MHU 0 irq line 1 -> CPU 1 IRQ 6
+             *  MHU 1 irq line 0 -> CPU 0 IRQ 7
+             *  MHU 1 irq line 1 -> CPU 1 IRQ 7
+             */
+            for (cpunum = 0; cpunum < info->num_cpus; cpunum++) {
+                DeviceState *cpudev = DEVICE(&s->armv7m[cpunum]);
+
+                sysbus_connect_irq(mhu_sbd, cpunum,
+                                   qdev_get_gpio_in(cpudev, 6 + i));
+            }
         }
     }
 
@@ -970,6 +1004,14 @@ static void armsse_realize(DeviceState *dev, Error **errp)
     /* System information registers */
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysinfo), 0, 0x40020000);
     /* System control registers */
+    object_property_set_int(OBJECT(&s->sysctl), info->sys_version,
+                            "SYS_VERSION", &err);
+    object_property_set_int(OBJECT(&s->sysctl), info->cpuwait_rst,
+                            "CPUWAIT_RST", &err);
+    object_property_set_int(OBJECT(&s->sysctl), s->init_svtor,
+                            "INITSVTOR0_RST", &err);
+    object_property_set_int(OBJECT(&s->sysctl), s->init_svtor,
+                            "INITSVTOR1_RST", &err);
     object_property_set_bool(OBJECT(&s->sysctl), true, "realized", &err);
     if (err) {
         error_propagate(errp, err);
@@ -1185,6 +1227,7 @@ static Property armsse_properties[] = {
     DEFINE_PROP_UINT32("EXP_NUMIRQ", ARMSSE, exp_numirq, 64),
     DEFINE_PROP_UINT32("MAINCLK", ARMSSE, mainclk_frq, 0),
     DEFINE_PROP_UINT32("SRAM_ADDR_WIDTH", ARMSSE, sram_addr_width, 15),
+    DEFINE_PROP_UINT32("init-svtor", ARMSSE, init_svtor, 0x10000000),
     DEFINE_PROP_END_OF_LIST()
 };
 

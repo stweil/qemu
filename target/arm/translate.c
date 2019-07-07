@@ -298,17 +298,6 @@ static void gen_exception(int excp, uint32_t syndrome, uint32_t target_el)
     tcg_temp_free_i32(tcg_excp);
 }
 
-static void gen_ss_advance(DisasContext *s)
-{
-    /* If the singlestep state is Active-not-pending, advance to
-     * Active-pending.
-     */
-    if (s->ss_active) {
-        s->pstate_ss = 0;
-        gen_helper_clear_pstate_ss(cpu_env);
-    }
-}
-
 static void gen_step_complete_exception(DisasContext *s)
 {
     /* We just completed step of an insn. Move from Active-not-pending
@@ -3357,13 +3346,9 @@ static const uint8_t fp_decode_rm[] = {
     FPROUNDING_NEGINF,
 };
 
-static int disas_vfp_v8_insn(DisasContext *s, uint32_t insn)
+static int disas_vfp_misc_insn(DisasContext *s, uint32_t insn)
 {
     uint32_t rd, rn, rm, dp = extract32(insn, 8, 1);
-
-    if (!arm_dc_feature(s, ARM_FEATURE_V8)) {
-        return 1;
-    }
 
     if (dp) {
         VFP_DREG_D(rd, insn);
@@ -3375,15 +3360,18 @@ static int disas_vfp_v8_insn(DisasContext *s, uint32_t insn)
         rm = VFP_SREG_M(insn);
     }
 
-    if ((insn & 0x0f800e50) == 0x0e000a00) {
+    if ((insn & 0x0f800e50) == 0x0e000a00 && dc_isar_feature(aa32_vsel, s)) {
         return handle_vsel(insn, rd, rn, rm, dp);
-    } else if ((insn & 0x0fb00e10) == 0x0e800a00) {
+    } else if ((insn & 0x0fb00e10) == 0x0e800a00 &&
+               dc_isar_feature(aa32_vminmaxnm, s)) {
         return handle_vminmaxnm(insn, rd, rn, rm, dp);
-    } else if ((insn & 0x0fbc0ed0) == 0x0eb80a40) {
+    } else if ((insn & 0x0fbc0ed0) == 0x0eb80a40 &&
+               dc_isar_feature(aa32_vrint, s)) {
         /* VRINTA, VRINTN, VRINTP, VRINTM */
         int rounding = fp_decode_rm[extract32(insn, 16, 2)];
         return handle_vrint(insn, rd, rm, dp, rounding);
-    } else if ((insn & 0x0fbc0e50) == 0x0ebc0a40) {
+    } else if ((insn & 0x0fbc0e50) == 0x0ebc0a40 &&
+               dc_isar_feature(aa32_vcvt_dr, s)) {
         /* VCVTA, VCVTN, VCVTP, VCVTM */
         int rounding = fp_decode_rm[extract32(insn, 16, 2)];
         return handle_vcvt(insn, rd, rm, dp, rounding);
@@ -3427,10 +3415,12 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
     }
 
     if (extract32(insn, 28, 4) == 0xf) {
-        /* Encodings with T=1 (Thumb) or unconditional (ARM):
-         * only used in v8 and above.
+        /*
+         * Encodings with T=1 (Thumb) or unconditional (ARM):
+         * only used for the "miscellaneous VFP features" added in v8A
+         * and v7M (and gated on the MVFR2.FPMisc field).
          */
-        return disas_vfp_v8_insn(s, insn);
+        return disas_vfp_misc_insn(s, insn);
     }
 
     dp = ((insn & 0xf00) == 0xb00);
@@ -3639,52 +3629,125 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
             }
         } else {
             /* data processing */
+            bool rd_is_dp = dp;
+            bool rm_is_dp = dp;
+            bool no_output = false;
+
             /* The opcode is in bits 23, 21, 20 and 6.  */
             op = ((insn >> 20) & 8) | ((insn >> 19) & 6) | ((insn >> 6) & 1);
-            if (dp) {
-                if (op == 15) {
-                    /* rn is opcode */
-                    rn = ((insn >> 15) & 0x1e) | ((insn >> 7) & 1);
-                } else {
-                    /* rn is register number */
-                    VFP_DREG_N(rn, insn);
-                }
+            rn = VFP_SREG_N(insn);
 
-                if (op == 15 && (rn == 15 || ((rn & 0x1c) == 0x18) ||
-                                 ((rn & 0x1e) == 0x6))) {
-                    /* Integer or single/half precision destination.  */
-                    rd = VFP_SREG_D(insn);
-                } else {
-                    VFP_DREG_D(rd, insn);
-                }
-                if (op == 15 &&
-                    (((rn & 0x1c) == 0x10) || ((rn & 0x14) == 0x14) ||
-                     ((rn & 0x1e) == 0x4))) {
-                    /* VCVT from int or half precision is always from S reg
-                     * regardless of dp bit. VCVT with immediate frac_bits
-                     * has same format as SREG_M.
+            if (op == 15) {
+                /* rn is opcode, encoded as per VFP_SREG_N. */
+                switch (rn) {
+                case 0x00: /* vmov */
+                case 0x01: /* vabs */
+                case 0x02: /* vneg */
+                case 0x03: /* vsqrt */
+                    break;
+
+                case 0x04: /* vcvtb.f64.f16, vcvtb.f32.f16 */
+                case 0x05: /* vcvtt.f64.f16, vcvtt.f32.f16 */
+                    /*
+                     * VCVTB, VCVTT: only present with the halfprec extension
+                     * UNPREDICTABLE if bit 8 is set prior to ARMv8
+                     * (we choose to UNDEF)
                      */
-                    rm = VFP_SREG_M(insn);
-                } else {
-                    VFP_DREG_M(rm, insn);
+                    if (dp) {
+                        if (!dc_isar_feature(aa32_fp16_dpconv, s)) {
+                            return 1;
+                        }
+                    } else {
+                        if (!dc_isar_feature(aa32_fp16_spconv, s)) {
+                            return 1;
+                        }
+                    }
+                    rm_is_dp = false;
+                    break;
+                case 0x06: /* vcvtb.f16.f32, vcvtb.f16.f64 */
+                case 0x07: /* vcvtt.f16.f32, vcvtt.f16.f64 */
+                    if (dp) {
+                        if (!dc_isar_feature(aa32_fp16_dpconv, s)) {
+                            return 1;
+                        }
+                    } else {
+                        if (!dc_isar_feature(aa32_fp16_spconv, s)) {
+                            return 1;
+                        }
+                    }
+                    rd_is_dp = false;
+                    break;
+
+                case 0x08: case 0x0a: /* vcmp, vcmpz */
+                case 0x09: case 0x0b: /* vcmpe, vcmpez */
+                    no_output = true;
+                    break;
+
+                case 0x0c: /* vrintr */
+                case 0x0d: /* vrintz */
+                case 0x0e: /* vrintx */
+                    break;
+
+                case 0x0f: /* vcvt double<->single */
+                    rd_is_dp = !dp;
+                    break;
+
+                case 0x10: /* vcvt.fxx.u32 */
+                case 0x11: /* vcvt.fxx.s32 */
+                    rm_is_dp = false;
+                    break;
+                case 0x18: /* vcvtr.u32.fxx */
+                case 0x19: /* vcvtz.u32.fxx */
+                case 0x1a: /* vcvtr.s32.fxx */
+                case 0x1b: /* vcvtz.s32.fxx */
+                    rd_is_dp = false;
+                    break;
+
+                case 0x14: /* vcvt fp <-> fixed */
+                case 0x15:
+                case 0x16:
+                case 0x17:
+                case 0x1c:
+                case 0x1d:
+                case 0x1e:
+                case 0x1f:
+                    if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
+                        return 1;
+                    }
+                    /* Immediate frac_bits has same format as SREG_M.  */
+                    rm_is_dp = false;
+                    break;
+
+                case 0x13: /* vjcvt */
+                    if (!dp || !dc_isar_feature(aa32_jscvt, s)) {
+                        return 1;
+                    }
+                    rd_is_dp = false;
+                    break;
+
+                default:
+                    return 1;
                 }
+            } else if (dp) {
+                /* rn is register number */
+                VFP_DREG_N(rn, insn);
+            }
+
+            if (rd_is_dp) {
+                VFP_DREG_D(rd, insn);
             } else {
-                rn = VFP_SREG_N(insn);
-                if (op == 15 && rn == 15) {
-                    /* Double precision destination.  */
-                    VFP_DREG_D(rd, insn);
-                } else {
-                    rd = VFP_SREG_D(insn);
-                }
-                /* NB that we implicitly rely on the encoding for the frac_bits
-                 * in VCVT of fixed to float being the same as that of an SREG_M
-                 */
+                rd = VFP_SREG_D(insn);
+            }
+            if (rm_is_dp) {
+                VFP_DREG_M(rm, insn);
+            } else {
                 rm = VFP_SREG_M(insn);
             }
 
             veclen = s->vec_len;
-            if (op == 15 && rn > 3)
+            if (op == 15 && rn > 3) {
                 veclen = 0;
+            }
 
             /* Shut up compiler warnings.  */
             delta_m = 0;
@@ -3720,55 +3783,28 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
             /* Load the initial operands.  */
             if (op == 15) {
                 switch (rn) {
-                case 16:
-                case 17:
-                    /* Integer source */
-                    gen_mov_F0_vreg(0, rm);
-                    break;
-                case 8:
-                case 9:
-                    /* Compare */
+                case 0x08: case 0x09: /* Compare */
                     gen_mov_F0_vreg(dp, rd);
                     gen_mov_F1_vreg(dp, rm);
                     break;
-                case 10:
-                case 11:
-                    /* Compare with zero */
+                case 0x0a: case 0x0b: /* Compare with zero */
                     gen_mov_F0_vreg(dp, rd);
                     gen_vfp_F1_ld0(dp);
                     break;
-                case 20:
-                case 21:
-                case 22:
-                case 23:
-                case 28:
-                case 29:
-                case 30:
-                case 31:
+                case 0x14: /* vcvt fp <-> fixed */
+                case 0x15:
+                case 0x16:
+                case 0x17:
+                case 0x1c:
+                case 0x1d:
+                case 0x1e:
+                case 0x1f:
                     /* Source and destination the same.  */
                     gen_mov_F0_vreg(dp, rd);
                     break;
-                case 4:
-                case 5:
-                case 6:
-                case 7:
-                    /* VCVTB, VCVTT: only present with the halfprec extension
-                     * UNPREDICTABLE if bit 8 is set prior to ARMv8
-                     * (we choose to UNDEF)
-                     */
-                    if ((dp && !arm_dc_feature(s, ARM_FEATURE_V8)) ||
-                        !arm_dc_feature(s, ARM_FEATURE_VFP_FP16)) {
-                        return 1;
-                    }
-                    if (!extract32(rn, 1, 1)) {
-                        /* Half precision source.  */
-                        gen_mov_F0_vreg(0, rm);
-                        break;
-                    }
-                    /* Otherwise fall through */
                 default:
                     /* One source operand.  */
-                    gen_mov_F0_vreg(dp, rm);
+                    gen_mov_F0_vreg(rm_is_dp, rm);
                     break;
                 }
             } else {
@@ -4047,10 +4083,11 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
                         break;
                     }
                     case 15: /* single<->double conversion */
-                        if (dp)
+                        if (dp) {
                             gen_helper_vfp_fcvtsd(cpu_F0s, cpu_F0d, cpu_env);
-                        else
+                        } else {
                             gen_helper_vfp_fcvtds(cpu_F0d, cpu_F0s, cpu_env);
+                        }
                         break;
                     case 16: /* fuito */
                         gen_vfp_uito(dp, 0);
@@ -4058,28 +4095,19 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
                     case 17: /* fsito */
                         gen_vfp_sito(dp, 0);
                         break;
+                    case 19: /* vjcvt */
+                        gen_helper_vjcvt(cpu_F0s, cpu_F0d, cpu_env);
+                        break;
                     case 20: /* fshto */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_shto(dp, 16 - rm, 0);
                         break;
                     case 21: /* fslto */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_slto(dp, 32 - rm, 0);
                         break;
                     case 22: /* fuhto */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_uhto(dp, 16 - rm, 0);
                         break;
                     case 23: /* fulto */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_ulto(dp, 32 - rm, 0);
                         break;
                     case 24: /* ftoui */
@@ -4095,57 +4123,34 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
                         gen_vfp_tosiz(dp, 0);
                         break;
                     case 28: /* ftosh */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_tosh(dp, 16 - rm, 0);
                         break;
                     case 29: /* ftosl */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_tosl(dp, 32 - rm, 0);
                         break;
                     case 30: /* ftouh */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_touh(dp, 16 - rm, 0);
                         break;
                     case 31: /* ftoul */
-                        if (!arm_dc_feature(s, ARM_FEATURE_VFP3)) {
-                            return 1;
-                        }
                         gen_vfp_toul(dp, 32 - rm, 0);
                         break;
                     default: /* undefined */
-                        return 1;
+                        g_assert_not_reached();
                     }
                     break;
                 default: /* undefined */
                     return 1;
                 }
 
-                /* Write back the result.  */
-                if (op == 15 && (rn >= 8 && rn <= 11)) {
-                    /* Comparison, do nothing.  */
-                } else if (op == 15 && dp && ((rn & 0x1c) == 0x18 ||
-                                              (rn & 0x1e) == 0x6)) {
-                    /* VCVT double to int: always integer result.
-                     * VCVT double to half precision is always a single
-                     * precision result.
-                     */
-                    gen_mov_vreg_F0(0, rd);
-                } else if (op == 15 && rn == 15) {
-                    /* conversion */
-                    gen_mov_vreg_F0(!dp, rd);
-                } else {
-                    gen_mov_vreg_F0(dp, rd);
+                /* Write back the result, if any.  */
+                if (!no_output) {
+                    gen_mov_vreg_F0(rd_is_dp, rd);
                 }
 
                 /* break out of the loop if we have finished  */
-                if (veclen == 0)
+                if (veclen == 0) {
                     break;
+                }
 
                 if (op == 15 && delta_m == 0) {
                     /* single source one-many */
@@ -7871,7 +7876,7 @@ static int disas_neon_data_insn(DisasContext *s, uint32_t insn)
                     TCGv_ptr fpst;
                     TCGv_i32 ahp;
 
-                    if (!arm_dc_feature(s, ARM_FEATURE_VFP_FP16) ||
+                    if (!dc_isar_feature(aa32_fp16_spconv, s) ||
                         q || (rm & 1)) {
                         return 1;
                     }
@@ -7903,7 +7908,7 @@ static int disas_neon_data_insn(DisasContext *s, uint32_t insn)
                 {
                     TCGv_ptr fpst;
                     TCGv_i32 ahp;
-                    if (!arm_dc_feature(s, ARM_FEATURE_VFP_FP16) ||
+                    if (!dc_isar_feature(aa32_fp16_spconv, s) ||
                         q || (rd & 1)) {
                         return 1;
                     }
@@ -8367,15 +8372,9 @@ static int disas_neon_insn_3same_ext(DisasContext *s, uint32_t insn)
     gen_helper_gvec_3_ptr *fn_gvec_ptr = NULL;
     int rd, rn, rm, opr_sz;
     int data = 0;
-    bool q;
-
-    q = extract32(insn, 6, 1);
-    VFP_DREG_D(rd, insn);
-    VFP_DREG_N(rn, insn);
-    VFP_DREG_M(rm, insn);
-    if ((rd | rn | rm) & q) {
-        return 1;
-    }
+    int off_rn, off_rm;
+    bool is_long = false, q = extract32(insn, 6, 1);
+    bool ptr_is_env = false;
 
     if ((insn & 0xfe200f10) == 0xfc200800) {
         /* VCMLA -- 1111 110R R.1S .... .... 1000 ...0 .... */
@@ -8402,8 +8401,37 @@ static int disas_neon_insn_3same_ext(DisasContext *s, uint32_t insn)
             return 1;
         }
         fn_gvec = u ? gen_helper_gvec_udot_b : gen_helper_gvec_sdot_b;
+    } else if ((insn & 0xff300f10) == 0xfc200810) {
+        /* VFM[AS]L -- 1111 1100 S.10 .... .... 1000 .Q.1 .... */
+        int is_s = extract32(insn, 23, 1);
+        if (!dc_isar_feature(aa32_fhm, s)) {
+            return 1;
+        }
+        is_long = true;
+        data = is_s; /* is_2 == 0 */
+        fn_gvec_ptr = gen_helper_gvec_fmlal_a32;
+        ptr_is_env = true;
     } else {
         return 1;
+    }
+
+    VFP_DREG_D(rd, insn);
+    if (rd & q) {
+        return 1;
+    }
+    if (q || !is_long) {
+        VFP_DREG_N(rn, insn);
+        VFP_DREG_M(rm, insn);
+        if ((rn | rm) & q & !is_long) {
+            return 1;
+        }
+        off_rn = vfp_reg_offset(1, rn);
+        off_rm = vfp_reg_offset(1, rm);
+    } else {
+        rn = VFP_SREG_N(insn);
+        rm = VFP_SREG_M(insn);
+        off_rn = vfp_reg_offset(0, rn);
+        off_rm = vfp_reg_offset(0, rm);
     }
 
     if (s->fp_excp_el) {
@@ -8417,16 +8445,19 @@ static int disas_neon_insn_3same_ext(DisasContext *s, uint32_t insn)
 
     opr_sz = (1 + q) * 8;
     if (fn_gvec_ptr) {
-        TCGv_ptr fpst = get_fpstatus_ptr(1);
-        tcg_gen_gvec_3_ptr(vfp_reg_offset(1, rd),
-                           vfp_reg_offset(1, rn),
-                           vfp_reg_offset(1, rm), fpst,
+        TCGv_ptr ptr;
+        if (ptr_is_env) {
+            ptr = cpu_env;
+        } else {
+            ptr = get_fpstatus_ptr(1);
+        }
+        tcg_gen_gvec_3_ptr(vfp_reg_offset(1, rd), off_rn, off_rm, ptr,
                            opr_sz, opr_sz, data, fn_gvec_ptr);
-        tcg_temp_free_ptr(fpst);
+        if (!ptr_is_env) {
+            tcg_temp_free_ptr(ptr);
+        }
     } else {
-        tcg_gen_gvec_3_ool(vfp_reg_offset(1, rd),
-                           vfp_reg_offset(1, rn),
-                           vfp_reg_offset(1, rm),
+        tcg_gen_gvec_3_ool(vfp_reg_offset(1, rd), off_rn, off_rm,
                            opr_sz, opr_sz, data, fn_gvec);
     }
     return 0;
@@ -8445,14 +8476,9 @@ static int disas_neon_insn_2reg_scalar_ext(DisasContext *s, uint32_t insn)
     gen_helper_gvec_3 *fn_gvec = NULL;
     gen_helper_gvec_3_ptr *fn_gvec_ptr = NULL;
     int rd, rn, rm, opr_sz, data;
-    bool q;
-
-    q = extract32(insn, 6, 1);
-    VFP_DREG_D(rd, insn);
-    VFP_DREG_N(rn, insn);
-    if ((rd | rn) & q) {
-        return 1;
-    }
+    int off_rn, off_rm;
+    bool is_long = false, q = extract32(insn, 6, 1);
+    bool ptr_is_env = false;
 
     if ((insn & 0xff000f10) == 0xfe000800) {
         /* VCMLA (indexed) -- 1111 1110 S.RR .... .... 1000 ...0 .... */
@@ -8481,6 +8507,7 @@ static int disas_neon_insn_2reg_scalar_ext(DisasContext *s, uint32_t insn)
     } else if ((insn & 0xffb00f00) == 0xfe200d00) {
         /* V[US]DOT -- 1111 1110 0.10 .... .... 1101 .Q.U .... */
         int u = extract32(insn, 4, 1);
+
         if (!dc_isar_feature(aa32_dp, s)) {
             return 1;
         }
@@ -8488,10 +8515,48 @@ static int disas_neon_insn_2reg_scalar_ext(DisasContext *s, uint32_t insn)
         /* rm is just Vm, and index is M.  */
         data = extract32(insn, 5, 1); /* index */
         rm = extract32(insn, 0, 4);
+    } else if ((insn & 0xffa00f10) == 0xfe000810) {
+        /* VFM[AS]L -- 1111 1110 0.0S .... .... 1000 .Q.1 .... */
+        int is_s = extract32(insn, 20, 1);
+        int vm20 = extract32(insn, 0, 3);
+        int vm3 = extract32(insn, 3, 1);
+        int m = extract32(insn, 5, 1);
+        int index;
+
+        if (!dc_isar_feature(aa32_fhm, s)) {
+            return 1;
+        }
+        if (q) {
+            rm = vm20;
+            index = m * 2 + vm3;
+        } else {
+            rm = vm20 * 2 + m;
+            index = vm3;
+        }
+        is_long = true;
+        data = (index << 2) | is_s; /* is_2 == 0 */
+        fn_gvec_ptr = gen_helper_gvec_fmlal_idx_a32;
+        ptr_is_env = true;
     } else {
         return 1;
     }
 
+    VFP_DREG_D(rd, insn);
+    if (rd & q) {
+        return 1;
+    }
+    if (q || !is_long) {
+        VFP_DREG_N(rn, insn);
+        if (rn & q & !is_long) {
+            return 1;
+        }
+        off_rn = vfp_reg_offset(1, rn);
+        off_rm = vfp_reg_offset(1, rm);
+    } else {
+        rn = VFP_SREG_N(insn);
+        off_rn = vfp_reg_offset(0, rn);
+        off_rm = vfp_reg_offset(0, rm);
+    }
     if (s->fp_excp_el) {
         gen_exception_insn(s, 4, EXCP_UDEF,
                            syn_simd_access_trap(1, 0xe, false), s->fp_excp_el);
@@ -8503,16 +8568,19 @@ static int disas_neon_insn_2reg_scalar_ext(DisasContext *s, uint32_t insn)
 
     opr_sz = (1 + q) * 8;
     if (fn_gvec_ptr) {
-        TCGv_ptr fpst = get_fpstatus_ptr(1);
-        tcg_gen_gvec_3_ptr(vfp_reg_offset(1, rd),
-                           vfp_reg_offset(1, rn),
-                           vfp_reg_offset(1, rm), fpst,
+        TCGv_ptr ptr;
+        if (ptr_is_env) {
+            ptr = cpu_env;
+        } else {
+            ptr = get_fpstatus_ptr(1);
+        }
+        tcg_gen_gvec_3_ptr(vfp_reg_offset(1, rd), off_rn, off_rm, ptr,
                            opr_sz, opr_sz, data, fn_gvec_ptr);
-        tcg_temp_free_ptr(fpst);
+        if (!ptr_is_env) {
+            tcg_temp_free_ptr(ptr);
+        }
     } else {
-        tcg_gen_gvec_3_ool(vfp_reg_offset(1, rd),
-                           vfp_reg_offset(1, rn),
-                           vfp_reg_offset(1, rm),
+        tcg_gen_gvec_3_ool(vfp_reg_offset(1, rd), off_rn, off_rm,
                            opr_sz, opr_sz, data, fn_gvec);
     }
     return 0;
@@ -9201,6 +9269,17 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
                  * self-modifying code correctly and also to take
                  * any pending interrupts immediately.
                  */
+                gen_goto_tb(s, 0, s->pc & ~1);
+                return;
+            case 7: /* sb */
+                if ((insn & 0xf) || !dc_isar_feature(aa32_sb, s)) {
+                    goto illegal_op;
+                }
+                /*
+                 * TODO: There is no speculation barrier opcode
+                 * for TCG; MB and end the TB instead.
+                 */
+                tcg_gen_mb(TCG_MO_ALL | TCG_BAR_SC);
                 gen_goto_tb(s, 0, s->pc & ~1);
                 return;
             default:
@@ -10533,7 +10612,7 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
                             } else if (i == rn) {
                                 loaded_var = tmp;
                                 loaded_base = 1;
-                            } else if (rn == 15 && exc_return) {
+                            } else if (i == 15 && exc_return) {
                                 store_pc_exc_ret(s, tmp);
                             } else {
                                 store_reg_from_load(s, i, tmp);
@@ -11819,6 +11898,17 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
                              * and also to take any pending interrupts
                              * immediately.
                              */
+                            gen_goto_tb(s, 0, s->pc & ~1);
+                            break;
+                        case 7: /* sb */
+                            if ((insn & 0xf) || !dc_isar_feature(aa32_sb, s)) {
+                                goto illegal_op;
+                            }
+                            /*
+                             * TODO: There is no speculation barrier opcode
+                             * for TCG; MB and end the TB instead.
+                             */
+                            tcg_gen_mb(TCG_MO_ALL | TCG_BAR_SC);
                             gen_goto_tb(s, 0, s->pc & ~1);
                             break;
                         default:

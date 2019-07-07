@@ -28,7 +28,6 @@
 #include "sysemu/sysemu.h"
 #include "qapi/error.h"
 #include "qemu/range.h"
-#include "hw/nvram/fw_cfg.h"
 #include "exec/address-spaces.h"
 #include "hw/acpi/piix4.h"
 #include "hw/acpi/pcihp.h"
@@ -302,6 +301,11 @@ static const VMStateDescription vmstate_cpuhp_state = {
     }
 };
 
+static bool piix4_vmstate_need_smbus(void *opaque, int version_id)
+{
+    return pm_smbus_vmstate_needed();
+}
+
 /* qemu-kvm 1.2 uses version 3 but advertised as 2
  * To support incoming qemu-kvm 1.2 migration, change version_id
  * and minimum_version_id to 2 below (which breaks migration from
@@ -321,6 +325,8 @@ static const VMStateDescription vmstate_acpi = {
         VMSTATE_UINT16(ar.pm1.evt.en, PIIX4PMState),
         VMSTATE_UINT16(ar.pm1.cnt.cnt, PIIX4PMState),
         VMSTATE_STRUCT(apm, PIIX4PMState, 0, vmstate_apm, APMState),
+        VMSTATE_STRUCT_TEST(smb, PIIX4PMState, piix4_vmstate_need_smbus, 3,
+                            pmsmb_vmstate, PMSMBus),
         VMSTATE_TIMER_PTR(ar.tmr.timer, PIIX4PMState),
         VMSTATE_INT64(ar.tmr.overflow_time, PIIX4PMState),
         VMSTATE_STRUCT(ar.gpe, PIIX4PMState, 2, vmstate_gpe, ACPIGPE),
@@ -374,9 +380,17 @@ static void piix4_pm_powerdown_req(Notifier *n, void *opaque)
 static void piix4_device_pre_plug_cb(HotplugHandler *hotplug_dev,
                                     DeviceState *dev, Error **errp)
 {
+    PIIX4PMState *s = PIIX4_PM(hotplug_dev);
+
     if (object_dynamic_cast(OBJECT(dev), TYPE_PCI_DEVICE)) {
         acpi_pcihp_device_pre_plug_cb(hotplug_dev, dev, errp);
-    } else if (!object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM) &&
+    } else if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM)) {
+        if (!s->acpi_memory_hotplug.is_enabled) {
+            error_setg(errp,
+                "memory hotplug is not enabled: %s.memory-hotplug-support "
+                "is not set", object_get_typename(OBJECT(s)));
+        }
+    } else if (
                !object_dynamic_cast(OBJECT(dev), TYPE_CPU)) {
         error_setg(errp, "acpi: device pre plug request for not supported"
                    " device type: %s", object_get_typename(OBJECT(dev)));
@@ -388,8 +402,7 @@ static void piix4_device_plug_cb(HotplugHandler *hotplug_dev,
 {
     PIIX4PMState *s = PIIX4_PM(hotplug_dev);
 
-    if (s->acpi_memory_hotplug.is_enabled &&
-        object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM)) {
+    if (object_dynamic_cast(OBJECT(dev), TYPE_PC_DIMM)) {
         if (object_dynamic_cast(OBJECT(dev), TYPE_NVDIMM)) {
             nvdimm_acpi_plug_cb(hotplug_dev, dev);
         } else {
@@ -536,7 +549,7 @@ static void piix4_pm_realize(PCIDevice *dev, Error **errp)
 
     piix4_acpi_system_hot_add_init(pci_address_space_io(dev),
                                    pci_get_bus(dev), s);
-    qbus_set_hotplug_handler(BUS(pci_get_bus(dev)), DEVICE(s), &error_abort);
+    qbus_set_hotplug_handler(BUS(pci_get_bus(dev)), OBJECT(s), &error_abort);
 
     piix4_pm_add_propeties(s);
 }

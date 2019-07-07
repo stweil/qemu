@@ -27,6 +27,7 @@
 #include "qapi/error.h"
 #include "block/block_int.h"
 #include "sysemu/block-backend.h"
+#include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/error-report.h"
 #include "qemu/module.h"
@@ -194,13 +195,15 @@ static int vmdk_probe(const uint8_t *buf, int buf_size, const char *filename)
             }
             if (end - p >= strlen("version=X\n")) {
                 if (strncmp("version=1\n", p, strlen("version=1\n")) == 0 ||
-                    strncmp("version=2\n", p, strlen("version=2\n")) == 0) {
+                    strncmp("version=2\n", p, strlen("version=2\n")) == 0 ||
+                    strncmp("version=3\n", p, strlen("version=3\n")) == 0) {
                     return 100;
                 }
             }
             if (end - p >= strlen("version=X\r\n")) {
                 if (strncmp("version=1\r\n", p, strlen("version=1\r\n")) == 0 ||
-                    strncmp("version=2\r\n", p, strlen("version=2\r\n")) == 0) {
+                    strncmp("version=2\r\n", p, strlen("version=2\r\n")) == 0 ||
+                    strncmp("version=3\r\n", p, strlen("version=3\r\n")) == 0) {
                     return 100;
                 }
             }
@@ -386,12 +389,14 @@ static int vmdk_parent_open(BlockDriverState *bs)
             ret = -EINVAL;
             goto out;
         }
-        if ((end_name - p_name) > sizeof(bs->backing_file) - 1) {
+        if ((end_name - p_name) > sizeof(bs->auto_backing_file) - 1) {
             ret = -EINVAL;
             goto out;
         }
 
-        pstrcpy(bs->backing_file, end_name - p_name + 1, p_name);
+        pstrcpy(bs->auto_backing_file, end_name - p_name + 1, p_name);
+        pstrcpy(bs->backing_file, sizeof(bs->backing_file),
+                bs->auto_backing_file);
     }
 
 out:
@@ -479,6 +484,7 @@ static int vmdk_init_tables(BlockDriverState *bs, VmdkExtent *extent,
                      extent->l1_table,
                      l1_size);
     if (ret < 0) {
+        bdrv_refresh_filename(extent->file->bs);
         error_setg_errno(errp, -ret,
                          "Could not read l1 table from extent '%s'",
                          extent->file->bs->filename);
@@ -499,6 +505,7 @@ static int vmdk_init_tables(BlockDriverState *bs, VmdkExtent *extent,
                          extent->l1_backup_table,
                          l1_size);
         if (ret < 0) {
+            bdrv_refresh_filename(extent->file->bs);
             error_setg_errno(errp, -ret,
                              "Could not read l1 backup table from extent '%s'",
                              extent->file->bs->filename);
@@ -530,6 +537,7 @@ static int vmdk_open_vmfs_sparse(BlockDriverState *bs,
 
     ret = bdrv_pread(file, sizeof(magic), &header, sizeof(header));
     if (ret < 0) {
+        bdrv_refresh_filename(file->bs);
         error_setg_errno(errp, -ret,
                          "Could not read header from file '%s'",
                          file->bs->filename);
@@ -607,6 +615,7 @@ static int vmdk_open_vmdk4(BlockDriverState *bs,
 
     ret = bdrv_pread(file, sizeof(magic), &header, sizeof(header));
     if (ret < 0) {
+        bdrv_refresh_filename(file->bs);
         error_setg_errno(errp, -ret,
                          "Could not read header from file '%s'",
                          file->bs->filename);
@@ -861,13 +870,13 @@ static int vmdk_parse_extents(const char *desc, BlockDriverState *bs,
         if (!path_is_absolute(fname) && !path_has_protocol(fname) &&
             !desc_file_path[0])
         {
+            bdrv_refresh_filename(bs->file->bs);
             error_setg(errp, "Cannot use relative extent paths with VMDK "
                        "descriptor file '%s'", bs->file->bs->filename);
             return -EINVAL;
         }
 
-        extent_path = g_malloc0(PATH_MAX);
-        path_combine(extent_path, PATH_MAX, desc_file_path, fname);
+        extent_path = path_combine(desc_file_path, fname);
 
         ret = snprintf(extent_opt_prefix, 32, "extents.%d", s->num_extents);
         assert(ret < 32);
@@ -1371,7 +1380,6 @@ static int vmdk_write_extent(VmdkExtent *extent, int64_t cluster_offset,
     VmdkGrainMarker *data = NULL;
     uLongf buf_len;
     QEMUIOVector local_qiov;
-    struct iovec iov;
     int64_t write_offset;
     int64_t write_end_sector;
 
@@ -1399,11 +1407,7 @@ static int vmdk_write_extent(VmdkExtent *extent, int64_t cluster_offset,
         data->size = cpu_to_le32(buf_len);
 
         n_bytes = buf_len + sizeof(VmdkGrainMarker);
-        iov = (struct iovec) {
-            .iov_base   = data,
-            .iov_len    = n_bytes,
-        };
-        qemu_iovec_init_external(&local_qiov, &iov, 1);
+        qemu_iovec_init_buf(&local_qiov, data, n_bytes);
 
         BLKDBG_EVENT(extent->file, BLKDBG_WRITE_COMPRESSED);
     } else {
@@ -2072,16 +2076,16 @@ static int coroutine_fn vmdk_co_do_create(int64_t size,
 
     if (backing_file) {
         BlockBackend *backing;
-        char *full_backing = g_new0(char, PATH_MAX);
-        bdrv_get_full_backing_filename_from_filename(blk_bs(blk)->filename, backing_file,
-                                                     full_backing, PATH_MAX,
-                                                     &local_err);
+        char *full_backing =
+            bdrv_get_full_backing_filename_from_filename(blk_bs(blk)->filename,
+                                                         backing_file,
+                                                         &local_err);
         if (local_err) {
-            g_free(full_backing);
             error_propagate(errp, local_err);
             ret = -ENOENT;
             goto exit;
         }
+        assert(full_backing);
 
         backing = blk_new_open(full_backing, NULL, NULL,
                                BDRV_O_NO_BACKING, errp);
@@ -2260,7 +2264,7 @@ static int coroutine_fn vmdk_co_create_opts(const char *filename, QemuOpts *opts
     compat6 = qemu_opt_get_bool_del(opts, BLOCK_OPT_COMPAT6, false);
     if (strcmp(hw_version, "undefined") == 0) {
         g_free(hw_version);
-        hw_version = g_strdup("4");
+        hw_version = NULL;
     }
     fmt = qemu_opt_get_del(opts, BLOCK_OPT_SUBFMT);
     zeroed_grain = qemu_opt_get_bool_del(opts, BLOCK_OPT_ZEROED_GRAIN, false);
@@ -2470,6 +2474,7 @@ static ImageInfo *vmdk_get_extent_info(VmdkExtent *extent)
 {
     ImageInfo *info = g_new0(ImageInfo, 1);
 
+    bdrv_refresh_filename(extent->file->bs);
     *info = (ImageInfo){
         .filename         = g_strdup(extent->file->bs->filename),
         .format           = g_strdup(extent->type),
@@ -2601,6 +2606,23 @@ static int vmdk_get_info(BlockDriverState *bs, BlockDriverInfo *bdi)
     return 0;
 }
 
+static void vmdk_gather_child_options(BlockDriverState *bs, QDict *target,
+                                      bool backing_overridden)
+{
+    /* No children but file and backing can be explicitly specified (TODO) */
+    qdict_put(target, "file",
+              qobject_ref(bs->file->bs->full_open_options));
+
+    if (backing_overridden) {
+        if (bs->backing) {
+            qdict_put(target, "backing",
+                      qobject_ref(bs->backing->bs->full_open_options));
+        } else {
+            qdict_put_null(target, "backing");
+        }
+    }
+}
+
 static QemuOptsList vmdk_create_opts = {
     .name = "vmdk-create-opts",
     .head = QTAILQ_HEAD_INITIALIZER(vmdk_create_opts.head),
@@ -2672,6 +2694,7 @@ static BlockDriver bdrv_vmdk = {
     .bdrv_get_specific_info       = vmdk_get_specific_info,
     .bdrv_refresh_limits          = vmdk_refresh_limits,
     .bdrv_get_info                = vmdk_get_info,
+    .bdrv_gather_child_options    = vmdk_gather_child_options,
 
     .supports_backing             = true,
     .create_opts                  = &vmdk_create_opts,

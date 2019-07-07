@@ -111,7 +111,7 @@ struct NBDClient {
 
     NBDExport *exp;
     QCryptoTLSCreds *tlscreds;
-    char *tlsaclname;
+    char *tlsauthz;
     QIOChannelSocket *sioc; /* The underlying data channel */
     QIOChannel *ioc; /* The current I/O channel which may differ (eg TLS) */
 
@@ -686,7 +686,7 @@ static QIOChannel *nbd_negotiate_handle_starttls(NBDClient *client,
 
     tioc = qio_channel_tls_new_server(ioc,
                                       client->tlscreds,
-                                      client->tlsaclname,
+                                      client->tlsauthz,
                                       errp);
     if (!tioc) {
         return NULL;
@@ -1348,7 +1348,7 @@ void nbd_client_put(NBDClient *client)
         if (client->tlscreds) {
             object_unref(OBJECT(client->tlscreds));
         }
-        g_free(client->tlsaclname);
+        g_free(client->tlsauthz);
         if (client->exp) {
             QTAILQ_REMOVE(&client->exp->clients, client, next);
             nbd_export_put(client->exp);
@@ -1510,6 +1510,10 @@ NBDExport *nbd_export_new(BlockDriverState *bs, uint64_t dev_offset,
             goto fail;
         }
 
+        if (bdrv_dirty_bitmap_check(bm, BDRV_BITMAP_ALLOW_RO, errp)) {
+            goto fail;
+        }
+
         if ((nbdflags & NBD_FLAG_READ_ONLY) && bdrv_is_writable(bs) &&
             bdrv_dirty_bitmap_enabled(bm)) {
             error_setg(errp,
@@ -1518,12 +1522,7 @@ NBDExport *nbd_export_new(BlockDriverState *bs, uint64_t dev_offset,
             goto fail;
         }
 
-        if (bdrv_dirty_bitmap_user_locked(bm)) {
-            error_setg(errp, "Bitmap '%s' is in use", bitmap);
-            goto fail;
-        }
-
-        bdrv_dirty_bitmap_set_qmp_locked(bm, true);
+        bdrv_dirty_bitmap_set_busy(bm, true);
         exp->export_bitmap = bm;
         exp->export_bitmap_context = g_strdup_printf("qemu:dirty-bitmap:%s",
                                                      bitmap);
@@ -1641,7 +1640,7 @@ void nbd_export_put(NBDExport *exp)
         }
 
         if (exp->export_bitmap) {
-            bdrv_dirty_bitmap_set_qmp_locked(exp->export_bitmap, false);
+            bdrv_dirty_bitmap_set_busy(exp->export_bitmap, false);
             g_free(exp->export_bitmap_context);
         }
 
@@ -2425,7 +2424,7 @@ static coroutine_fn void nbd_co_client_start(void *opaque)
  */
 void nbd_client_new(QIOChannelSocket *sioc,
                     QCryptoTLSCreds *tlscreds,
-                    const char *tlsaclname,
+                    const char *tlsauthz,
                     void (*close_fn)(NBDClient *, bool))
 {
     NBDClient *client;
@@ -2437,7 +2436,7 @@ void nbd_client_new(QIOChannelSocket *sioc,
     if (tlscreds) {
         object_ref(OBJECT(client->tlscreds));
     }
-    client->tlsaclname = g_strdup(tlsaclname);
+    client->tlsauthz = g_strdup(tlsauthz);
     client->sioc = sioc;
     object_ref(OBJECT(client->sioc));
     client->ioc = QIO_CHANNEL(sioc);

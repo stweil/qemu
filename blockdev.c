@@ -531,7 +531,9 @@ static BlockBackend *blockdev_init(const char *file, QDict *bs_opts,
     if ((buf = qemu_opt_get(opts, "format")) != NULL) {
         if (is_help_option(buf)) {
             error_printf("Supported formats:");
-            bdrv_iterate_format(bdrv_format_print, NULL);
+            bdrv_iterate_format(bdrv_format_print, NULL, false);
+            error_printf("\nSupported formats (read-only):");
+            bdrv_iterate_format(bdrv_format_print, NULL, true);
             error_printf("\n");
             goto early_err;
         }
@@ -1255,7 +1257,6 @@ out_aio_context:
  * @node: The name of the BDS node to search for bitmaps
  * @name: The name of the bitmap to search for
  * @pbs: Output pointer for BDS lookup, if desired. Can be NULL.
- * @paio: Output pointer for aio_context acquisition, if desired. Can be NULL.
  * @errp: Output pointer for error information. Can be NULL.
  *
  * @return: A bitmap object on success, or NULL on failure.
@@ -1627,6 +1628,7 @@ static void external_snapshot_prepare(BlkActionState *common,
                 error_setg_errno(errp, -size, "bdrv_getlength failed");
                 goto out;
             }
+            bdrv_refresh_filename(state->old_bs);
             bdrv_img_create(new_image_file, format,
                             state->old_bs->filename,
                             state->old_bs->drv->format_name,
@@ -2008,11 +2010,7 @@ static void block_dirty_bitmap_clear_prepare(BlkActionState *common,
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(state->bitmap)) {
-        error_setg(errp, "Cannot modify a bitmap in use by another operation");
-        return;
-    } else if (bdrv_dirty_bitmap_readonly(state->bitmap)) {
-        error_setg(errp, "Cannot clear a readonly bitmap");
+    if (bdrv_dirty_bitmap_check(state->bitmap, BDRV_BITMAP_DEFAULT, errp)) {
         return;
     }
 
@@ -2057,10 +2055,7 @@ static void block_dirty_bitmap_enable_prepare(BlkActionState *common,
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(state->bitmap)) {
-        error_setg(errp,
-                   "Bitmap '%s' is currently in use by another operation"
-                   " and cannot be enabled", action->name);
+    if (bdrv_dirty_bitmap_check(state->bitmap, BDRV_BITMAP_ALLOW_RO, errp)) {
         return;
     }
 
@@ -2098,10 +2093,7 @@ static void block_dirty_bitmap_disable_prepare(BlkActionState *common,
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(state->bitmap)) {
-        error_setg(errp,
-                   "Bitmap '%s' is currently in use by another operation"
-                   " and cannot be disabled", action->name);
+    if (bdrv_dirty_bitmap_check(state->bitmap, BDRV_BITMAP_ALLOW_RO, errp)) {
         return;
     }
 
@@ -2820,6 +2812,7 @@ void qmp_block_dirty_bitmap_add(const char *node, const char *name,
 {
     BlockDriverState *bs;
     BdrvDirtyBitmap *bitmap;
+    AioContext *aio_context = NULL;
 
     if (!name || name[0] == '\0') {
         error_setg(errp, "Bitmap name cannot be empty");
@@ -2854,22 +2847,28 @@ void qmp_block_dirty_bitmap_add(const char *node, const char *name,
         disabled = false;
     }
 
-    if (persistent &&
-        !bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp))
-    {
-        return;
+    if (persistent) {
+        aio_context = bdrv_get_aio_context(bs);
+        aio_context_acquire(aio_context);
+        if (!bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp)) {
+            goto out;
+        }
     }
 
     bitmap = bdrv_create_dirty_bitmap(bs, granularity, name, errp);
     if (bitmap == NULL) {
-        return;
+        goto out;
     }
 
     if (disabled) {
         bdrv_disable_dirty_bitmap(bitmap);
     }
 
-    bdrv_dirty_bitmap_set_persistance(bitmap, persistent);
+    bdrv_dirty_bitmap_set_persistence(bitmap, persistent);
+ out:
+    if (aio_context) {
+        aio_context_release(aio_context);
+    }
 }
 
 void qmp_block_dirty_bitmap_remove(const char *node, const char *name,
@@ -2878,28 +2877,33 @@ void qmp_block_dirty_bitmap_remove(const char *node, const char *name,
     BlockDriverState *bs;
     BdrvDirtyBitmap *bitmap;
     Error *local_err = NULL;
+    AioContext *aio_context = NULL;
 
     bitmap = block_dirty_bitmap_lookup(node, name, &bs, errp);
     if (!bitmap || !bs) {
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(bitmap)) {
-        error_setg(errp,
-                   "Bitmap '%s' is currently in use by another operation and"
-                   " cannot be removed", name);
+    if (bdrv_dirty_bitmap_check(bitmap, BDRV_BITMAP_BUSY | BDRV_BITMAP_RO,
+                                errp)) {
         return;
     }
 
-    if (bdrv_dirty_bitmap_get_persistance(bitmap)) {
+    if (bdrv_dirty_bitmap_get_persistence(bitmap)) {
+        aio_context = bdrv_get_aio_context(bs);
+        aio_context_acquire(aio_context);
         bdrv_remove_persistent_dirty_bitmap(bs, name, &local_err);
         if (local_err != NULL) {
             error_propagate(errp, local_err);
-            return;
+            goto out;
         }
     }
 
     bdrv_release_dirty_bitmap(bs, bitmap);
+ out:
+    if (aio_context) {
+        aio_context_release(aio_context);
+    }
 }
 
 /**
@@ -2917,13 +2921,7 @@ void qmp_block_dirty_bitmap_clear(const char *node, const char *name,
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(bitmap)) {
-        error_setg(errp,
-                   "Bitmap '%s' is currently in use by another operation"
-                   " and cannot be cleared", name);
-        return;
-    } else if (bdrv_dirty_bitmap_readonly(bitmap)) {
-        error_setg(errp, "Bitmap '%s' is readonly and cannot be cleared", name);
+    if (bdrv_dirty_bitmap_check(bitmap, BDRV_BITMAP_DEFAULT, errp)) {
         return;
     }
 
@@ -2941,10 +2939,7 @@ void qmp_block_dirty_bitmap_enable(const char *node, const char *name,
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(bitmap)) {
-        error_setg(errp,
-                   "Bitmap '%s' is currently in use by another operation"
-                   " and cannot be enabled", name);
+    if (bdrv_dirty_bitmap_check(bitmap, BDRV_BITMAP_ALLOW_RO, errp)) {
         return;
     }
 
@@ -2962,10 +2957,7 @@ void qmp_block_dirty_bitmap_disable(const char *node, const char *name,
         return;
     }
 
-    if (bdrv_dirty_bitmap_user_locked(bitmap)) {
-        error_setg(errp,
-                   "Bitmap '%s' is currently in use by another operation"
-                   " and cannot be disabled", name);
+    if (bdrv_dirty_bitmap_check(bitmap, BDRV_BITMAP_ALLOW_RO, errp)) {
         return;
     }
 
@@ -3216,6 +3208,7 @@ void qmp_block_stream(bool has_job_id, const char *job_id, const char *device,
             goto out;
         }
         assert(bdrv_get_aio_context(base_bs) == aio_context);
+        bdrv_refresh_filename(base_bs);
         base_name = base_bs->filename;
     }
 
@@ -3335,6 +3328,10 @@ void qmp_block_commit(bool has_job_id, const char *job_id, const char *device,
             goto out;
         }
     } else if (has_top && top) {
+        /* This strcmp() is just a shortcut, there is no need to
+         * refresh @bs's filename.  If it mismatches,
+         * bdrv_find_backing_image() will do the refresh and may still
+         * return @bs. */
         if (strcmp(bs->filename, top) != 0) {
             top_bs = bdrv_find_backing_image(bs, top);
         }
@@ -3495,6 +3492,7 @@ static BlockJob *do_drive_backup(DriveBackup *backup, JobTxn *txn,
     if (backup->mode != NEW_IMAGE_MODE_EXISTING) {
         assert(backup->format);
         if (source) {
+            bdrv_refresh_filename(source);
             bdrv_img_create(backup->target, backup->format, source->filename,
                             source->drv->format_name, NULL,
                             size, flags, false, &local_err);
@@ -3538,10 +3536,7 @@ static BlockJob *do_drive_backup(DriveBackup *backup, JobTxn *txn,
             bdrv_unref(target_bs);
             goto out;
         }
-        if (bdrv_dirty_bitmap_user_locked(bmap)) {
-            error_setg(errp,
-                       "Bitmap '%s' is currently in use by another operation"
-                       " and cannot be used for backup", backup->bitmap);
+        if (bdrv_dirty_bitmap_check(bmap, BDRV_BITMAP_DEFAULT, errp)) {
             goto out;
         }
     }
@@ -3651,10 +3646,7 @@ BlockJob *do_blockdev_backup(BlockdevBackup *backup, JobTxn *txn,
             error_setg(errp, "Bitmap '%s' could not be found", backup->bitmap);
             goto out;
         }
-        if (bdrv_dirty_bitmap_user_locked(bmap)) {
-            error_setg(errp,
-                       "Bitmap '%s' is currently in use by another operation"
-                       " and cannot be used for backup", backup->bitmap);
+        if (bdrv_dirty_bitmap_check(bmap, BDRV_BITMAP_DEFAULT, errp)) {
             goto out;
         }
     }
@@ -3764,6 +3756,39 @@ static void blockdev_mirror_common(const char *job_id, BlockDriverState *bs,
         sync = MIRROR_SYNC_MODE_FULL;
     }
 
+    if (has_replaces) {
+        BlockDriverState *to_replace_bs;
+        AioContext *replace_aio_context;
+        int64_t bs_size, replace_size;
+
+        bs_size = bdrv_getlength(bs);
+        if (bs_size < 0) {
+            error_setg_errno(errp, -bs_size, "Failed to query device's size");
+            return;
+        }
+
+        to_replace_bs = check_to_replace_node(bs, replaces, errp);
+        if (!to_replace_bs) {
+            return;
+        }
+
+        replace_aio_context = bdrv_get_aio_context(to_replace_bs);
+        aio_context_acquire(replace_aio_context);
+        replace_size = bdrv_getlength(to_replace_bs);
+        aio_context_release(replace_aio_context);
+
+        if (replace_size < 0) {
+            error_setg_errno(errp, -replace_size,
+                             "Failed to query the replacement node's size");
+            return;
+        }
+        if (bs_size != replace_size) {
+            error_setg(errp, "cannot replace image with a mirror image of "
+                             "different size");
+            return;
+        }
+    }
+
     /* pass the node name to replace to mirror start since it's loose coupling
      * and will allow to check whether the node still exist at mirror completion
      */
@@ -3824,31 +3849,9 @@ void qmp_drive_mirror(DriveMirror *arg, Error **errp)
     }
 
     if (arg->has_replaces) {
-        BlockDriverState *to_replace_bs;
-        AioContext *replace_aio_context;
-        int64_t replace_size;
-
         if (!arg->has_node_name) {
             error_setg(errp, "a node-name must be provided when replacing a"
                              " named node of the graph");
-            goto out;
-        }
-
-        to_replace_bs = check_to_replace_node(bs, arg->replaces, &local_err);
-
-        if (!to_replace_bs) {
-            error_propagate(errp, local_err);
-            goto out;
-        }
-
-        replace_aio_context = bdrv_get_aio_context(to_replace_bs);
-        aio_context_acquire(replace_aio_context);
-        replace_size = bdrv_getlength(to_replace_bs);
-        aio_context_release(replace_aio_context);
-
-        if (size != replace_size) {
-            error_setg(errp, "cannot replace image with a mirror image of "
-                             "different size");
             goto out;
         }
     }
@@ -3875,6 +3878,7 @@ void qmp_drive_mirror(DriveMirror *arg, Error **errp)
             break;
         case NEW_IMAGE_MODE_ABSOLUTE_PATHS:
             /* create new image with backing file */
+            bdrv_refresh_filename(source);
             bdrv_img_create(arg->target, format,
                             source->filename,
                             source->drv->format_name,
@@ -4263,6 +4267,53 @@ fail:
     visit_free(v);
 }
 
+void qmp_x_blockdev_reopen(BlockdevOptions *options, Error **errp)
+{
+    BlockDriverState *bs;
+    AioContext *ctx;
+    QObject *obj;
+    Visitor *v = qobject_output_visitor_new(&obj);
+    Error *local_err = NULL;
+    BlockReopenQueue *queue;
+    QDict *qdict;
+
+    /* Check for the selected node name */
+    if (!options->has_node_name) {
+        error_setg(errp, "Node name not specified");
+        goto fail;
+    }
+
+    bs = bdrv_find_node(options->node_name);
+    if (!bs) {
+        error_setg(errp, "Cannot find node named '%s'", options->node_name);
+        goto fail;
+    }
+
+    /* Put all options in a QDict and flatten it */
+    visit_type_BlockdevOptions(v, NULL, &options, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
+        goto fail;
+    }
+
+    visit_complete(v, &obj);
+    qdict = qobject_to(QDict, obj);
+
+    qdict_flatten(qdict);
+
+    /* Perform the reopen operation */
+    ctx = bdrv_get_aio_context(bs);
+    aio_context_acquire(ctx);
+    bdrv_subtree_drained_begin(bs);
+    queue = bdrv_reopen_queue(NULL, bs, qdict, false);
+    bdrv_reopen_multiple(queue, errp);
+    bdrv_subtree_drained_end(bs);
+    aio_context_release(ctx);
+
+fail:
+    visit_free(v);
+}
+
 void qmp_blockdev_del(const char *node_name, Error **errp)
 {
     AioContext *aio_context;
@@ -4428,22 +4479,22 @@ void qmp_x_blockdev_set_iothread(const char *node_name, StrOrNull *iothread,
     aio_context_release(old_context);
 }
 
-void qmp_x_block_latency_histogram_set(
-    const char *device,
+void qmp_block_latency_histogram_set(
+    const char *id,
     bool has_boundaries, uint64List *boundaries,
     bool has_boundaries_read, uint64List *boundaries_read,
     bool has_boundaries_write, uint64List *boundaries_write,
     bool has_boundaries_flush, uint64List *boundaries_flush,
     Error **errp)
 {
-    BlockBackend *blk = blk_by_name(device);
+    BlockBackend *blk = qmp_get_blk(NULL, id, errp);
     BlockAcctStats *stats;
     int ret;
 
     if (!blk) {
-        error_setg(errp, "Device '%s' not found", device);
         return;
     }
+
     stats = blk_get_stats(blk);
 
     if (!has_boundaries && !has_boundaries_read && !has_boundaries_write &&
@@ -4458,7 +4509,7 @@ void qmp_x_block_latency_histogram_set(
             stats, BLOCK_ACCT_READ,
             has_boundaries_read ? boundaries_read : boundaries);
         if (ret) {
-            error_setg(errp, "Device '%s' set read boundaries fail", device);
+            error_setg(errp, "Device '%s' set read boundaries fail", id);
             return;
         }
     }
@@ -4468,7 +4519,7 @@ void qmp_x_block_latency_histogram_set(
             stats, BLOCK_ACCT_WRITE,
             has_boundaries_write ? boundaries_write : boundaries);
         if (ret) {
-            error_setg(errp, "Device '%s' set write boundaries fail", device);
+            error_setg(errp, "Device '%s' set write boundaries fail", id);
             return;
         }
     }
@@ -4478,7 +4529,7 @@ void qmp_x_block_latency_histogram_set(
             stats, BLOCK_ACCT_FLUSH,
             has_boundaries_flush ? boundaries_flush : boundaries);
         if (ret) {
-            error_setg(errp, "Device '%s' set flush boundaries fail", device);
+            error_setg(errp, "Device '%s' set flush boundaries fail", id);
             return;
         }
     }

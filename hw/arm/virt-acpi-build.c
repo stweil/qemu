@@ -229,8 +229,8 @@ static void acpi_dsdt_add_pci(Aml *scope, const MemMapEntry *memmap,
                      size_pio));
 
     if (use_highmem) {
-        hwaddr base_mmio_high = memmap[VIRT_PCIE_MMIO_HIGH].base;
-        hwaddr size_mmio_high = memmap[VIRT_PCIE_MMIO_HIGH].size;
+        hwaddr base_mmio_high = memmap[VIRT_HIGH_PCIE_MMIO].base;
+        hwaddr size_mmio_high = memmap[VIRT_HIGH_PCIE_MMIO].size;
 
         aml_append(rbuf,
             aml_qword_memory(AML_POS_DECODE, AML_MIN_FIXED, AML_MAX_FIXED,
@@ -405,7 +405,7 @@ build_iort(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     its->identifiers[0] = 0; /* MADT translation_id */
 
     if (vms->iommu == VIRT_IOMMU_SMMUV3) {
-        int irq =  vms->irqmap[VIRT_SMMU];
+        int irq =  vms->irqmap[VIRT_SMMU] + ARM_SPI_BASE;
 
         /* SMMUv3 node */
         smmu_offset = iort_node_offset + node_size;
@@ -560,8 +560,8 @@ build_mcfg(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     /* Only a single allocation so no need to play with segments */
     mcfg->allocation[0].pci_segment = cpu_to_le16(0);
     mcfg->allocation[0].start_bus_number = 0;
-    mcfg->allocation[0].end_bus_number = (memmap[ecam_id].size
-                                          / PCIE_MMCFG_SIZE_MIN) - 1;
+    mcfg->allocation[0].end_bus_number =
+        PCIE_MMCFG_BUS(memmap[ecam_id].size - 1);
 
     build_header(linker, table_data, (void *)(table_data->data + mcfg_start),
                  "MCFG", table_data->len - mcfg_start, 1, NULL, NULL);
@@ -663,8 +663,10 @@ build_madt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
             gicr = acpi_data_push(table_data, sizeof(*gicr));
             gicr->type = ACPI_APIC_GENERIC_REDISTRIBUTOR;
             gicr->length = sizeof(*gicr);
-            gicr->base_address = cpu_to_le64(memmap[VIRT_GIC_REDIST2].base);
-            gicr->range_length = cpu_to_le32(memmap[VIRT_GIC_REDIST2].size);
+            gicr->base_address =
+                cpu_to_le64(memmap[VIRT_HIGH_GIC_REDIST2].base);
+            gicr->range_length =
+                cpu_to_le32(memmap[VIRT_HIGH_GIC_REDIST2].size);
         }
 
         if (its_class_name() && !vmc->no_its) {

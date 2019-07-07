@@ -87,6 +87,20 @@ endif
 
 include $(SRC_PATH)/rules.mak
 
+# Create QEMU_PKGVERSION and FULL_VERSION strings
+# If PKGVERSION is set, use that; otherwise get version and -dirty status from git
+QEMU_PKGVERSION := $(if $(PKGVERSION),$(PKGVERSION),$(shell \
+  cd $(SRC_PATH); \
+  if test -e .git; then \
+    git describe --match 'v*' 2>/dev/null | tr -d '\n'; \
+    if ! git diff-index --quiet HEAD &>/dev/null; then \
+      echo "-dirty"; \
+    fi; \
+  fi))
+
+# Either "version (pkgversion)", or just "version" if pkgversion not set
+FULL_VERSION := $(if $(QEMU_PKGVERSION),$(VERSION) ($(QEMU_PKGVERSION)),$(VERSION))
+
 GENERATED_FILES = qemu-version.h config-host.h qemu-options.def
 
 GENERATED_QAPI_FILES = qapi/qapi-builtin-types.h qapi/qapi-builtin-types.c
@@ -310,8 +324,8 @@ DOCS+=scripts/qemu-trace-stap.1
 endif
 
 SUBDIR_MAKEFLAGS=$(if $(V),,--no-print-directory --quiet) BUILD_DIR=$(BUILD_DIR)
-SUBDIR_DEVICES_MAK=$(patsubst %, %/config-devices.mak, $(TARGET_DIRS))
-SUBDIR_DEVICES_MAK_DEP=$(patsubst %, %-config-devices.mak.d, $(TARGET_DIRS))
+SUBDIR_DEVICES_MAK=$(patsubst %, %/config-devices.mak, $(filter %-softmmu, $(TARGET_DIRS)))
+SUBDIR_DEVICES_MAK_DEP=$(patsubst %, %.d, $(SUBDIR_DEVICES_MAK))
 
 ifeq ($(SUBDIR_DEVICES_MAK),)
 config-all-devices.mak:
@@ -326,9 +340,26 @@ endif
 
 -include $(SUBDIR_DEVICES_MAK_DEP)
 
-%/config-devices.mak: default-configs/%.mak $(SRC_PATH)/scripts/make_device_config.sh
-	$(call quiet-command, \
-            $(SHELL) $(SRC_PATH)/scripts/make_device_config.sh $< $*-config-devices.mak.d $@ > $@.tmp,"GEN","$@.tmp")
+# This has to be kept in sync with Kconfig.host.
+MINIKCONF_ARGS = \
+    $(CONFIG_MINIKCONF_MODE) \
+    $@ $*-config.devices.mak.d $< $(MINIKCONF_INPUTS) \
+    CONFIG_KVM=$(CONFIG_KVM) \
+    CONFIG_SPICE=$(CONFIG_SPICE) \
+    CONFIG_IVSHMEM=$(CONFIG_IVSHMEM) \
+    CONFIG_TPM=$(CONFIG_TPM) \
+    CONFIG_XEN=$(CONFIG_XEN) \
+    CONFIG_OPENGL=$(CONFIG_OPENGL) \
+    CONFIG_X11=$(CONFIG_X11) \
+    CONFIG_VHOST_USER=$(CONFIG_VHOST_USER) \
+    CONFIG_VIRTFS=$(CONFIG_VIRTFS) \
+    CONFIG_LINUX=$(CONFIG_LINUX)
+
+MINIKCONF_INPUTS = $(SRC_PATH)/Kconfig.host $(SRC_PATH)/hw/Kconfig
+MINIKCONF = $(PYTHON) $(SRC_PATH)/scripts/minikconf.py \
+
+$(SUBDIR_DEVICES_MAK): %/config-devices.mak: default-configs/%.mak $(MINIKCONF_INPUTS) $(BUILD_DIR)/config-host.mak
+	$(call quiet-command, $(MINIKCONF) $(MINIKCONF_ARGS) > $@.tmp, "GEN", "$@.tmp")
 	$(call quiet-command, if test -f $@; then \
 	  if cmp -s $@.old $@; then \
 	    mv $@.tmp $@; \
@@ -356,6 +387,7 @@ endif
 
 dummy := $(call unnest-vars,, \
                 stub-obj-y \
+                authz-obj-y \
                 chardev-obj-y \
                 util-obj-y \
                 qga-obj-y \
@@ -379,46 +411,16 @@ dummy := $(call unnest-vars,, \
                 ui-obj-m \
                 audio-obj-y \
                 audio-obj-m \
-                trace-obj-y \
-                slirp-obj-y)
+                trace-obj-y)
 
 include $(SRC_PATH)/tests/Makefile.include
 
-all: recurse-all
-
-ifdef BUILD_DOCS
-all: doc
-endif
-
-ifdef BUILD_TOOLS
-all: tools
-endif
-
-all: $(HELPERS-y)
-all: modules
-
-doc: $(DOCS)
-tools: $(TOOLS)
+all: $(DOCS) $(if $(BUILD_DOCS),sphinxdocs) $(TOOLS) $(HELPERS-y) recurse-all modules
 
 qemu-version.h: FORCE
 	$(call quiet-command, \
-		(cd $(SRC_PATH); \
-		if test -n "$(PKGVERSION)"; then \
-			pkgvers="$(PKGVERSION)"; \
-		else \
-			if test -d .git; then \
-				pkgvers=$$(git describe --match 'v*' 2>/dev/null | tr -d '\n');\
-				if ! git diff-index --quiet HEAD &>/dev/null; then \
-					pkgvers="$${pkgvers}-dirty"; \
-				fi; \
-			fi; \
-		fi; \
-		printf "#define QEMU_PKGVERSION \"$${pkgvers}\"\n"; \
-		if test -n "$${pkgvers}"; then \
-			printf '#define QEMU_FULL_VERSION QEMU_VERSION " (" QEMU_PKGVERSION ")"\n'; \
-		else \
-			printf '#define QEMU_FULL_VERSION QEMU_VERSION\n'; \
-		fi; \
+                (printf '#define QEMU_PKGVERSION "$(QEMU_PKGVERSION)"\n'; \
+		printf '#define QEMU_FULL_VERSION "$(FULL_VERSION)"\n'; \
 		) > $@.tmp)
 	$(call quiet-command, if ! cmp -s $@ $@.tmp; then \
 	  mv $@.tmp $@; \
@@ -434,6 +436,7 @@ qemu-options.def: $(SRC_PATH)/qemu-options.hx $(SRC_PATH)/scripts/hxtool
 SUBDIR_RULES=$(patsubst %,subdir-%, $(TARGET_DIRS))
 SOFTMMU_SUBDIR_RULES=$(filter %-softmmu,$(SUBDIR_RULES))
 
+$(SOFTMMU_SUBDIR_RULES): $(authz-obj-y)
 $(SOFTMMU_SUBDIR_RULES): $(block-obj-y)
 $(SOFTMMU_SUBDIR_RULES): $(crypto-obj-y)
 $(SOFTMMU_SUBDIR_RULES): $(io-obj-y)
@@ -467,7 +470,10 @@ CAP_CFLAGS += -DCAPSTONE_HAS_X86
 subdir-capstone: .git-submodule-status
 	$(call quiet-command,$(MAKE) -C $(SRC_PATH)/capstone CAPSTONE_SHARED=no BUILDDIR="$(BUILD_DIR)/capstone" CC="$(CC)" AR="$(AR)" LD="$(LD)" RANLIB="$(RANLIB)" CFLAGS="$(CAP_CFLAGS)" $(SUBDIR_MAKEFLAGS) $(BUILD_DIR)/capstone/$(LIBCAPSTONE))
 
-$(SUBDIR_RULES): libqemuutil.a $(common-obj-y) $(chardev-obj-y) $(slirp-obj-y) \
+subdir-slirp: .git-submodule-status
+	$(call quiet-command,$(MAKE) -C $(SRC_PATH)/slirp BUILD_DIR="$(BUILD_DIR)/slirp" CC="$(CC)" AR="$(AR)" LD="$(LD)" RANLIB="$(RANLIB)" CFLAGS="$(QEMU_CFLAGS)")
+
+$(SUBDIR_RULES): libqemuutil.a $(common-obj-y) $(chardev-obj-y) \
 	$(qom-obj-y) $(crypto-aes-obj-$(CONFIG_USER_ONLY))
 
 ROMSUBDIR_RULES=$(patsubst %,romsubdir-%, $(ROMS))
@@ -488,7 +494,7 @@ Makefile: $(version-obj-y)
 # Build libraries
 
 libqemuutil.a: $(util-obj-y) $(trace-obj-y) $(stub-obj-y)
-libvhost-user.a: $(libvhost-user-obj-y)
+libvhost-user.a: $(libvhost-user-obj-y) $(util-obj-y) $(stub-obj-y)
 
 ######################################################################
 
@@ -496,9 +502,9 @@ COMMON_LDADDS = libqemuutil.a
 
 qemu-img.o: qemu-img-cmds.h
 
-qemu-img$(EXESUF): qemu-img.o $(block-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
-qemu-nbd$(EXESUF): qemu-nbd.o $(block-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
-qemu-io$(EXESUF): qemu-io.o $(block-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
+qemu-img$(EXESUF): qemu-img.o $(authz-obj-y) $(block-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
+qemu-nbd$(EXESUF): qemu-nbd.o $(authz-obj-y) $(block-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
+qemu-io$(EXESUF): qemu-io.o $(authz-obj-y) $(block-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
 
 qemu-bridge-helper$(EXESUF): qemu-bridge-helper.o $(COMMON_LDADDS)
 
@@ -509,7 +515,7 @@ qemu-edid$(EXESUF): qemu-edid.o hw/display/edid-generate.o $(COMMON_LDADDS)
 fsdev/virtfs-proxy-helper$(EXESUF): fsdev/virtfs-proxy-helper.o fsdev/9p-marshal.o fsdev/9p-iov-marshal.o $(COMMON_LDADDS)
 fsdev/virtfs-proxy-helper$(EXESUF): LIBS += -lcap
 
-scsi/qemu-pr-helper$(EXESUF): scsi/qemu-pr-helper.o scsi/utils.o $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
+scsi/qemu-pr-helper$(EXESUF): scsi/qemu-pr-helper.o scsi/utils.o $(authz-obj-y) $(crypto-obj-y) $(io-obj-y) $(qom-obj-y) $(COMMON_LDADDS)
 ifdef CONFIG_MPATH
 scsi/qemu-pr-helper$(EXESUF): LIBS += -ludev -lmultipath -lmpathpersist
 endif
@@ -618,7 +624,11 @@ clean:
 	rm -f config.mak op-i386.h opc-i386.h gen-op-i386.h op-arm.h opc-arm.h gen-op-arm.h
 	rm -f qemu-options.def
 	rm -f *.msi
-	find . \( -name '*.so' -o -name '*.dll' -o -name '*.mo' -o -name '*.[oda]' \) -type f -exec rm {} +
+	find . \( -name '*.so' -o -name '*.dll' -o -name '*.mo' -o -name '*.[oda]' \) -type f \
+		! -path ./roms/edk2/ArmPkg/Library/GccLto/liblto-aarch64.a \
+		! -path ./roms/edk2/ArmPkg/Library/GccLto/liblto-arm.a \
+		! -path ./roms/edk2/BaseTools/Source/Python/UPT/Dll/sqlite3.dll \
+		-exec rm {} +
 	rm -f $(filter-out %.tlb,$(TOOLS)) $(HELPERS-y) qemu-ga TAGS cscope.* *.pod *~ */*~
 	rm -f fsdev/*.pod scsi/*.pod
 	rm -f qemu-img-cmds.h
@@ -642,6 +652,22 @@ dist: qemu-$(VERSION).tar.bz2
 qemu-%.tar.bz2:
 	$(SRC_PATH)/scripts/make-release "$(SRC_PATH)" "$(patsubst qemu-%.tar.bz2,%,$@)"
 
+# Sphinx does not allow building manuals into the same directory as
+# the source files, so if we're doing an in-tree QEMU build we must
+# build the manuals into a subdirectory (and then install them from
+# there for 'make install'). For an out-of-tree build we can just
+# use the docs/ subdirectory in the build tree as normal.
+ifeq ($(realpath $(SRC_PATH)),$(realpath .))
+MANUAL_BUILDDIR := docs/built
+else
+MANUAL_BUILDDIR := docs
+endif
+
+define clean-manual =
+rm -rf $(MANUAL_BUILDDIR)/$1/_static
+rm -f $(MANUAL_BUILDDIR)/$1/objects.inv $(MANUAL_BUILDDIR)/$1/searchindex.js $(MANUAL_BUILDDIR)/$1/*.html
+endef
+
 distclean: clean
 	rm -f config-host.mak config-host.h* config-host.ld $(DOCS) qemu-options.texi qemu-img-cmds.texi qemu-monitor.texi qemu-monitor-info.texi
 	rm -f config-all-devices.mak config-all-disas.mak config.status
@@ -662,6 +688,9 @@ distclean: clean
 	rm -f docs/interop/qemu-qmp-ref.html docs/interop/qemu-ga-ref.html
 	rm -f docs/qemu-block-drivers.7
 	rm -f docs/qemu-cpu-models.7
+	rm -rf .doctrees
+	$(call clean-manual,devel)
+	$(call clean-manual,interop)
 	for d in $(TARGET_DIRS); do \
 	rm -rf $$d || exit 1 ; \
         done
@@ -695,7 +724,20 @@ else
 BLOBS=
 endif
 
-install-doc: doc
+# Note that we manually filter-out the non-Sphinx documentation which
+# is currently built into the docs/interop directory in the build tree.
+define install-manual =
+for d in $$(cd $(MANUAL_BUILDDIR) && find $1 -type d); do $(INSTALL_DIR) "$(DESTDIR)$(qemu_docdir)/$$d"; done
+for f in $$(cd $(MANUAL_BUILDDIR) && find $1 -type f -a '!' '(' -name 'qemu-*-qapi.*' -o -name 'qemu-*-ref.*' ')' ); do $(INSTALL_DATA) "$(MANUAL_BUILDDIR)/$$f" "$(DESTDIR)$(qemu_docdir)/$$f"; done
+endef
+
+# Note that we deliberately do not install the "devel" manual: it is
+# for QEMU developers, and not interesting to our users.
+.PHONY: install-sphinxdocs
+install-sphinxdocs: sphinxdocs
+	$(call install-manual,interop)
+
+install-doc: $(DOCS) install-sphinxdocs
 	$(INSTALL_DIR) "$(DESTDIR)$(qemu_docdir)"
 	$(INSTALL_DATA) qemu-doc.html "$(DESTDIR)$(qemu_docdir)"
 	$(INSTALL_DATA) qemu-doc.txt "$(DESTDIR)$(qemu_docdir)"
@@ -853,6 +895,23 @@ docs/version.texi: $(SRC_PATH)/VERSION
 %.pdf: %.texi docs/version.texi
 	$(call quiet-command,texi2pdf $(TEXI2PDFFLAGS) $< -o $@,"GEN","$@")
 
+# Sphinx builds all its documentation at once in one invocation
+# and handles "don't rebuild things unless necessary" itself.
+# The '.doctrees' files are cached information to speed this up.
+.PHONY: sphinxdocs
+sphinxdocs: $(MANUAL_BUILDDIR)/devel/index.html $(MANUAL_BUILDDIR)/interop/index.html
+
+# Canned command to build a single manual
+build-manual = $(call quiet-command,sphinx-build $(if $(V),,-q) -b html -D version=$(VERSION) -D release="$(FULL_VERSION)" -d .doctrees/$1 $(SRC_PATH)/docs/$1 $(MANUAL_BUILDDIR)/$1 ,"SPHINX","$(MANUAL_BUILDDIR)/$1")
+# We assume all RST files in the manual's directory are used in it
+manual-deps = $(wildcard $(SRC_PATH)/docs/$1/*.rst) $(SRC_PATH)/docs/$1/conf.py $(SRC_PATH)/docs/conf.py
+
+$(MANUAL_BUILDDIR)/devel/index.html: $(call manual-deps,devel)
+	$(call build-manual,devel)
+
+$(MANUAL_BUILDDIR)/interop/index.html: $(call manual-deps,interop)
+	$(call build-manual,interop)
+
 qemu-options.texi: $(SRC_PATH)/qemu-options.hx $(SRC_PATH)/scripts/hxtool
 	$(call quiet-command,sh $(SRC_PATH)/scripts/hxtool -t < $< > $@,"GEN","$@")
 
@@ -881,7 +940,7 @@ docs/qemu-block-drivers.7: docs/qemu-block-drivers.texi
 docs/qemu-cpu-models.7: docs/qemu-cpu-models.texi
 scripts/qemu-trace-stap.1: scripts/qemu-trace-stap.texi
 
-html: qemu-doc.html docs/interop/qemu-qmp-ref.html docs/interop/qemu-ga-ref.html
+html: qemu-doc.html docs/interop/qemu-qmp-ref.html docs/interop/qemu-ga-ref.html sphinxdocs
 info: qemu-doc.info docs/interop/qemu-qmp-ref.info docs/interop/qemu-ga-ref.info
 pdf: qemu-doc.pdf docs/interop/qemu-qmp-ref.pdf docs/interop/qemu-ga-ref.pdf
 txt: qemu-doc.txt docs/interop/qemu-qmp-ref.txt docs/interop/qemu-ga-ref.txt
@@ -909,7 +968,8 @@ $(filter %.1 %.7 %.8,$(DOCS)): scripts/texi2pod.pl
 %/coverage-report.html:
 	@mkdir -p $*
 	$(call quiet-command,\
-		gcovr -p --html --html-details -o $@, \
+		gcovr -r $(SRC_PATH) --object-directory $(BUILD_PATH) \
+		-p --html --html-details -o $@, \
 		"GEN", "coverage-report.html")
 
 .PHONY: coverage-report

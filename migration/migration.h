@@ -21,6 +21,7 @@
 #include "qemu/coroutine_int.h"
 #include "hw/qdev.h"
 #include "io/channel.h"
+#include "net/announce.h"
 
 struct PostcopyBlocktimeContext;
 
@@ -35,6 +36,9 @@ struct MigrationIncomingState {
      * loading state.
      */
     QemuEvent main_thread_load_event;
+
+    /* For network announces */
+    AnnounceTimer  announce_timer;
 
     size_t         largest_page_size;
     bool           have_fault_thread;
@@ -80,6 +84,9 @@ struct MigrationIncomingState {
     bool postcopy_recover_triggered;
     QemuSemaphore postcopy_pause_sem_dst;
     QemuSemaphore postcopy_pause_sem_fault;
+
+    /* List of listening socket addresses  */
+    SocketAddressList *socket_address_list;
 };
 
 MigrationIncomingState *migration_incoming_get_current(void);
@@ -261,6 +268,7 @@ bool migrate_release_ram(void);
 bool migrate_postcopy_ram(void);
 bool migrate_zero_blocks(void);
 bool migrate_dirty_bitmaps(void);
+bool migrate_ignore_shared(void);
 
 bool migrate_auto_converge(void);
 bool migrate_use_multifd(void);
@@ -300,9 +308,12 @@ void migrate_send_rp_resume_ack(MigrationIncomingState *mis, uint32_t value);
 
 void dirty_bitmap_mig_before_vm_start(void);
 void init_dirty_bitmap_incoming_migration(void);
+void migrate_add_address(SocketAddress *address);
+
+int foreach_not_ignored_block(RAMBlockIterFunc func, void *opaque);
 
 #define qemu_ram_foreach_block \
-  #warning "Use qemu_ram_foreach_block_migratable in migration code"
+  #warning "Use foreach_not_ignored_block in migration code"
 
 void migration_make_urgent_request(void);
 void migration_consume_urgent_request(void);
