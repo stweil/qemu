@@ -113,7 +113,7 @@ inline void USE(T1, T2, T3, T4) {}
 #if __has_warning("-Wimplicit-fallthrough") && __cplusplus >= 201103L
   #define VIXL_FALLTHROUGH() [[clang::fallthrough]] //NOLINT
 #else
-  #define VIXL_FALLTHROUGH() do {} while (0)
+  #define VIXL_FALLTHROUGH() __attribute__((fallthrough))
 #endif
 
 #if __cplusplus >= 201103L

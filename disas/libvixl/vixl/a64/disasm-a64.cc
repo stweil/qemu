@@ -2985,6 +2985,8 @@ int Disassembler::SubstituteImmediateField(const Instruction* instr,
           }
           return 3;
         }
+        default:
+          abort();
       }
     }
     case 'C': {  // ICondB - Immediate Conditional Branch.
