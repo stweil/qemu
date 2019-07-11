@@ -27,13 +27,13 @@
 static int traceflag;
 #endif
 
-pflash_t *pflash_device_register(hwaddr base,
-                                 DeviceState *qdev, const char *name,
-                                 hwaddr size,
-                                 BlockBackend *bs, int width,
-                                 uint16_t flash_manufacturer,
-                                 uint16_t flash_type,
-                                 int be)
+PFlash *pflash_device_register(hwaddr base,
+                               const char *name,
+                               hwaddr size,
+                               BlockBackend *bs, int width,
+                               uint16_t flash_manufacturer,
+                               uint16_t flash_type,
+                               int be)
 {
     /* The values for blocksize and nblocks are defaults which must be
        replaced by the correct values based on flash manufacturer and type.
@@ -42,7 +42,7 @@ pflash_t *pflash_device_register(hwaddr base,
     const uint32_t nblocks = size / blocksize;
     const uint16_t id2 = 0x33;
     const uint16_t id3 = 0x44;
-    pflash_t *pf;
+    PFlash *pf;
 
 #ifdef PFLASH_DEBUG
     if (getenv("DEBUG_FLASH")) {
@@ -65,21 +65,30 @@ pflash_t *pflash_device_register(hwaddr base,
                                      flash_manufacturer, flash_type,
                                      id2, id3, be);
 #else
-            pf = pflash_cfi02_register(base, qdev, name, size, bs,
+            pf = (PFlash *)pflash_cfi02_register(base, name, size, bs,
                                        blocksize, nblocks, 1, width,
                                        flash_manufacturer, flash_type,
                                        id2, id3, 0, 0, be);
 #endif
             break;
         case MANUFACTURER_INTEL:
-            pf = pflash_cfi01_register(base, qdev, name, size, bs,
+PFlashCFI01 *pflash_cfi01_register(hwaddr base,
+                                   const char *name,
+                                   hwaddr size,
+                                   BlockBackend *blk,
+                                   uint32_t sector_len,
+                                   int width,
+                                   uint16_t id0, uint16_t id1,
+                                   uint16_t id2, uint16_t id3,
+                                   int be);
+            pf = (PFlash *)pflash_cfi01_register(base, name, size, bs,
                                        blocksize, nblocks, width,
                                        flash_manufacturer, flash_type,
                                        id2, id3, be);
             break;
         default:
             /* TODO: fix new parameters (0) */
-            pf = pflash_cfi02_register(base, qdev, name, size, bs,
+            pf = (PFlash *)pflash_cfi02_register(base, name, size, bs,
                                        blocksize, nblocks, 1, width,
                                        flash_manufacturer, flash_type,
                                        id2, id3, 0, 0, be);

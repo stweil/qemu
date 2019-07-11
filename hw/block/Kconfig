@@ -10,6 +10,10 @@ config SSI_M25P80
 config NAND
     bool
 
+# TODO: Fix PFLASH (needed for devices which allow both CFI01 and CFI02)
+#config PFLASH
+#    bool
+
 config PFLASH_CFI01
     bool
 

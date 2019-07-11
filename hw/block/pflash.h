@@ -217,27 +217,27 @@ typedef enum {
 /* QEMU interface */
 
 #include "qemu-common.h"        /* BlockBackend */
-#include "hw/block/flash.h"     /* pflash_t */
+#include "hw/block/flash.h"
 
 /* NOR flash devices */
-//~ typedef struct pflash_t pflash_t;
+typedef struct PFlash PFlash;
 
 /* Special interfaces used by pflash_register. */
 
-pflash_t *pflash_amd_register (hwaddr base, ram_addr_t off,
-                               BlockBackend *blk,
-                               uint32_t sector_len, int nb_blocs, int width,
-                               uint16_t id0, uint16_t id1, 
-                               uint16_t id2, uint16_t id3, int be);
+PFlash *pflash_amd_register(hwaddr base, ram_addr_t off,
+                            BlockBackend *blk,
+                            uint32_t sector_len, int nb_blocs, int width,
+                            uint16_t id0, uint16_t id1, 
+                            uint16_t id2, uint16_t id3, int be);
 
 /* User interface. */
 
-pflash_t *pflash_device_register(hwaddr base,
-                                 DeviceState *qdev, const char *name,
-                                 hwaddr size,
-                                 BlockBackend *blk, int width,
-                                 uint16_t flash_manufacturer,
-                                 uint16_t flash_type,
-                                 int be);
+PFlash *pflash_device_register(hwaddr base,
+                               const char *name,
+                               hwaddr size,
+                               BlockBackend *blk, int width,
+                               uint16_t flash_manufacturer,
+                               uint16_t flash_type,
+                               int be);
 
 #endif /* __pflash_h */
