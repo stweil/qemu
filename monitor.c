@@ -450,28 +450,30 @@ static void monitor_puts(Monitor *mon, const char *str)
     qemu_mutex_unlock(&mon->mon_lock);
 }
 
-void monitor_vprintf(Monitor *mon, const char *fmt, va_list ap)
+int monitor_vprintf(Monitor *mon, const char *fmt, va_list ap)
 {
     char *buf;
 
     if (!mon)
-        return;
+        return -1;
 
     if (monitor_is_qmp(mon)) {
-        return;
+        return -1;
     }
 
     buf = g_strdup_vprintf(fmt, ap);
     monitor_puts(mon, buf);
     g_free(buf);
+    return 0;
 }
 
-void monitor_printf(Monitor *mon, const char *fmt, ...)
+int monitor_printf(Monitor *mon, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
     monitor_vprintf(mon, fmt, ap);
     va_end(ap);
+    return 0;
 }
 
 int monitor_fprintf(FILE *stream, const char *fmt, ...)
@@ -4538,13 +4540,14 @@ static void monitor_readline_flush(void *opaque)
  * TODO should return int, so callers can calculate width, but that
  * requires surgery to monitor_vprintf().  Left for another day.
  */
-void monitor_vfprintf(FILE *stream, const char *fmt, va_list ap)
+int monitor_vfprintf(FILE *stream, const char *fmt, va_list ap)
 {
     if (cur_mon && !monitor_cur_is_qmp()) {
         monitor_vprintf(cur_mon, fmt, ap);
     } else {
         vfprintf(stream, fmt, ap);
     }
+    return 0;
 }
 
 /*
