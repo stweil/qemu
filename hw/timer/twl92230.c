@@ -273,29 +273,29 @@ static uint8_t menelaus_read(void *opaque, uint8_t addr)
     case MENELAUS_REV:
         return 0x22;
 
-    case MENELAUS_VCORE_CTRL5: reg ++;
-    case MENELAUS_VCORE_CTRL4: reg ++;
-    case MENELAUS_VCORE_CTRL3: reg ++;
-    case MENELAUS_VCORE_CTRL2: reg ++;
+    case MENELAUS_VCORE_CTRL5: reg ++; /* fall through */
+    case MENELAUS_VCORE_CTRL4: reg ++; /* fall through */
+    case MENELAUS_VCORE_CTRL3: reg ++; /* fall through */
+    case MENELAUS_VCORE_CTRL2: reg ++; /* fall through */
     case MENELAUS_VCORE_CTRL1:
         return s->vcore[reg];
 
-    case MENELAUS_DCDC_CTRL3: reg ++;
-    case MENELAUS_DCDC_CTRL2: reg ++;
+    case MENELAUS_DCDC_CTRL3: reg ++; /* fall through */
+    case MENELAUS_DCDC_CTRL2: reg ++; /* fall through */
     case MENELAUS_DCDC_CTRL1:
         return s->dcdc[reg];
 
-    case MENELAUS_LDO_CTRL8: reg ++;
-    case MENELAUS_LDO_CTRL7: reg ++;
-    case MENELAUS_LDO_CTRL6: reg ++;
-    case MENELAUS_LDO_CTRL5: reg ++;
-    case MENELAUS_LDO_CTRL4: reg ++;
-    case MENELAUS_LDO_CTRL3: reg ++;
-    case MENELAUS_LDO_CTRL2: reg ++;
+    case MENELAUS_LDO_CTRL8: reg ++; /* fall through */
+    case MENELAUS_LDO_CTRL7: reg ++; /* fall through */
+    case MENELAUS_LDO_CTRL6: reg ++; /* fall through */
+    case MENELAUS_LDO_CTRL5: reg ++; /* fall through */
+    case MENELAUS_LDO_CTRL4: reg ++; /* fall through */
+    case MENELAUS_LDO_CTRL3: reg ++; /* fall through */
+    case MENELAUS_LDO_CTRL2: reg ++; /* fall through */
     case MENELAUS_LDO_CTRL1:
         return s->ldo[reg];
 
-    case MENELAUS_SLEEP_CTRL2: reg ++;
+    case MENELAUS_SLEEP_CTRL2: reg ++; /* fall through */
     case MENELAUS_SLEEP_CTRL1:
         return s->sleep[reg];
 
@@ -391,8 +391,8 @@ static uint8_t menelaus_read(void *opaque, uint8_t addr)
     case MENELAUS_S2_PULL_DIR:
         return s->pull[3];
 
-    case MENELAUS_MCT_CTRL3: reg ++;
-    case MENELAUS_MCT_CTRL2: reg ++;
+    case MENELAUS_MCT_CTRL3: reg ++; /* fall through */
+    case MENELAUS_MCT_CTRL2: reg ++; /* fall through */
     case MENELAUS_MCT_CTRL1:
         return s->mmc_ctrl[reg];
     case MENELAUS_MCT_PIN_ST:
@@ -492,7 +492,7 @@ static void menelaus_write(void *opaque, uint8_t addr, uint8_t value)
         s->ldo[7] = value & 3;
         break;
 
-    case MENELAUS_SLEEP_CTRL2: reg ++;
+    case MENELAUS_SLEEP_CTRL2: reg ++; /* fall through */
     case MENELAUS_SLEEP_CTRL1:
         s->sleep[reg] = value;
         break;
