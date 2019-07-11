@@ -1613,6 +1613,10 @@ static int handle_aiocb_write_zeroes_unmap(void *opaque)
 }
 
 #ifndef HAVE_COPY_FILE_RANGE
+
+/* Avoid conflict with system header file. */
+#define copy_file_range(a, b, c, d, e, f) local_copy_file_range(a, b, c, d, e, f)
+
 static off_t copy_file_range(int in_fd, off_t *in_off, int out_fd,
                              off_t *out_off, size_t len, unsigned int flags)
 {
