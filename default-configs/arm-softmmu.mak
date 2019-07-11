@@ -1,5 +1,6 @@
 # Default configuration for arm-softmmu
 
+CONFIG_ISA_BUS=y
 CONFIG_PCI=y
 CONFIG_PCI_DEVICES=y
 CONFIG_VGA=y
