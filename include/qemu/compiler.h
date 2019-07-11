@@ -100,9 +100,11 @@
 # if !QEMU_GNUC_PREREQ(4, 4)
    /* gcc versions before 4.4.x don't support gnu_printf, so use printf. */
 #  define GCC_FMT_ATTR(n, m) __attribute__((format(printf, n, m)))
+#  define GCC_SCANF_ATTR(n, m) __attribute__((format(printf, n, m)))
 # else
    /* Use gnu_printf when supported (qemu uses standard format strings). */
 #  define GCC_FMT_ATTR(n, m) __attribute__((format(gnu_printf, n, m)))
+#  define GCC_SCANF_ATTR(n, m) __attribute__((format(gnu_scanf, n, m)))
 #  if defined(_WIN32)
     /* Map __printf__ to __gnu_printf__ because we want standard format strings
      * even when MinGW or GLib include files use __printf__. */
@@ -111,6 +113,7 @@
 # endif
 #else
 #define GCC_FMT_ATTR(n, m)
+#define GCC_SCANF_ATTR(n, m)
 #endif
 
 #ifndef __has_warning

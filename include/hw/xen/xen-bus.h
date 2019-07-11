@@ -94,7 +94,7 @@ void xen_device_frontend_printf(XenDevice *xendev, const char *key,
     GCC_FMT_ATTR(3, 4);
 
 int xen_device_frontend_scanf(XenDevice *xendev, const char *key,
-                              const char *fmt, ...);
+                              const char *fmt, ...) GCC_SCANF_ATTR(3, 4);
 
 void xen_device_set_max_grant_refs(XenDevice *xendev, unsigned int nr_refs,
                                    Error **errp);

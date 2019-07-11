@@ -463,8 +463,9 @@ void xen_device_backend_printf(XenDevice *xendev, const char *key,
     }
 }
 
-static int xen_device_backend_scanf(XenDevice *xendev, const char *key,
-                                    const char *fmt, ...)
+static int GCC_SCANF_ATTR(3, 4)
+xen_device_backend_scanf(XenDevice *xendev, const char *key,
+                         const char *fmt, ...)
 {
     XenBus *xenbus = XEN_BUS(qdev_get_parent_bus(DEVICE(xendev)));
     va_list ap;
