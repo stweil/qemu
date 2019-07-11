@@ -146,7 +146,7 @@ namespace img
         return a;
     }
 
-    std::string format(const char *format, ...)
+    static std::string GCC_FMT_ATTR(1, 2) format(const char *format, ...)
     {
         char buffer[256];
         va_list args;
