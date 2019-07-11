@@ -35,6 +35,11 @@
 #include <sys/syscall.h>
 #include <asm/unistd.h>
 
+/* Avoid conflict with system header file:
+ * /usr/include/x86_64-linux-gnu/bits/mman-shared.h:46:5: note: previous declaration of ‘memfd_create’ was here
+ */
+#define memfd_create(a, b) mem_fd_create(a, b)
+
 static int memfd_create(const char *name, unsigned int flags)
 {
 #ifdef __NR_memfd_create
