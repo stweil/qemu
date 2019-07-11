@@ -15,7 +15,7 @@
 #include "hw/devices.h"
 #include "hw/loader.h"          /* load_image_targphys */
 #include "hw/s3c2410x.h"
-#include "hw/i2c/smbus.h"
+#include "hw/i2c/i2c.h"         /* i2c_create_slave */
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/sysemu.h"

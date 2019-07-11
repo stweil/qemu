@@ -1634,12 +1634,21 @@ static void musicpal_init(MachineState *machine)
          * 0xFF800000 (if there is 8 MB flash). So remap flash access if the
          * image is smaller than 32 MB.
          */
-        pflash_cfi02_register(0x100000000ULL-MP_FLASH_SIZE_MAX,
+#ifdef TARGET_WORDS_BIGENDIAN
+        pflash_cfi02_register(0x100000000ULL - MP_FLASH_SIZE_MAX,
+                              "musicpal.flash", flash_size,
+                              blk, 0x10000,
+                              MP_FLASH_SIZE_MAX / flash_size,
+                              2, 0x00BF, 0x236D, 0x0000, 0x0000,
+                              0x5555, 0x2AAA, true);
+#else
+        pflash_cfi02_register(0x100000000ULL - MP_FLASH_SIZE_MAX,
                               "musicpal.flash", flash_size,
                               blk, 0x10000,
                               MP_FLASH_SIZE_MAX / flash_size,
                               2, 0x00BF, 0x236D, 0x0000, 0x0000,
                               0x5555, 0x2AAA, false);
+#endif
     }
     sysbus_create_simple(TYPE_MV88W8618_FLASHCFG, MP_FLASHCFG_BASE, NULL);
 

@@ -20,21 +20,20 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "chardev/char.h"        /* qemu_chr_new */
-#include "hw/hw.h"
+#include "exec/address-spaces.h" /* get_system_memory */
 #include "hw/arm/arm.h"
-#include "hw/loader.h"          /* load_image_targphys */
-#include "hw/i2c/smbus.h"
-#include "hw/devices.h"
 #include "hw/boards.h"
-#include "hw/ide/internal.h"    /* ide_cmd_write, ... */
-#include "s3c2410x.h"
 #include "hw/char/serial.h"     /* serial_isa_init */
+#include "hw/hw.h"
+#include "hw/i2c/i2c.h"         /* i2c_create_slave */
+#include "hw/ide/internal.h"    /* ide_cmd_write, ... */
+#include "hw/loader.h"          /* load_image_targphys */
 #include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
 #include "net/net.h"
+#include "s3c2410x.h"
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/dma.h"         /* QEMUSGList (in ide/internal.h) */
 #include "sysemu/sysemu.h"
-#include "exec/address-spaces.h" /* get_system_memory */
 
 #define BIOS_FILENAME "able.bin"
 
@@ -476,8 +475,8 @@ static void stcb_init(MachineState *machine)
         }
     }
 
-    pflash_cfi02_register(BAST_NOR_RW_BASE, NULL, "bast.flash",
-                          BAST_NOR_SIZE, flash_bds, 65536, 32, 1, 2,
+    pflash_cfi02_register(BAST_NOR_RW_BASE, "bast.flash",
+                          BAST_NOR_SIZE, flash_bds, 0x10000, 1, 2,
                           0x00BF, 0x234B, 0x0000, 0x0000, 0x5555, 0x2AAA,
                           false);
     /* TODO: Read only ROM type mapping to address BAST_NOR_RO_BASE. */

@@ -2,7 +2,7 @@
  *
  * System emulation for the Digi a9m2410.
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010-2019 Stefan Weil
  *
  * Based on code from bast.c
  * Copyright 2006, 2008 Daniel Silverstone and Vincent Sanders
@@ -21,7 +21,7 @@
 #include "hw/ide/internal.h"    /* ide_cmd_write, ... */
 #include "hw/loader.h"          /* load_image_targphys */
 #include "hw/s3c2410x.h"
-#include "hw/i2c/smbus.h"
+#include "hw/i2c/i2c.h"         /* i2c_create_slave */
 #include "hw/devices.h"
 #include "hw/boards.h"
 #include "hw/char/serial.h"     /* serial_isa_init */
