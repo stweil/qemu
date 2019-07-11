@@ -52,6 +52,8 @@
  *
  */
 
+#if 0 // TODO: Fix code for QEMU API changes
+
 #include "qemu/osdep.h"
 #include "cpu.h"
 
@@ -79,7 +81,7 @@
 #include "hw/char/serial.h"     /* serial_16550_init, ... */
 #include "hw/block/pflash.h"    /* pflash_device_register, ... */
 #include "hw/sysbus.h"          /* SysBusDevice */
-#include "hw/vlynq.h"           /* vlynq_create_bus */
+#include "hw/char/vlynq.h"      /* vlynq_create_bus */
 
 #include "qapi/error.h"          /* error_abort */
 #include "target/mips/internal.h" /* mips_cpu_do_interrupt */
@@ -4353,5 +4355,7 @@ static void ar7_register_types(void)
 }
 
 type_init(ar7_register_types);
+
+#endif
 
 /* eof */

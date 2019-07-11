@@ -1,3 +1,7 @@
+config AR7
+    bool
+    select VLYNQ
+
 config R4K
     bool
 
