@@ -11,7 +11,7 @@
 #include "cpu.h"
 #include "hw/sysbus.h"
 #include "hw/boards.h"
-#include "hw/arm/arm.h"
+#include "hw/arm/boot.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "net/net.h"
 

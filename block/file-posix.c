@@ -23,6 +23,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu-common.h"
 #include "qapi/error.h"
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
@@ -145,6 +146,7 @@ typedef struct BDRVRawState {
     uint64_t locked_shared_perm;
 
     int perm_change_fd;
+    int perm_change_flags;
     BDRVReopenState *reopen_state;
 
 #ifdef CONFIG_XFS
@@ -1444,8 +1446,21 @@ out:
 #ifdef CONFIG_XFS
 static int xfs_write_zeroes(BDRVRawState *s, int64_t offset, uint64_t bytes)
 {
+    int64_t len;
     struct xfs_flock64 fl;
     int err;
+
+    len = lseek(s->fd, 0, SEEK_END);
+    if (len < 0) {
+        return -errno;
+    }
+
+    if (offset + bytes > len) {
+        /* XFS_IOC_ZERO_RANGE does not increase the file length */
+        if (ftruncate(s->fd, offset + bytes) < 0) {
+            return -errno;
+        }
+    }
 
     memset(&fl, 0, sizeof(fl));
     fl.l_whence = SEEK_SET;
@@ -2479,6 +2494,8 @@ static int coroutine_fn raw_co_block_status(BlockDriverState *bs,
     off_t data = 0, hole = 0;
     int ret;
 
+    assert(QEMU_IS_ALIGNED(offset | bytes, bs->bl.request_alignment));
+
     ret = fd_open(bs);
     if (ret < 0) {
         return ret;
@@ -2504,6 +2521,20 @@ static int coroutine_fn raw_co_block_status(BlockDriverState *bs,
         /* On a data extent, compute bytes to the end of the extent,
          * possibly including a partial sector at EOF. */
         *pnum = MIN(bytes, hole - offset);
+
+        /*
+         * We are not allowed to return partial sectors, though, so
+         * round up if necessary.
+         */
+        if (!QEMU_IS_ALIGNED(*pnum, bs->bl.request_alignment)) {
+            int64_t file_length = raw_getlength(bs);
+            if (file_length > 0) {
+                /* Ignore errors, this is just a safeguard */
+                assert(hole == file_length);
+            }
+            *pnum = ROUND_UP(*pnum, bs->bl.request_alignment);
+        }
+
         ret = BDRV_BLOCK_DATA;
     } else {
         /* On a hole, compute bytes to the beginning of the next extent.  */
@@ -2726,7 +2757,11 @@ static QemuOptsList raw_create_opts = {
         {
             .name = BLOCK_OPT_PREALLOC,
             .type = QEMU_OPT_STRING,
-            .help = "Preallocation mode (allowed values: off, falloc, full)"
+            .help = "Preallocation mode (allowed values: off"
+#ifdef CONFIG_POSIX_FALLOCATE
+                    ", falloc"
+#endif
+                    ", full)"
         },
         { /* end of list */ }
     }
@@ -2758,6 +2793,7 @@ static int raw_check_perm(BlockDriverState *bs, uint64_t perm, uint64_t shared,
         assert(s->reopen_state->shared_perm == shared);
         rs = s->reopen_state->opaque;
         s->perm_change_fd = rs->fd;
+        s->perm_change_flags = rs->open_flags;
     } else {
         /* We may need a new fd if auto-read-only switches the mode */
         ret = raw_reconfigure_getfd(bs, bs->open_flags, &open_flags, perm,
@@ -2766,6 +2802,7 @@ static int raw_check_perm(BlockDriverState *bs, uint64_t perm, uint64_t shared,
             return ret;
         } else if (ret != s->fd) {
             s->perm_change_fd = ret;
+            s->perm_change_flags = open_flags;
         }
     }
 
@@ -2804,6 +2841,7 @@ static void raw_set_perm(BlockDriverState *bs, uint64_t perm, uint64_t shared)
     if (s->perm_change_fd && s->fd != s->perm_change_fd) {
         qemu_close(s->fd);
         s->fd = s->perm_change_fd;
+        s->open_flags = s->perm_change_flags;
     }
     s->perm_change_fd = 0;
 

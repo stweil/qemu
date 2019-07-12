@@ -14,6 +14,7 @@
 
 #include "qemu/osdep.h"
 #include "qapi/error.h"
+#include "qemu/module.h"
 #include "hw/pci/pcie_port.h"
 
 static void rp_aer_vector_update(PCIDevice *d)
@@ -30,10 +31,13 @@ static void rp_write_config(PCIDevice *d, uint32_t address,
 {
     uint32_t root_cmd =
         pci_get_long(d->config + d->exp.aer_cap + PCI_ERR_ROOT_COMMAND);
+    uint16_t slt_ctl, slt_sta;
+
+    pcie_cap_slot_get(d, &slt_ctl, &slt_sta);
 
     pci_bridge_write_config(d, address, val, len);
     rp_aer_vector_update(d);
-    pcie_cap_slot_write_config(d, address, val, len);
+    pcie_cap_slot_write_config(d, slt_ctl, slt_sta, address, val, len);
     pcie_aer_write_config(d, address, val, len);
     pcie_aer_root_write_config(d, address, val, len, root_cmd);
 }
@@ -162,7 +166,7 @@ static void rp_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
-    k->is_bridge = 1;
+    k->is_bridge = true;
     k->config_write = rp_write_config;
     k->realize = rp_realize;
     k->exit = rp_exit;

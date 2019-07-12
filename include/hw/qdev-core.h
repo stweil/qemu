@@ -6,6 +6,7 @@
 #include "qom/object.h"
 #include "hw/irq.h"
 #include "hw/hotplug.h"
+#include "sysemu/sysemu.h"
 
 enum {
     DEV_NVECTORS_UNSPECIFIED = -1,
@@ -251,8 +252,6 @@ struct PropertyInfo {
 /**
  * GlobalProperty:
  * @used: Set to true if property was used when initializing a device.
- * @optional: If set to true, GlobalProperty will be skipped without errors
- *            if the property doesn't exist.
  *
  * An error is fatal for non-hotplugged devices, when the global is applied.
  */
@@ -261,7 +260,6 @@ typedef struct GlobalProperty {
     const char *property;
     const char *value;
     bool used;
-    bool optional;
 } GlobalProperty;
 
 static inline void
@@ -452,5 +450,9 @@ static inline bool qbus_is_hotpluggable(BusState *bus)
 
 void device_listener_register(DeviceListener *listener);
 void device_listener_unregister(DeviceListener *listener);
+
+VMChangeStateEntry *qdev_add_vm_change_state_handler(DeviceState *dev,
+                                                     VMChangeStateHandler *cb,
+                                                     void *opaque);
 
 #endif

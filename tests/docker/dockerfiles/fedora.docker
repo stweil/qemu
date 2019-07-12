@@ -1,4 +1,4 @@
-FROM fedora:29
+FROM fedora:30
 ENV PACKAGES \
     bc \
     bison \
@@ -8,6 +8,7 @@ ENV PACKAGES \
     bzip2-devel \
     ccache \
     clang \
+    cyrus-sasl-devel \
     device-mapper-multipath-devel \
     findutils \
     flex \
@@ -23,14 +24,18 @@ ENV PACKAGES \
     libaio-devel \
     libasan \
     libattr-devel \
+    libblockdev-mpath-devel \
     libcap-devel \
     libcap-ng-devel \
     libcurl-devel \
     libfdt-devel \
+    libiscsi-devel \
     libjpeg-devel \
+    libpmem-devel \
     libpng-devel \
     librbd-devel \
-    libssh2-devel \
+    libseccomp-devel \
+    libssh-devel \
     libubsan \
     libusbx-devel \
     libxml2-devel \
@@ -45,7 +50,6 @@ ENV PACKAGES \
     mingw32-gtk3 \
     mingw32-libjpeg-turbo \
     mingw32-libpng \
-    mingw32-libssh2 \
     mingw32-libtasn1 \
     mingw32-nettle \
     mingw32-pixman \
@@ -59,7 +63,6 @@ ENV PACKAGES \
     mingw64-gtk3 \
     mingw64-libjpeg-turbo \
     mingw64-libpng \
-    mingw64-libssh2 \
     mingw64-libtasn1 \
     mingw64-nettle \
     mingw64-pixman \
@@ -74,10 +77,12 @@ ENV PACKAGES \
     pixman-devel \
     python3 \
     PyYAML \
+    rdma-core-devel \
     SDL2-devel \
     snappy-devel \
     sparse \
     spice-server-devel \
+    systemd-devel \
     systemtap-sdt-devel \
     tar \
     usbredir-devel \

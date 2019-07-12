@@ -17,7 +17,7 @@
 #include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
-#include "hw/arm/arm.h"
+#include "hw/arm/boot.h"
 #include "hw/ide/internal.h"    /* ide_cmd_write, ... */
 #include "hw/loader.h"          /* load_image_targphys */
 #include "hw/s3c2410x.h"
