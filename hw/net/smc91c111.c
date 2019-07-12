@@ -211,7 +211,7 @@ typedef struct {
 
 /* Default values for MII management registers (see IEEE 802.3-2008 22.2.4). */
 
-static const uint16_t mii_regs_default[] = {
+static const uint16_t mii_regs_default[32] = {
     [MII_BMCR] = BMCR_ANENABLE | BMCR_SPEED100,
     [MII_BMSR] = BMSR_100FULL | BMSR_100HALF | BMSR_10FULL | BMSR_10HALF |
                  BMSR_ANEGCAPABLE | BMSR_LSTATUS | BMSR_ERCAP,
