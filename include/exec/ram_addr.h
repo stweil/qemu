@@ -21,6 +21,7 @@
 
 #ifndef CONFIG_USER_ONLY
 #include "hw/xen/xen.h"
+#include "sysemu/tcg.h"
 #include "exec/ramlist.h"
 
 struct RAMBlock {
@@ -73,7 +74,8 @@ static inline unsigned long int ramblock_recv_bitmap_offset(void *host_addr,
 
 bool ramblock_is_pmem(RAMBlock *rb);
 
-long qemu_getrampagesize(void);
+long qemu_minrampagesize(void);
+long qemu_maxrampagesize(void);
 
 /**
  * qemu_ram_alloc_from_file,

@@ -11,7 +11,7 @@
 #ifndef BCM2835_H
 #define BCM2835_H
 
-#include "hw/arm/arm.h"
+#include "hw/arm/boot.h"
 #include "bcm2835_peripherals.h"
 
 #define TYPE_BCM2835 "bcm2835"

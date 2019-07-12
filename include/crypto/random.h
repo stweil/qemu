@@ -21,7 +21,6 @@
 #ifndef QCRYPTO_RANDOM_H
 #define QCRYPTO_RANDOM_H
 
-#include "qemu-common.h"
 
 /**
  * qcrypto_random_bytes:
@@ -34,7 +33,7 @@
  *
  * Returns 0 on success, -1 on error
  */
-int qcrypto_random_bytes(uint8_t *buf,
+int qcrypto_random_bytes(void *buf,
                          size_t buflen,
                          Error **errp);
 

@@ -10,7 +10,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/hw.h"
-#include "hw/arm/arm.h"
+#include "hw/arm/boot.h"
 #include "hw/boards.h"
 #include "hw/devices.h"
 #include "hw/loader.h"          /* load_image_targphys */

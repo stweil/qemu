@@ -224,7 +224,7 @@ void mips_init(MachineState *machine)
     } else {
         bios_size = -1;
     }
-    g_assert(ENV_GET_CPU(env)->bigendian == bigendian);
+    g_assert(env_cpu(env)->bigendian == bigendian);
     if ((bios_size > 0) && (bios_size <= BIOS_SIZE)) {
         bios = g_new(MemoryRegion, 1);
         memory_region_init_ram(bios, NULL, "mips_r4k.bios", BIOS_SIZE,

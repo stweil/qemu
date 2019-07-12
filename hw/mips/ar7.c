@@ -2928,7 +2928,7 @@ static void watchdog_cb(void *opaque)
     logout("watchdog expired");
     first_cpu->exception_index = EXCP_NMI;
     env->error_code = 0;
-    mips_cpu_do_interrupt(ENV_GET_CPU(env));
+    mips_cpu_do_interrupt(env_cpu(env));
 }
 
 /*****************************************************************************

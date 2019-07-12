@@ -15,6 +15,7 @@
 #include "libqtest.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qjson.h"
+#include "qemu/module.h"
 #include "qemu/option.h"
 #include "qemu/range.h"
 #include "qemu/sockets.h"
@@ -90,23 +91,13 @@ static const char *tmpfs;
  */
 #include "tests/migration/i386/a-b-bootblock.h"
 #include "tests/migration/aarch64/a-b-kernel.h"
-
-static void init_bootfile(const char *bootpath, void *content)
-{
-    FILE *bootfile = fopen(bootpath, "wb");
-
-    g_assert_cmpint(fwrite(content, 512, 1, bootfile), ==, 1);
-    fclose(bootfile);
-}
-
 #include "tests/migration/s390x/a-b-bios.h"
 
-static void init_bootfile_s390x(const char *bootpath)
+static void init_bootfile(const char *bootpath, void *content, size_t len)
 {
     FILE *bootfile = fopen(bootpath, "wb");
-    size_t len = sizeof(s390x_elf);
 
-    g_assert_cmpint(fwrite(s390x_elf, len, 1, bootfile), ==, 1);
+    g_assert_cmpint(fwrite(content, len, 1, bootfile), ==, 1);
     fclose(bootfile);
 }
 
@@ -172,6 +163,21 @@ static void stop_cb(void *opaque, const char *name, QDict *data)
     if (!strcmp(name, "STOP")) {
         got_stop = true;
     }
+}
+
+/*
+ * Events can get in the way of responses we are actually waiting for.
+ */
+GCC_FMT_ATTR(3, 4)
+static QDict *wait_command_fd(QTestState *who, int fd, const char *command, ...)
+{
+    va_list ap;
+
+    va_start(ap, command);
+    qtest_qmp_vsend_fds(who, &fd, 1, command, ap);
+    va_end(ap);
+
+    return qtest_qmp_receive_success(who, stop_cb, NULL);
 }
 
 /*
@@ -480,6 +486,7 @@ static void migrate(QTestState *who, const char *uri, const char *fmt, ...)
     qdict_put_str(args, "uri", uri);
 
     rsp = qmp("{ 'execute': 'migrate', 'arguments': %p}", args);
+
     g_assert(qdict_haskey(rsp, "return"));
     qobject_unref(rsp);
 }
@@ -520,7 +527,9 @@ static int test_migrate_start(QTestState **from, QTestState **to,
     got_stop = false;
     bootpath = g_strdup_printf("%s/bootsect", tmpfs);
     if (strcmp(arch, "i386") == 0 || strcmp(arch, "x86_64") == 0) {
-        init_bootfile(bootpath, x86_bootsect);
+        /* the assembled x86 boot sector should be exactly one sector large */
+        assert(sizeof(x86_bootsect) == 512);
+        init_bootfile(bootpath, x86_bootsect, sizeof(x86_bootsect));
         extra_opts = use_shmem ? get_shmem_opts("150M", shmem_path) : NULL;
         cmd_src = g_strdup_printf("-machine accel=%s -m 150M"
                                   " -name source,debug-threads=on"
@@ -538,7 +547,7 @@ static int test_migrate_start(QTestState **from, QTestState **to,
         start_address = X86_TEST_MEM_START;
         end_address = X86_TEST_MEM_END;
     } else if (g_str_equal(arch, "s390x")) {
-        init_bootfile_s390x(bootpath);
+        init_bootfile(bootpath, s390x_elf, sizeof(s390x_elf));
         extra_opts = use_shmem ? get_shmem_opts("128M", shmem_path) : NULL;
         cmd_src = g_strdup_printf("-machine accel=%s -m 128M"
                                   " -name source,debug-threads=on"
@@ -573,7 +582,7 @@ static int test_migrate_start(QTestState **from, QTestState **to,
         start_address = PPC_TEST_MEM_START;
         end_address = PPC_TEST_MEM_END;
     } else if (strcmp(arch, "aarch64") == 0) {
-        init_bootfile(bootpath, aarch64_kernel);
+        init_bootfile(bootpath, aarch64_kernel, sizeof(aarch64_kernel));
         extra_opts = use_shmem ? get_shmem_opts("150M", shmem_path) : NULL;
         cmd_src = g_strdup_printf("-machine virt,accel=%s,gic-version=max "
                                   "-name vmsource,debug-threads=on -cpu max "
@@ -1027,6 +1036,90 @@ static void test_precopy_tcp(void)
     g_free(uri);
 }
 
+static void test_migrate_fd_proto(void)
+{
+    QTestState *from, *to;
+    int ret;
+    int pair[2];
+    QDict *rsp;
+    const char *error_desc;
+
+    if (test_migrate_start(&from, &to, "defer", false, false)) {
+        return;
+    }
+
+    /*
+     * We want to pick a speed slow enough that the test completes
+     * quickly, but that it doesn't complete precopy even on a slow
+     * machine, so also set the downtime.
+     */
+    /* 1 ms should make it not converge */
+    migrate_set_parameter(from, "downtime-limit", 1);
+    /* 1GB/s */
+    migrate_set_parameter(from, "max-bandwidth", 1000000000);
+
+    /* Wait for the first serial output from the source */
+    wait_for_serial("src_serial");
+
+    /* Create two connected sockets for migration */
+    ret = socketpair(PF_LOCAL, SOCK_STREAM, 0, pair);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Send the 1st socket to the target */
+    rsp = wait_command_fd(to, pair[0],
+                          "{ 'execute': 'getfd',"
+                          "  'arguments': { 'fdname': 'fd-mig' }}");
+    qobject_unref(rsp);
+    close(pair[0]);
+
+    /* Start incoming migration from the 1st socket */
+    rsp = wait_command(to, "{ 'execute': 'migrate-incoming',"
+                           "  'arguments': { 'uri': 'fd:fd-mig' }}");
+    qobject_unref(rsp);
+
+    /* Send the 2nd socket to the target */
+    rsp = wait_command_fd(from, pair[1],
+                          "{ 'execute': 'getfd',"
+                          "  'arguments': { 'fdname': 'fd-mig' }}");
+    qobject_unref(rsp);
+    close(pair[1]);
+
+    /* Start migration to the 2nd socket*/
+    migrate(from, "fd:fd-mig", "{}");
+
+    wait_for_migration_pass(from);
+
+    /* 300ms should converge */
+    migrate_set_parameter(from, "downtime-limit", 300);
+
+    if (!got_stop) {
+        qtest_qmp_eventwait(from, "STOP");
+    }
+    qtest_qmp_eventwait(to, "RESUME");
+
+    /* Test closing fds */
+    /* We assume, that QEMU removes named fd from its list,
+     * so this should fail */
+    rsp = qtest_qmp(from, "{ 'execute': 'closefd',"
+                          "  'arguments': { 'fdname': 'fd-mig' }}");
+    g_assert_true(qdict_haskey(rsp, "error"));
+    error_desc = qdict_get_str(qdict_get_qdict(rsp, "error"), "desc");
+    g_assert_cmpstr(error_desc, ==, "File descriptor named 'fd-mig' not found");
+    qobject_unref(rsp);
+
+    rsp = qtest_qmp(to, "{ 'execute': 'closefd',"
+                        "  'arguments': { 'fdname': 'fd-mig' }}");
+    g_assert_true(qdict_haskey(rsp, "error"));
+    error_desc = qdict_get_str(qdict_get_qdict(rsp, "error"), "desc");
+    g_assert_cmpstr(error_desc, ==, "File descriptor named 'fd-mig' not found");
+    qobject_unref(rsp);
+
+    /* Complete migration */
+    wait_for_serial("dest_serial");
+    wait_for_migration_complete(from);
+    test_migrate_end(from, to, true);
+}
+
 int main(int argc, char **argv)
 {
     char template[] = "/tmp/migration-test-XXXXXX";
@@ -1081,6 +1174,7 @@ int main(int argc, char **argv)
     qtest_add_func("/migration/precopy/tcp", test_precopy_tcp);
     /* qtest_add_func("/migration/ignore_shared", test_ignore_shared); */
     qtest_add_func("/migration/xbzrle/unix", test_xbzrle_unix);
+    qtest_add_func("/migration/fd_proto", test_migrate_fd_proto);
 
     ret = g_test_run();
 

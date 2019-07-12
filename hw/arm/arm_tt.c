@@ -1,7 +1,7 @@
 /*
  * TomTom GO 730 with Samsung S3C2443X emulation.
  *
- * Copyright (c) 2010, 2013 Stefan Weil
+ * Copyright (c) 2010, 2013, 2019 Stefan Weil
  *
  * Code based on hw/musicpal.c
  * Copyright (c) 2008 Jan Kiszka
@@ -15,8 +15,7 @@
 
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
-#include "hw/arm/arm.h"
-#include "hw/devices.h"
+#include "hw/arm/boot.h"
 #include "hw/boards.h"
 #include "hw/i2c/i2c.h"
 #include "hw/i386/pc.h"

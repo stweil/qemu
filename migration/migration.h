@@ -14,7 +14,6 @@
 #ifndef QEMU_MIGRATION_H
 #define QEMU_MIGRATION_H
 
-#include "qemu-common.h"
 #include "qapi/qapi-types-migration.h"
 #include "qemu/thread.h"
 #include "exec/cpu-common.h"
@@ -117,7 +116,6 @@ struct MigrationState
 
     /*< public >*/
     size_t bytes_xfer;
-    size_t xfer_limit;
     QemuThread thread;
     QEMUBH *cleanup_bh;
     QEMUFile *to_dst_file;

@@ -21,7 +21,7 @@
 #include "cpu.h"
 #include "chardev/char.h"        /* qemu_chr_new */
 #include "exec/address-spaces.h" /* get_system_memory */
-#include "hw/arm/arm.h"
+#include "hw/arm/boot.h"
 #include "hw/boards.h"
 #include "hw/char/serial.h"     /* serial_isa_init */
 #include "hw/hw.h"
@@ -30,6 +30,7 @@
 #include "hw/loader.h"          /* load_image_targphys */
 #include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
 #include "net/net.h"
+#include "qemu-common.h"         /* qemu_find_file */
 #include "s3c2410x.h"
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/dma.h"         /* QEMUSGList (in ide/internal.h) */
