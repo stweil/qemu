@@ -105,10 +105,20 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "Italian"
 !insertmacro MUI_LANGUAGE "Spanish"
 
+; Include files with language instalelr strings.
+; Language ID table - https://www.science.co.il/language/Locale-codes.php
+; Language ID 1033 - English
+; Language ID 1031 - German
+; Language ID 1034 - Spanish
+; Language ID 1036 - French
+; Language ID 1040 - Italian
+!include installer\installer_strings_english.nsh
+!include installer\installer_strings_italian.nsh
+
 ;--------------------------------
 
 ; The stuff to install.
-Section "${PRODUCT} (required)"
+Section "${PRODUCT} "${Required_Text}""
 
     SectionIn RO
 
@@ -159,7 +169,7 @@ Section "${PRODUCT} (required)"
     WriteUninstaller "qemu-uninstall.exe"
 SectionEnd
 
-Section "Tools" SectionTools
+Section "${Tools_Section_Text}" SectionTools
     SetOutPath "$INSTDIR"
     File "${BINDIR}\qemu-edid.exe"
     File "${BINDIR}\qemu-ga.exe"
@@ -167,13 +177,13 @@ Section "Tools" SectionTools
     File "${BINDIR}\qemu-io.exe"
 SectionEnd
 
-SectionGroup "System Emulations" SectionSystem
+SectionGroup "${System_Emulations_Section_Text}" SectionSystem
 
 !include "${BINDIR}\system-emulations.nsh"
 
 SectionGroupEnd
 
-Section "Desktop icons" SectionGnome
+Section "${Desktop_icons_Text}" SectionGnome
     SetOutPath "$INSTDIR\share"
 !ifdef W64
     File /r /usr/x86_64-w64-mingw32/sys-root/mingw/share/icons
@@ -183,32 +193,32 @@ Section "Desktop icons" SectionGnome
 SectionEnd
 
 !ifdef DLLDIR
-Section "Libraries (DLL)" SectionDll
+Section "${Libraries_DLL_Section_Text}" SectionDll
     SetOutPath "$INSTDIR"
     File "${DLLDIR}\*.dll"
 SectionEnd
 !endif
 
 !ifdef CONFIG_DOCUMENTATION
-Section "Documentation" SectionDoc
+Section "${Documentation_Section_Text}" SectionDoc
     SetOutPath "$INSTDIR"
     File "${BINDIR}\qemu-doc.html"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\User Documentation.lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\${User_Documentation_Link_Text}.lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
 SectionEnd
 !endif
 
 ; Optional section (can be disabled by the user)
-Section "Start Menu Shortcuts" SectionMenu
+Section "${Start_Menu_Shortcuts_Section_Text}" SectionMenu
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\Uninstall.lnk" "${UNINST_EXE}" "" "${UNINST_EXE}" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\${Uninstall_Link_Text}.lnk" "${UNINST_EXE}" "" "${UNINST_EXE}" 0
 SectionEnd
 
 ;--------------------------------
 
 ; Uninstaller
 
-Section "Uninstall"
+Section "${Uninstall_Section_Text}"
     ; Remove registry keys
 !ifdef W64
     SetRegView 64
@@ -217,9 +227,9 @@ Section "Uninstall"
     DeleteRegKey HKLM SOFTWARE\${PRODUCT}
 
     ; Remove shortcuts, if any
-    Delete "$SMPROGRAMS\${PRODUCT}\User Documentation.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT}\Technical Documentation.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT}\Uninstall.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\${User_Documentation_Link_Text}.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\${Technical_Documentation_Link_Text}.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\${Uninstall_Link_Text}.lnk"
     RMDir "$SMPROGRAMS\${PRODUCT}"
 
     ; Remove files and directories used
@@ -261,18 +271,18 @@ SectionEnd
 
 ; Descriptions (mouse-over).
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionGnome}   "GNOME desktop icon theme."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "System emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "Alpha system emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "PC i386 system emulation."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools}   "Tools."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionGnome}   "${GNOME_desktop_icon_theme_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "${System_Emulations_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "${Alpha_system_emulation_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "${PC_i386_system_emulation_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools}   "${Tools_Section_Text}"
 !ifdef DLLDIR
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}     "Runtime Libraries (DLL)."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}     "${Libraries_DLL_Section_Text}"
 !endif
 !ifdef CONFIG_DOCUMENTATION
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}     "Documentation."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}     "${Documentation_Section_Text}"
 !endif
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}    "Menu entries."
+    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}    "${Menu_entries_Section_Text}"
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
 ;--------------------------------
