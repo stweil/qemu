@@ -2473,18 +2473,20 @@ void bdrv_root_unref_child(BdrvChild *child)
     bdrv_unref(child_bs);
 }
 
-void bdrv_unref_child(BlockDriverState *parent, BdrvChild *child)
+/**
+ * Clear all inherits_from pointers from children and grandchildren of
+ * @root that point to @root, where necessary.
+ */
+static void bdrv_unset_inherits_from(BlockDriverState *root, BdrvChild *child)
 {
-    if (child == NULL) {
-        return;
-    }
+    BdrvChild *c;
 
-    if (child->bs->inherits_from == parent) {
-        BdrvChild *c;
-
-        /* Remove inherits_from only when the last reference between parent and
-         * child->bs goes away. */
-        QLIST_FOREACH(c, &parent->children, next) {
+    if (child->bs->inherits_from == root) {
+        /*
+         * Remove inherits_from only when the last reference between root and
+         * child->bs goes away.
+         */
+        QLIST_FOREACH(c, &root->children, next) {
             if (c != child && c->bs == child->bs) {
                 break;
             }
@@ -2494,6 +2496,18 @@ void bdrv_unref_child(BlockDriverState *parent, BdrvChild *child)
         }
     }
 
+    QLIST_FOREACH(c, &child->bs->children, next) {
+        bdrv_unset_inherits_from(root, c);
+    }
+}
+
+void bdrv_unref_child(BlockDriverState *parent, BdrvChild *child)
+{
+    if (child == NULL) {
+        return;
+    }
+
+    bdrv_unset_inherits_from(parent, child);
     bdrv_root_unref_child(child);
 }
 
@@ -4415,6 +4429,14 @@ int bdrv_freeze_backing_chain(BlockDriverState *bs, BlockDriverState *base,
 
     if (bdrv_is_backing_chain_frozen(bs, base, errp)) {
         return -EPERM;
+    }
+
+    for (i = bs; i != base; i = backing_bs(i)) {
+        if (i->backing && backing_bs(i)->never_freeze) {
+            error_setg(errp, "Cannot freeze '%s' link to '%s'",
+                       i->backing->name, backing_bs(i)->node_name);
+            return -EPERM;
+        }
     }
 
     for (i = bs; i != base; i = backing_bs(i)) {
