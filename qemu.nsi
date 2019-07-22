@@ -131,23 +131,6 @@ Section "${PRODUCT} "${Required_Text}""
     File "${SRCDIR}\README"
     File "${SRCDIR}\VERSION"
 
-    File "${BINDIR}\*.bin"
-    File "${BINDIR}\*.dtb"
-    File "${BINDIR}\*.fd"
-    File "${BINDIR}\*.img"
-    File "${BINDIR}\*.lid"
-    File "${BINDIR}\*.ndrv"
-    File "${BINDIR}\*.rom"
-    File "${BINDIR}\openbios-*"
-    File "${BINDIR}\palcode-clipper"
-    File "${BINDIR}\u-boot.e500"
-    File "${BINDIR}\icons\hicolor\scalable\apps\qemu.svg"
-
-    File /r "${BINDIR}\keymaps"
-!ifdef CONFIG_GTK
-    File /r "${BINDIR}\share"
-!endif
-
     SetOutPath "$INSTDIR\lib\gdk-pixbuf-2.0\2.10.0"
     FileOpen $0 "loaders.cache" w
     FileClose $0
@@ -172,25 +155,13 @@ SectionEnd
 
 Section "${Tools_Section_Text}" SectionTools
     SetOutPath "$INSTDIR"
-    File "${BINDIR}\qemu-edid.exe"
-    File "${BINDIR}\qemu-ga.exe"
-    File "${BINDIR}\qemu-img.exe"
-    File "${BINDIR}\qemu-io.exe"
 SectionEnd
 
 SectionGroup "${System_Emulations_Section_Text}" SectionSystem
-
-!include "${BINDIR}\system-emulations.nsh"
-
 SectionGroupEnd
 
 Section "${Desktop_icons_Text}" SectionGnome
     SetOutPath "$INSTDIR\share"
-!ifdef W64
-    File /r /usr/x86_64-w64-mingw32/sys-root/mingw/share/icons
-!else
-    File /r /usr/i686-w64-mingw32/sys-root/mingw/share/icons
-!endif
 SectionEnd
 
 !ifdef DLLDIR
@@ -203,7 +174,6 @@ SectionEnd
 !ifdef CONFIG_DOCUMENTATION
 Section "${Documentation_Section_Text}" SectionDoc
     SetOutPath "$INSTDIR"
-    File "${BINDIR}\qemu-doc.html"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
     CreateShortCut "$SMPROGRAMS\${PRODUCT}\${User_Documentation_Link_Text}.lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
 SectionEnd
