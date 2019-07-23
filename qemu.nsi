@@ -89,7 +89,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_LINK "Visit the QEMU Wiki online!"
+!define MUI_FINISHPAGE_LINK $(Visit_QEMU_WIki_Link)
 !define MUI_FINISHPAGE_LINK_LOCATION "${URL}"
 !insertmacro MUI_PAGE_FINISH
 
@@ -105,20 +105,18 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "Italian"
 !insertmacro MUI_LANGUAGE "Spanish"
 
-; Include files with language instalelr strings.
-; Language ID table - https://www.science.co.il/language/Locale-codes.php
-; Language ID 1033 - English
-; Language ID 1031 - German
-; Language ID 1034 - Spanish
-; Language ID 1036 - French
-; Language ID 1040 - Italian
-!include installer\installer_strings_english.nsh
-!include installer\installer_strings_italian.nsh
+;--------------------------------
+; Functions.
+
+Function .onInit
+    !insertmacro MUI_LANGDLL_DISPLAY
+FunctionEnd
+
 
 ;--------------------------------
 
 ; The stuff to install.
-Section "${PRODUCT} "${Required_Text}""
+Section "${PRODUCT}" QEMU_System_File_Section_Description
 
     SectionIn RO
 
@@ -130,22 +128,6 @@ Section "${PRODUCT} "${Required_Text}""
     File "${SRCDIR}\COPYING.LIB"
     File "${SRCDIR}\README"
     File "${SRCDIR}\VERSION"
-
-    File "${BINDIR}\*.bin"
-    File "${BINDIR}\*.dtb"
-    File "${BINDIR}\*.img"
-    File "${BINDIR}\*.lid"
-    File "${BINDIR}\*.ndrv"
-    File "${BINDIR}\*.rom"
-    File "${BINDIR}\openbios-*"
-    File "${BINDIR}\palcode-clipper"
-    File "${BINDIR}\u-boot.e500"
-    File "${BINDIR}\icons\hicolor\scalable\apps\qemu.svg"
-
-    File /r "${BINDIR}\keymaps"
-!ifdef CONFIG_GTK
-    File /r "${BINDIR}\share"
-!endif
 
     SetOutPath "$INSTDIR\lib\gdk-pixbuf-2.0\2.10.0"
     FileOpen $0 "loaders.cache" w
@@ -169,56 +151,43 @@ Section "${PRODUCT} "${Required_Text}""
     WriteUninstaller "qemu-uninstall.exe"
 SectionEnd
 
-Section "${Tools_Section_Text}" SectionTools
+Section "$(Tools_Section_Name)" Tools_Section_Description
     SetOutPath "$INSTDIR"
-    File "${BINDIR}\qemu-edid.exe"
-    File "${BINDIR}\qemu-ga.exe"
-    File "${BINDIR}\qemu-img.exe"
-    File "${BINDIR}\qemu-io.exe"
 SectionEnd
 
-SectionGroup "${System_Emulations_Section_Text}" SectionSystem
-
-!include "${BINDIR}\system-emulations.nsh"
-
+SectionGroup "$(System_Emulation_Section_Name)" System_Emulation_Section_Description
 SectionGroupEnd
 
-Section "${Desktop_icons_Text}" SectionGnome
+Section "$(Desktop_Icon_Section_Name)" Desktop_Icon_Section_Description
     SetOutPath "$INSTDIR\share"
-!ifdef W64
-    File /r /usr/x86_64-w64-mingw32/sys-root/mingw/share/icons
-!else
-    File /r /usr/i686-w64-mingw32/sys-root/mingw/share/icons
-!endif
 SectionEnd
 
 !ifdef DLLDIR
-Section "${Libraries_DLL_Section_Text}" SectionDll
+Section "$(DLL_Library_Section_Name)" DLL_Library_Section_Description
     SetOutPath "$INSTDIR"
     File "${DLLDIR}\*.dll"
 SectionEnd
 !endif
 
 !ifdef CONFIG_DOCUMENTATION
-Section "${Documentation_Section_Text}" SectionDoc
+Section "$(Documentation_Section_Name)" Documentation_Section_Description
     SetOutPath "$INSTDIR"
-    File "${BINDIR}\qemu-doc.html"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\${User_Documentation_Link_Text}.lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Link_Description_User_Documentation).lnk" "$INSTDIR\qemu-doc.html" "" "$INSTDIR\qemu-doc.html" 0
 SectionEnd
 !endif
 
 ; Optional section (can be disabled by the user)
-Section "${Start_Menu_Shortcuts_Section_Text}" SectionMenu
+Section "$(Start_Menu_Section_Name)" Start_Menu_Section_Description
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\${Uninstall_Link_Text}.lnk" "${UNINST_EXE}" "" "${UNINST_EXE}" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Link_Description_Uninstall).lnk" "${UNINST_EXE}" "" "${UNINST_EXE}" 0
 SectionEnd
 
 ;--------------------------------
 
 ; Uninstaller
 
-Section "${Uninstall_Section_Text}"
+Section "$(Uninstall_Section_Name)" Uninstall_Section_Description
     ; Remove registry keys
 !ifdef W64
     SetRegView 64
@@ -227,9 +196,9 @@ Section "${Uninstall_Section_Text}"
     DeleteRegKey HKLM SOFTWARE\${PRODUCT}
 
     ; Remove shortcuts, if any
-    Delete "$SMPROGRAMS\${PRODUCT}\${User_Documentation_Link_Text}.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT}\${Technical_Documentation_Link_Text}.lnk"
-    Delete "$SMPROGRAMS\${PRODUCT}\${Uninstall_Link_Text}.lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\$(Link_Description_User_Documentation).lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\$(Link_Description_Technical_Documentation).lnk"
+    Delete "$SMPROGRAMS\${PRODUCT}\$(Link_Description_Uninstall).lnk"
     RMDir "$SMPROGRAMS\${PRODUCT}"
 
     ; Remove files and directories used
@@ -241,6 +210,7 @@ Section "${Uninstall_Section_Text}"
     Delete "$INSTDIR\*.bin"
     Delete "$INSTDIR\*.dll"
     Delete "$INSTDIR\*.dtb"
+    Delete "$INSTDIR\*.fd"
     Delete "$INSTDIR\*.img"
     Delete "$INSTDIR\*.lid"
     Delete "$INSTDIR\*.ndrv"
@@ -267,27 +237,33 @@ Section "${Uninstall_Section_Text}"
     RMDir "$INSTDIR"
 SectionEnd
 
-;--------------------------------
+; Include files with language instalelr strings.
+; Language ID table - https://www.science.co.il/language/Locale-codes.php
+; Language ID 1033 - English
+; Language ID 1031 - German
+; Language ID 1034 - Spanish
+; Language ID 1036 - French
+; Language ID 1040 - Italian
+!addincludedir installer
+!include installer_strings_english.nsh
+!include installer_strings_italian.nsh
+
+
+; ---------------------
 
 ; Descriptions (mouse-over).
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionGnome}   "${GNOME_desktop_icon_theme_Section_Text}"
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionSystem}  "${System_Emulations_Section_Text}"
-    !insertmacro MUI_DESCRIPTION_TEXT ${Section_alpha}  "${Alpha_system_emulation_Section_Text}"
-    !insertmacro MUI_DESCRIPTION_TEXT ${Section_i386}   "${PC_i386_system_emulation_Section_Text}"
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionTools}   "${Tools_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${QEMU_System_File_Section_Description}  $(QEMU_System_File_Section_Description_Text)
+    !insertmacro MUI_DESCRIPTION_TEXT ${Tools_Section_Description}             $(Tools_Section_Description_Text)
+    !insertmacro MUI_DESCRIPTION_TEXT ${System_Emulation_Section_Description}  $(System_Emulation_Section_Description_Text)
+    !insertmacro MUI_DESCRIPTION_TEXT ${Desktop_Icon_Section_Description}      $(Desktop_Icon_Section_Description_Text)
+    !insertmacro MUI_DESCRIPTION_TEXT ${Uninstall_Section_Description}         $(Uninstall_Section_Description_Text)
 !ifdef DLLDIR
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDll}     "${Libraries_DLL_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${DLL_Library_Section_Description}       $(DLL_Library_Section_Description_Text)
 !endif
 !ifdef CONFIG_DOCUMENTATION
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionDoc}     "${Documentation_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${Documentation_Section_Description}     $(Documentation_Section_Description_Text)
 !endif
-    !insertmacro MUI_DESCRIPTION_TEXT ${SectionMenu}    "${Menu_entries_Section_Text}"
+    !insertmacro MUI_DESCRIPTION_TEXT ${Start_Menu_Section_Description}        $(Start_Menu_Section_Description_Text)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
-;--------------------------------
-; Functions.
-
-Function .onInit
-    !insertmacro MUI_LANGDLL_DISPLAY
-FunctionEnd
