@@ -339,7 +339,13 @@ static void serial_ioport_write(void *opaque, hwaddr addr, uint64_t val,
 {
     SerialState *s = opaque;
 
-    assert(addr < 8);
+    if (!(addr < 8)) {
+      static bool shown;
+      if (!shown) {
+        shown = true;
+        fprintf(stderr, "%s(%p,0x%08x)\n", __func__, opaque, (unsigned)addr);
+      }
+    }
     addr &= 7;
 
     trace_serial_ioport_write(addr, val);
@@ -482,10 +488,14 @@ static uint64_t serial_ioport_read(void *opaque, hwaddr addr, unsigned size)
     SerialState *s = opaque;
     uint32_t ret;
 
-    assert(addr < 8);
+    if (!(addr < 8)) {
+      static bool shown;
+      if (!shown) {
+        shown = true;
+        fprintf(stderr, "%s(%p,0x%08x)\n", __func__, opaque, (unsigned)addr);
+      }
+    }
     addr &= 7;
-
-  //~ fprintf(stderr, "%s(%p,0x%08x)\n", __func__, opaque, addr);
 
     switch(addr) {
     default:
@@ -569,7 +579,6 @@ static uint64_t serial_ioport_read(void *opaque, hwaddr addr, unsigned size)
 
 static int serial_can_receive(SerialState *s)
 {
-    //~ fprintf(stderr, "%s:%u\n", __FILE__, __LINE__);
     if(s->fcr & UART_FCR_FE) {
         if (s->recv_fifo.num < UART_FIFO_LENGTH) {
             /*
@@ -990,7 +999,6 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
 
     s = g_malloc0(sizeof(SerialState));
 
-    s->base = base;
     s->it_shift = 0;
     s->irq = irq;
     s->baudbase = baudbase;
@@ -1010,7 +1018,7 @@ uint64_t serial_mm_read(void *opaque, hwaddr addr,
                         unsigned size)
 {
     SerialState *s = opaque;
-    return serial_ioport_read(s, (addr - s->base) >> s->it_shift, 1);
+    return serial_ioport_read(s, addr >> s->it_shift, 1);
 }
 
 void serial_mm_write(void *opaque, hwaddr addr,
@@ -1018,7 +1026,7 @@ void serial_mm_write(void *opaque, hwaddr addr,
 {
     SerialState *s = opaque;
     value &= 255;
-    serial_ioport_write(s, (addr - s->base) >> s->it_shift, value, 1);
+    serial_ioport_write(s, addr >> s->it_shift, value, 1);
 }
 
 static const MemoryRegionOps serial_mm_ops[3] = {
@@ -1054,7 +1062,6 @@ SerialState *serial_mm_init(MemoryRegion *address_space,
 
     s = g_malloc0(sizeof(SerialState));
 
-    s->base = base;
     s->it_shift = it_shift;
     s->irq = irq;
     s->baudbase = baudbase;

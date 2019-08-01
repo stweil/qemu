@@ -55,7 +55,6 @@ typedef struct SerialState {
     int thr_ipending;
     qemu_irq irq;
     CharBackend chr;
-    hwaddr base;
     int last_break_enable;
     int it_shift;
     int baudbase;
