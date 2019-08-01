@@ -429,7 +429,7 @@ static void pxa2xx_mm_write(void *opaque, hwaddr addr,
             s->mm_regs[addr >> 2] = value;
             break;
         }
-
+        /* fall through */
     default:
         printf("%s: Bad register " REG_FMT "\n", __func__, addr);
         break;
