@@ -1,4 +1,4 @@
-;-------------------------------- Installer text strings (English - LangID ${LANG_English}3)
+; QEMU NSIS installer text strings (English - LangID 1033)
 
 LangString QEMU_System_File_Section_Description_Text ${LANG_ENGLISH} "QEMU system files (required)"
 LangString Tools_Section_Name ${LANG_ENGLISH} "Tools"
@@ -18,4 +18,4 @@ LangString Uninstall_Section_Description_Text ${LANG_ENGLISH} "Create program li
 LangString Link_Description_User_Documentation ${LANG_ENGLISH} "User documentation"
 LangString Link_Description_Uninstall ${LANG_ENGLISH} "Uninstall"
 LangString Link_Description_Technical_Documentation ${LANG_ENGLISH} "Technical Documentation"
-LangString Visit_QEMU_WIki_Link ${LANG_ENGLISH} "Visit the QEMU Wiki online!"
+LangString Visit_QEMU_Wiki_Link ${LANG_ENGLISH} "Visit the QEMU Wiki online!"

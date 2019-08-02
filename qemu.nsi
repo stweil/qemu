@@ -89,7 +89,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_LINK $(Visit_QEMU_WIki_Link)
+!define MUI_FINISHPAGE_LINK $(Visit_QEMU_Wiki_Link)
 !define MUI_FINISHPAGE_LINK_LOCATION "${URL}"
 !insertmacro MUI_PAGE_FINISH
 
@@ -270,16 +270,19 @@ Section "$(Uninstall_Section_Name)" Uninstall_Section_Description
     RMDir "$INSTDIR"
 SectionEnd
 
-; Include files with language instalelr strings.
+; Include files with language installer strings.
 ; Language ID table - https://www.science.co.il/language/Locale-codes.php
 ; Language ID 1033 - English
 ; Language ID 1031 - German
 ; Language ID 1034 - Spanish
 ; Language ID 1036 - French
 ; Language ID 1040 - Italian
-!addincludedir installer
+!addincludedir ${SRCDIR}/installer
 !include installer_strings_english.nsh
+!include installer_strings_french.nsh
+!include installer_strings_german.nsh
 !include installer_strings_italian.nsh
+!include installer_strings_spanish.nsh
 
 
 ; ---------------------
