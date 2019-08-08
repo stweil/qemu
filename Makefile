@@ -1084,7 +1084,7 @@ installer: $(INSTALLER)
 
 INSTDIR=/tmp/qemu-nsis
 
-$(INSTALLER): install-doc $(SRC_PATH)/qemu.nsi
+$(INSTALLER): $(SRC_PATH)/qemu.nsi
 	$(MAKE) install prefix=${INSTDIR}
 ifdef SIGNCODE
 	(cd ${INSTDIR}; \
