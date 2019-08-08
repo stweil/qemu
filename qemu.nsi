@@ -220,7 +220,7 @@ SectionEnd
 
 ; Uninstaller
 
-Section "$(Uninstall_Section_Name)" Uninstall_Section_Description
+Section "Uninstall" Uninstall_Section_Description
     ; Remove registry keys
 !ifdef W64
     SetRegView 64
