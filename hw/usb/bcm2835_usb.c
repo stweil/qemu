@@ -7,7 +7,9 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "hw/irq.h"               /* qemu_set_irq */
 #include "hw/usb/bcm2835_usb.h"
+#include "migration/vmstate.h"    /* VMStateDescription */
 #include "qapi/error.h"
 #include "sysemu/dma.h"
 

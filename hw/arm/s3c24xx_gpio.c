@@ -4,7 +4,7 @@
  *
  * Copyright 2006, 2007 Daniel Silverstone and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2020 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
@@ -12,7 +12,10 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "hw/hw.h"
+#include "hw/irq.h"              /* qemu_set_irq */
+#include "hw/qdev-properties.h"  /* DEFINE_PROP_END_OF_LIST */
 #include "hw/sysbus.h"
+#include "migration/vmstate.h"   /* VMStateDescription */
 #include "s3c24xx.h"
 
 #define S3C_GPIO_GPECON         0x40

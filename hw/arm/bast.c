@@ -28,7 +28,9 @@
 #include "hw/i2c/i2c.h"         /* i2c_create_slave */
 #include "hw/ide/internal.h"    /* ide_cmd_write, ... */
 #include "hw/loader.h"          /* load_image_targphys */
+#include "hw/qdev-properties.h"
 #include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
+#include "migration/vmstate.h"   /* VMStateDescription */
 #include "net/net.h"
 #include "qemu-common.h"         /* qemu_find_file */
 #include "s3c2410x.h"
@@ -486,7 +488,7 @@ static void stcb_init(MachineState *machine)
     if (machine->kernel_filename != NULL) {
         bast_binfo.loader_start = CPU_S3C2410X_DRAM;
         //~ bast_binfo.loader_start = 0xc0108000 - 0x00010000;
-        arm_load_kernel(stcb->soc->cpu, &bast_binfo);
+        arm_load_kernel(stcb->soc->cpu, machine, &bast_binfo);
     }
 
     /* Setup initial (reset) program counter */

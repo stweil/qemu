@@ -27,7 +27,6 @@
  */
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
 #include "ui/console.h"
 #include "hw/arm/omap.h"
 #include "hw/boards.h"
@@ -196,10 +195,7 @@ static void sx1_init(MachineState *machine, const int version)
     }
 
     /* Load the kernel.  */
-    sx1_binfo.kernel_filename = machine->kernel_filename;
-    sx1_binfo.kernel_cmdline = machine->kernel_cmdline;
-    sx1_binfo.initrd_filename = machine->initrd_filename;
-    arm_load_kernel(mpu->cpu, &sx1_binfo);
+    arm_load_kernel(mpu->cpu, machine, &sx1_binfo);
 
     /* TODO: fix next line */
     //~ qemu_console_resize(ds, 640, 480);

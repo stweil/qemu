@@ -5,7 +5,9 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "hw/irq.h"               /* qemu_set_irq */
 #include "hw/misc/bcm2835_mphi.h"
+#include "migration/vmstate.h"    /* VMStateDescription */
 
 static void bcm2835_mphi_update_irq(BCM2835MphiState *s)
 {

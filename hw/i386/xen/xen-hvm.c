@@ -14,6 +14,8 @@
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_host.h"
 #include "hw/i386/pc.h"
+#include "hw/irq.h"
+#include "hw/hw.h"
 #include "hw/i386/apic-msidef.h"
 #include "hw/xen/xen_common.h"
 #include "hw/xen/xen-legacy-backend.h"
@@ -21,7 +23,10 @@
 #include "qapi/error.h"
 #include "qapi/qapi-commands-misc.h"
 #include "qemu/error-report.h"
+#include "qemu/main-loop.h"
 #include "qemu/range.h"
+#include "sysemu/runstate.h"
+#include "sysemu/sysemu.h"
 #include "sysemu/xen-mapcache.h"
 #include "trace.h"
 #include "exec/address-spaces.h"
@@ -1241,6 +1246,8 @@ static void xen_hvm_change_state_handler(void *opaque, int running,
 static void xen_exit_notifier(Notifier *n, void *data)
 {
     XenIOState *state = container_of(n, XenIOState, exit);
+
+    xen_destroy_ioreq_server(xen_domid, state->ioservid);
 
     xenevtchn_close(state->xce_handle);
     xs_daemon_close(state->xenstore);

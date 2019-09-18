@@ -216,7 +216,6 @@ static const BlockJobDriver commit_job_driver = {
         .job_type      = JOB_TYPE_COMMIT,
         .free          = block_job_free,
         .user_resume   = block_job_user_resume,
-        .drain         = block_job_drain,
         .run           = commit_run,
         .prepare       = commit_prepare,
         .abort         = commit_abort,
@@ -350,6 +349,7 @@ void commit_start(const char *job_id, BlockDriverState *bs,
     if (ret < 0) {
         goto fail;
     }
+    blk_set_disable_request_queuing(s->base, true);
     s->base_bs = base;
 
     /* Required permissions are already taken with block_job_add_bdrv() */
@@ -358,6 +358,7 @@ void commit_start(const char *job_id, BlockDriverState *bs,
     if (ret < 0) {
         goto fail;
     }
+    blk_set_disable_request_queuing(s->top, true);
 
     s->backing_file_str = g_strdup(backing_file_str);
     s->on_error = on_error;

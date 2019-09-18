@@ -4,15 +4,17 @@
  *
  * Copyright 2009 Daniel Silverstone and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2020 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
 
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "hw/hw.h"
+#include "hw/irq.h"              /* qemu_set_irq */
+#include "migration/qemu-file-types.h" /* qemu_put_be32s */
 #include "migration/register.h"  /* register_savevm_live */
 #include "qemu/timer.h"
 
@@ -199,7 +201,7 @@ s3c24xx_timers_init(S3CState *soc, hwaddr base_addr, uint32_t tclk0, uint32_t tc
                           &s3c24xx_timers_ops, s, "s3c24xx-timers", 17 * 4);
     memory_region_add_subregion(system_memory, base_addr, &s->mmio);
 
-    register_savevm_live(NULL, "s3c24xx_timers", 0, 0,
+    register_savevm_live("s3c24xx_timers", 0, 0,
                          &savevm_s3c24xx_timers, s);
 
     s->tclk0 = tclk0;

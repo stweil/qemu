@@ -5,7 +5,7 @@
  * Copyright 2006, 2007, 2008 Daniel Silverstone, Ben Dooks
  *  and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2020 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
@@ -15,6 +15,8 @@
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "hw/i2c/i2c.h"
+#include "hw/irq.h"              /* qemu_set_irq */
+#include "migration/qemu-file-types.h" /* qemu_put_be32s */
 #include "migration/register.h"  /* register_savevm_live */
 
 #include "s3c24xx.h"
@@ -253,7 +255,7 @@ struct s3c24xx_i2c_state_s *s3c24xx_iic_init(qemu_irq irq,
                           &s3c24xx_i2c_ops, s, "s3c24xx-i2c", 0x1000000);
     memory_region_add_subregion(system_memory, base_addr, &s->mmio);
 
-    register_savevm_live(NULL, "s3c24xx_i2c", 0, 0, &savevm_s3c24xx_i2c, s);
+    register_savevm_live("s3c24xx_i2c", 0, 0, &savevm_s3c24xx_i2c, s);
 
     return s;
 }

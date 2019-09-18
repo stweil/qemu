@@ -1443,9 +1443,7 @@ static uint32_t do_csst(CPUS390XState *env, uint32_t r3, uint64_t a1,
     }
 
     /* Sanity check writability of the store address.  */
-#ifndef CONFIG_USER_ONLY
-    probe_write(env, a2, 0, mem_idx, ra);
-#endif
+    probe_write(env, a2, 1 << sc, mem_idx, ra);
 
     /*
      * Note that the compare-and-swap is atomic, and the store is atomic,
@@ -1815,6 +1813,11 @@ void HELPER(sske)(CPUS390XState *env, uint64_t r1, uint64_t r2)
 
     key = (uint8_t) r1;
     skeyclass->set_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
+   /*
+    * As we can only flush by virtual address and not all the entries
+    * that point to a physical address we have to flush the whole TLB.
+    */
+    tlb_flush_all_cpus_synced(env_cpu(env));
 }
 
 /* reset reference bit extended */
@@ -1843,6 +1846,11 @@ uint32_t HELPER(rrbe)(CPUS390XState *env, uint64_t r2)
     if (skeyclass->set_skeys(ss, r2 / TARGET_PAGE_SIZE, 1, &key)) {
         return 0;
     }
+   /*
+    * As we can only flush by virtual address and not all the entries
+    * that point to a physical address we have to flush the whole TLB.
+    */
+    tlb_flush_all_cpus_synced(env_cpu(env));
 
     /*
      * cc
@@ -2605,22 +2613,15 @@ uint32_t HELPER(cu42)(CPUS390XState *env, uint32_t r1, uint32_t r2, uint32_t m3)
 void probe_write_access(CPUS390XState *env, uint64_t addr, uint64_t len,
                         uintptr_t ra)
 {
-#ifdef CONFIG_USER_ONLY
-    if (!h2g_valid(addr) || !h2g_valid(addr + len - 1) ||
-        page_check_range(addr, len, PAGE_WRITE) < 0) {
-        s390_program_interrupt(env, PGM_ADDRESSING, ILEN_AUTO, ra);
-    }
-#else
     /* test the actual access, not just any access to the page due to LAP */
     while (len) {
-        const uint64_t pagelen = -(addr | -TARGET_PAGE_MASK);
+        const uint64_t pagelen = -(addr | TARGET_PAGE_MASK);
         const uint64_t curlen = MIN(pagelen, len);
 
         probe_write(env, addr, curlen, cpu_mmu_index(env, false), ra);
         addr = wrap_address(env, addr + curlen);
         len -= curlen;
     }
-#endif
 }
 
 void HELPER(probe_write_access)(CPUS390XState *env, uint64_t addr, uint64_t len)

@@ -62,6 +62,7 @@
 #include "block/block.h"
 #include "block/block_int.h"
 #include "sysemu/block-backend.h"
+#include "sysemu/runstate.h"
 #include "qemu/main-loop.h"
 #include "qemu/error-report.h"
 #include "migration/misc.h"
@@ -70,7 +71,6 @@
 #include "migration/vmstate.h"
 #include "migration/register.h"
 #include "qemu/hbitmap.h"
-#include "sysemu/sysemu.h"
 #include "qemu/cutils.h"
 #include "qapi/error.h"
 #include "trace.h"
@@ -326,7 +326,7 @@ static int init_dirty_bitmap_migration(void)
 
     /* unset migration flags here, to not roll back it */
     QSIMPLEQ_FOREACH(dbms, &dirty_bitmap_mig_state.dbms_list, entry) {
-        bdrv_dirty_bitmap_set_migration(dbms->bitmap, true);
+        bdrv_dirty_bitmap_skip_store(dbms->bitmap, true);
     }
 
     if (QSIMPLEQ_EMPTY(&dirty_bitmap_mig_state.dbms_list)) {
@@ -733,7 +733,7 @@ void dirty_bitmap_mig_init(void)
 {
     QSIMPLEQ_INIT(&dirty_bitmap_mig_state.dbms_list);
 
-    register_savevm_live(NULL, "dirty-bitmap", 0, 1,
+    register_savevm_live("dirty-bitmap", 0, 1,
                          &savevm_dirty_bitmap_handlers,
                          &dirty_bitmap_mig_state);
 }

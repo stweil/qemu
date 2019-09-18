@@ -4,7 +4,7 @@
  *
  * Copyright 2006, 2007, 2008 Daniel Silverstone and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2020 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
@@ -13,6 +13,7 @@
 #include "cpu.h"
 #include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "migration/qemu-file-types.h" /* qemu_put_be32s */
 #include "migration/register.h"  /* register_savevm_live */
 
 #include "s3c24xx.h"
@@ -124,7 +125,7 @@ s3c24xx_clkcon_init(S3CState *soc, hwaddr base_addr, uint32_t ref_freq)
     memory_region_init_io(&s->mmio, OBJECT(s), &s3c24xx_clkcon_ops, s,
                           "s3c24xx.clkcon", ARRAY_SIZE(s->clkcon_reg) * 4);
     memory_region_add_subregion(get_system_memory(), base_addr, &s->mmio);
-    register_savevm_live(NULL, "s3c24xx_clkcon", 0, 0, &savevm_s3c24xx_clkcon, s);
+    register_savevm_live("s3c24xx_clkcon", 0, 0, &savevm_s3c24xx_clkcon, s);
 
     s->cpu_env = &soc->cpu->env;
     s->ref_freq = ref_freq;

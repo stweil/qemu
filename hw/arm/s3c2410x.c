@@ -4,13 +4,14 @@
  *
  * Copyright 2009 Daniel Silverstone and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2019 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
 
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
 #include "qapi/error.h"          /* error_abort */
 #include "sysemu/sysemu.h"

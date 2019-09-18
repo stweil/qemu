@@ -138,9 +138,9 @@ static bool qvirtio_pci_get_queue_isr_status(QVirtioDevice *d, QVirtQueue *vq)
             /* No ISR checking should be done if masked, but read anyway */
             return qpci_msix_pending(dev->pdev, vqpci->msix_entry);
         } else {
-            data = readl(vqpci->msix_addr);
+            data = qtest_readl(dev->pdev->bus->qts, vqpci->msix_addr);
             if (data == vqpci->msix_data) {
-                writel(vqpci->msix_addr, 0);
+                qtest_writel(dev->pdev->bus->qts, vqpci->msix_addr, 0);
                 return true;
             } else {
                 return false;
@@ -162,9 +162,9 @@ static bool qvirtio_pci_get_config_isr_status(QVirtioDevice *d)
             /* No ISR checking should be done if masked, but read anyway */
             return qpci_msix_pending(dev->pdev, dev->config_msix_entry);
         } else {
-            data = readl(dev->config_msix_addr);
+            data = qtest_readl(dev->pdev->bus->qts, dev->config_msix_addr);
             if (data == dev->config_msix_data) {
-                writel(dev->config_msix_addr, 0);
+                qtest_writel(dev->pdev->bus->qts, dev->config_msix_addr, 0);
                 return true;
             } else {
                 return false;
@@ -173,6 +173,18 @@ static bool qvirtio_pci_get_config_isr_status(QVirtioDevice *d)
     } else {
         return qpci_io_readb(dev->pdev, dev->bar, VIRTIO_PCI_ISR) & 2;
     }
+}
+
+static void qvirtio_pci_wait_config_isr_status(QVirtioDevice *d,
+                                               gint64 timeout_us)
+{
+    QVirtioPCIDevice *dev = container_of(d, QVirtioPCIDevice, vdev);
+    gint64 start_time = g_get_monotonic_time();
+
+    do {
+        g_assert(g_get_monotonic_time() - start_time <= timeout_us);
+        qtest_clock_step(dev->pdev->bus->qts, 100);
+    } while (!qvirtio_pci_get_config_isr_status(d));
 }
 
 static void qvirtio_pci_queue_select(QVirtioDevice *d, uint16_t index)
@@ -257,7 +269,7 @@ const QVirtioBus qvirtio_pci = {
     .get_status = qvirtio_pci_get_status,
     .set_status = qvirtio_pci_set_status,
     .get_queue_isr_status = qvirtio_pci_get_queue_isr_status,
-    .get_config_isr_status = qvirtio_pci_get_config_isr_status,
+    .wait_config_isr_status = qvirtio_pci_wait_config_isr_status,
     .queue_select = qvirtio_pci_queue_select,
     .get_queue_size = qvirtio_pci_get_queue_size,
     .set_queue_address = qvirtio_pci_set_queue_address,

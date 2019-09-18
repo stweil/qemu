@@ -26,6 +26,7 @@
 #define ASPEED_SMC_H
 
 #include "hw/ssi/ssi.h"
+#include "hw/sysbus.h"
 
 typedef struct AspeedSegments {
     hwaddr addr;
@@ -45,6 +46,8 @@ typedef struct AspeedSMCController {
     hwaddr flash_window_base;
     uint32_t flash_window_size;
     bool has_dma;
+    hwaddr dma_flash_mask;
+    hwaddr dma_dram_mask;
     uint32_t nregs;
 } AspeedSMCController;
 
@@ -85,6 +88,7 @@ typedef struct AspeedSMCState {
 
     uint32_t num_cs;
     qemu_irq *cs_lines;
+    bool inject_failure;
 
     SSIBus *spi;
 
@@ -99,6 +103,10 @@ typedef struct AspeedSMCState {
 
     /* for DMA support */
     uint64_t sdram_base;
+
+    AddressSpace flash_as;
+    MemoryRegion *dram_mr;
+    AddressSpace dram_as;
 
     AspeedSMCFlash *flashes;
 

@@ -15,7 +15,6 @@
 #include "hw/block/block.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-block.h"
-#include "sysemu/sysemu.h"
 #include "block/nbd.h"
 #include "io/channel-socket.h"
 #include "io/net-listener.h"
@@ -102,7 +101,7 @@ void nbd_server_start(SocketAddress *addr, const char *tls_creds,
     qio_net_listener_set_name(nbd_server->listener,
                               "nbd-listener");
 
-    if (qio_net_listener_open_sync(nbd_server->listener, addr, errp) < 0) {
+    if (qio_net_listener_open_sync(nbd_server->listener, addr, 1, errp) < 0) {
         goto error;
     }
 
@@ -188,8 +187,7 @@ void qmp_nbd_server_add(const char *device, bool has_name, const char *name,
         writable = false;
     }
 
-    exp = nbd_export_new(bs, 0, len, name, NULL, bitmap,
-                         writable ? 0 : NBD_FLAG_READ_ONLY,
+    exp = nbd_export_new(bs, 0, len, name, NULL, bitmap, !writable, !writable,
                          NULL, false, on_eject_blk, errp);
     if (!exp) {
         return;

@@ -17,10 +17,13 @@
 #include "hw/sysbus.h"
 #include "hw/arm/boot.h"
 #include "hw/boards.h"
+#include "hw/hw.h"               /* hw_error */
 #include "hw/i2c/i2c.h"
 #include "hw/i386/pc.h"
-#include "hw/ptimer.h"          /* ptimer_state */
+#include "hw/irq.h"              /* qemu_irq_raise */
+#include "hw/ptimer.h"           /* ptimer_state */
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "migration/vmstate.h"   /* VMStateDescription */
 #include "net/net.h"
 #include "sysemu/sysemu.h"
 #include "qemu/timer.h"
@@ -1026,7 +1029,7 @@ static void tt_init(MachineState *machine)
         /* TODO: load ttsystem. */
         //~ sect_size = 0x11b778, sect_addr = 0x31700000
         //~ sect_size = 0x6a3f45, sect_addr = 0x31000000
-        arm_load_kernel(cpu, &tt_binfo);
+        arm_load_kernel(cpu, machine, &tt_binfo);
     }
 }
 

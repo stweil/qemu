@@ -2,7 +2,7 @@
  * QEMU WLAN device emulation
  *
  * Copyright (c) 2008 Clemens Kolbitsch
- * Copyright (c) 2008-2012 Stefan Weil
+ * Copyright (c) 2008-2020 Stefan Weil
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -323,7 +323,7 @@ static int pci_Atheros_WLAN_init(PCIDevice *pci_dev)
     /* TODO: we don't support multiple instance yet!! */
     /* TODO: replace NULL by &dev->qdev. */
 #if 0
-    register_savevm_live(NULL, "Atheros_WLAN", 0, 3, Atheros_WLAN_save, Atheros_WLAN_load, s);
+    register_savevm_live("Atheros_WLAN", 0, 3, Atheros_WLAN_save, Atheros_WLAN_load, s);
 #endif
 
     Atheros_WLAN_reset(nd, s);

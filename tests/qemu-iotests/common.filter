@@ -130,8 +130,8 @@ _filter_img_create()
         -e "s# compat6=\\(on\\|off\\)##g" \
         -e "s# static=\\(on\\|off\\)##g" \
         -e "s# zeroed_grain=\\(on\\|off\\)##g" \
-        -e "s# subformat='[^']*'##g" \
-        -e "s# adapter_type='[^']*'##g" \
+        -e "s# subformat=[^ ]*##g" \
+        -e "s# adapter_type=[^ ]*##g" \
         -e "s# hwversion=[^ ]*##g" \
         -e "s# lazy_refcounts=\\(on\\|off\\)##g" \
         -e "s# block_size=[0-9]\\+##g" \
@@ -217,6 +217,11 @@ _filter_nbd()
         -e 's#127\.0\.0\.1:[0-9]*#127.0.0.1:PORT#g' \
         -e "s#?socket=$TEST_DIR#?socket=TEST_DIR#g" \
         -e 's#\(foo\|PORT/\?\|.sock\): Failed to .*$#\1#'
+}
+
+_filter_qmp_empty_return()
+{
+    grep -v '{"return": {}}'
 }
 
 # make sure this script returns success

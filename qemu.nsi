@@ -129,7 +129,7 @@ Section "${PRODUCT}" QEMU_System_File_Section_Description
     File "${SRCDIR}\Changelog"
     File "${SRCDIR}\COPYING"
     File "${SRCDIR}\COPYING.LIB"
-    File "${SRCDIR}\README"
+    File "${SRCDIR}\README.rst"
     File "${SRCDIR}\VERSION"
 
     File "${BINDIR}\*.bin"
@@ -238,7 +238,7 @@ Section "Uninstall" Uninstall_Section_Description
     Delete "$INSTDIR\Changelog"
     Delete "$INSTDIR\COPYING"
     Delete "$INSTDIR\COPYING.LIB"
-    Delete "$INSTDIR\README"
+    Delete "$INSTDIR\README.rst"
     Delete "$INSTDIR\VERSION"
     Delete "$INSTDIR\*.bin"
     Delete "$INSTDIR\*.dll"

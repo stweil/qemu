@@ -21,6 +21,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "hw/irq.h"
 #include "hw/mips/cpudevs.h"
 #include "qemu/timer.h"
 #include "sysemu/kvm.h"
@@ -32,7 +33,7 @@
 #define TIMER_PERIOD 10 /* 10 ns period for 100 Mhz frequency */
 
 /* XXX: do not use a global */
-uint32_t cpu_mips_get_random (CPUMIPSState *env)
+uint32_t cpu_mips_get_random(CPUMIPSState *env)
 {
     static uint32_t seed = 1;
     static uint32_t prev_idx = 0;
@@ -45,8 +46,10 @@ uint32_t cpu_mips_get_random (CPUMIPSState *env)
 
     /* Don't return same value twice, so get another value */
     do {
-        /* Use a simple algorithm of Linear Congruential Generator
-         * from ISO/IEC 9899 standard. */
+        /*
+         * Use a simple algorithm of Linear Congruential Generator
+         * from ISO/IEC 9899 standard.
+         */
         seed = 1103515245 * seed + 12345;
         idx = (seed >> 16) % nb_rand_tlb + env->CP0_Wired;
     } while (idx == prev_idx);
@@ -82,7 +85,7 @@ static void cpu_mips_timer_expire(CPUMIPSState *env)
     qemu_irq_raise(env->irq[(env->CP0_IntCtl >> CP0IntCtl_IPTI) & 0x7]);
 }
 
-uint32_t cpu_mips_get_count (CPUMIPSState *env)
+uint32_t cpu_mips_get_count(CPUMIPSState *env)
 {
     uint32_t value = env->CP0_Count;
     if (!cpu_mips_timer_disabled(env)) {
@@ -97,7 +100,7 @@ uint32_t cpu_mips_get_count (CPUMIPSState *env)
     return value;
 }
 
-void cpu_mips_store_count (CPUMIPSState *env, uint32_t count)
+void cpu_mips_store_count(CPUMIPSState *env, uint32_t count)
 {
     /*
      * This gets called from cpu_state_reset(), potentially before timer init.
@@ -118,14 +121,15 @@ void cpu_mips_store_count (CPUMIPSState *env, uint32_t count)
     }
 }
 
-void cpu_mips_store_compare (CPUMIPSState *env, uint32_t value)
+void cpu_mips_store_compare(CPUMIPSState *env, uint32_t value)
 {
     env->CP0_Compare = value;
     if (!cpu_mips_timer_disabled(env)) {
         cpu_mips_timer_update(env);
     }
-    if (env->insn_flags & ISA_MIPS32R2)
+    if (env->insn_flags & ISA_MIPS32R2) {
         env->CP0_Cause &= ~(1 << CP0Ca_TI);
+    }
     qemu_irq_lower(env->irq[(env->CP0_IntCtl >> CP0IntCtl_IPTI) & 0x7]);
 #if 0
     cpu_mips_timer_triggered = 0;
@@ -149,17 +153,16 @@ static void mips_timer_cb(void *opaque)
     CPUMIPSState *env;
 
     env = opaque;
-#if 0
-    qemu_log("%s\n", __func__);
-#endif
 
     if (cpu_mips_timer_disabled(env)) {
         return;
     }
 
-    /* ??? This callback should occur when the counter is exactly equal to
-       the comparator value.  Offset the count by one to avoid immediately
-       retriggering the callback before any virtual time has passed.  */
+    /*
+     * ??? This callback should occur when the counter is exactly equal to
+     * the comparator value.  Offset the count by one to avoid immediately
+     * retriggering the callback before any virtual time has passed.
+     */
     env->CP0_Count++;
     cpu_mips_timer_expire(env);
     env->CP0_Count--;
@@ -171,7 +174,7 @@ static void mips_timer_cb(void *opaque)
 #endif
 }
 
-void cpu_mips_clock_init (MIPSCPU *cpu)
+void cpu_mips_clock_init(MIPSCPU *cpu)
 {
     CPUMIPSState *env = &cpu->env;
 

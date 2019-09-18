@@ -5,7 +5,9 @@
 
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "hw/irq.h"               /* qemu_set_irq */
 #include "hw/timer/bcm2835_timer.h"
+#include "migration/vmstate.h"    /* VMStateDescription */
 #include "qemu/main-loop.h"
 
 #define SYSCLOCK_FREQ (252000000)

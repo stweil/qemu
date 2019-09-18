@@ -7,15 +7,16 @@
  *
  * Copyright 2006, 2007 Daniel Silverstone and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2020 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
 
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "hw/hw.h"
 #include "exec/address-spaces.h" /* get_system_memory */
+#include "hw/hw.h"
+#include "migration/qemu-file-types.h" /* qemu_put_be32s */
 #include "migration/register.h"  /* register_savevm_live */
 
 #include "s3c24xx.h"
@@ -99,7 +100,7 @@ s3c24xx_memc_init(hwaddr base_addr)
     memory_region_init_io(&s->mmio, OBJECT(s), &s3c24xx_memc_ops, s,
                           "s3c24xx.memc", 13 * 4);
     memory_region_add_subregion(get_system_memory(), base_addr, &s->mmio);
-    register_savevm_live(NULL, "s3c24xx_memc", 0, 0, &savevm_s3c24xx_memc, s);
+    register_savevm_live("s3c24xx_memc", 0, 0, &savevm_s3c24xx_memc, s);
 
     return s;
 }

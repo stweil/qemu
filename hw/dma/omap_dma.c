@@ -1531,7 +1531,7 @@ static void omap_dma_write(void *opaque, hwaddr addr,
     case 0x404 ... 0x4fe:
         if (s->model <= omap_dma_3_1)
             break;
-        /* Fall through. */
+        /* fall through */
     case 0x400:
         if (omap_dma_sys_write(s, addr, value))
             break;

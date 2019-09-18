@@ -16,9 +16,9 @@
  * You should have received a copy of the GNU General Public License along
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
+
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "hw/hw.h"
 #include "audio/audio.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/qtest.h"
@@ -27,6 +27,7 @@
 #include "hw/boards.h"
 #include "hw/arm/boot.h"
 #include "hw/input/tsc2xxx.h"
+#include "hw/irq.h"
 #include "hw/loader.h"
 #include "exec/address-spaces.h"
 #include "cpu.h"
@@ -186,9 +187,6 @@ static struct arm_boot_info palmte_binfo = {
 
 static void palmte_init(MachineState *machine)
 {
-    const char *kernel_filename = machine->kernel_filename;
-    const char *kernel_cmdline = machine->kernel_cmdline;
-    const char *initrd_filename = machine->initrd_filename;
     MemoryRegion *address_space_mem = get_system_memory();
     struct omap_mpu_state_s *mpu;
     int flash_size = 0x00800000;
@@ -248,16 +246,13 @@ static void palmte_init(MachineState *machine)
         }
     }
 
-    if (!rom_loaded && !kernel_filename && !qtest_enabled()) {
+    if (!rom_loaded && !machine->kernel_filename && !qtest_enabled()) {
         fprintf(stderr, "Kernel or ROM image must be specified\n");
         exit(1);
     }
 
     /* Load the kernel.  */
-    palmte_binfo.kernel_filename = kernel_filename;
-    palmte_binfo.kernel_cmdline = kernel_cmdline;
-    palmte_binfo.initrd_filename = initrd_filename;
-    arm_load_kernel(mpu->cpu, &palmte_binfo);
+    arm_load_kernel(mpu->cpu, machine, &palmte_binfo);
 }
 
 static void palmte_machine_init(MachineClass *mc)

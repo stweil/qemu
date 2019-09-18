@@ -4,16 +4,17 @@
  *
  * Copyright 2006, 2007 Daniel Silverstone and Vincent Sanders
  *
- * Copyright 2010, 2013 Stefan Weil
+ * Copyright 2010, 2013, 2020 Stefan Weil
  *
  * This file is under the terms of the GNU General Public License Version 2.
  */
 
 #include "qemu/osdep.h"
-#include "cpu.h"
-#include "hw/hw.h"
-#include "exec/address-spaces.h" /* get_system_memory */
 #include "chardev/char-fe.h"     /* qemu_chr_fe_write */
+#include "cpu.h"
+#include "exec/address-spaces.h" /* get_system_memory */
+#include "hw/hw.h"
+#include "hw/irq.h"              /* qemu_set_irq */
 #include "sysemu/sysemu.h"
 
 #include "s3c24xx.h"
