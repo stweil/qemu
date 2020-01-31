@@ -45,6 +45,7 @@
 #include "exec/exec-all.h"
 
 #include "qemu/thread.h"
+#include "qemu/plugin.h"
 #include "sysemu/cpus.h"
 #include "sysemu/qtest.h"
 #include "qemu/main-loop.h"
@@ -949,8 +950,8 @@ static inline int64_t qemu_tcg_next_kick(void)
     return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + TCG_KICK_PERIOD;
 }
 
-/* Kick the currently round-robin scheduled vCPU */
-static void qemu_cpu_kick_rr_cpu(void)
+/* Kick the currently round-robin scheduled vCPU to next */
+static void qemu_cpu_kick_rr_next_cpu(void)
 {
     CPUState *cpu;
     do {
@@ -959,6 +960,16 @@ static void qemu_cpu_kick_rr_cpu(void)
             cpu_exit(cpu);
         }
     } while (cpu != atomic_mb_read(&tcg_current_rr_cpu));
+}
+
+/* Kick all RR vCPUs */
+static void qemu_cpu_kick_rr_cpus(void)
+{
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        cpu_exit(cpu);
+    };
 }
 
 static void do_nothing(CPUState *cpu, run_on_cpu_data unused)
@@ -993,7 +1004,7 @@ void qemu_timer_notify_cb(void *opaque, QEMUClockType type)
 static void kick_tcg_thread(void *opaque)
 {
     timer_mod(tcg_kick_vcpu_timer, qemu_tcg_next_kick());
-    qemu_cpu_kick_rr_cpu();
+    qemu_cpu_kick_rr_next_cpu();
 }
 
 static void start_tcg_kick_timer(void)
@@ -1097,7 +1108,6 @@ static int do_vm_stop(RunState state, bool send_stop)
     }
 
     bdrv_drain_all();
-    replay_disable_events();
     ret = bdrv_flush_all();
 
     return ret;
@@ -1255,8 +1265,17 @@ static void qemu_tcg_rr_wait_io_event(void)
 
 static void qemu_wait_io_event(CPUState *cpu)
 {
+    bool slept = false;
+
     while (cpu_thread_is_idle(cpu)) {
+        if (!slept) {
+            slept = true;
+            qemu_plugin_vcpu_idle_cb(cpu);
+        }
         qemu_cond_wait(cpu->halt_cond, &qemu_global_mutex);
+    }
+    if (slept) {
+        qemu_plugin_vcpu_resume_cb(cpu);
     }
 
 #ifdef _WIN32
@@ -1828,9 +1847,11 @@ void qemu_cpu_kick(CPUState *cpu)
 {
     qemu_cond_broadcast(cpu->halt_cond);
     if (tcg_enabled()) {
-        cpu_exit(cpu);
-        /* NOP unless doing single-thread RR */
-        qemu_cpu_kick_rr_cpu();
+        if (qemu_tcg_mttcg_enabled()) {
+            cpu_exit(cpu);
+        } else {
+            qemu_cpu_kick_rr_cpus();
+        }
     } else {
         if (hax_enabled()) {
             /*
@@ -2181,7 +2202,6 @@ int vm_prepare_start(void)
     /* We are sending this now, but the CPUs will be resumed shortly later */
     qapi_event_send_resume();
 
-    replay_enable_events();
     cpu_enable_ticks();
     runstate_set(RUN_STATE_RUNNING);
     vm_state_notify(1, RUN_STATE_RUNNING);

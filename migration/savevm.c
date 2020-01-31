@@ -1113,6 +1113,37 @@ void qemu_savevm_state_header(QEMUFile *f)
     }
 }
 
+int qemu_savevm_nr_failover_devices(void)
+{
+    SaveStateEntry *se;
+    int n = 0;
+
+    QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
+        if (se->vmsd && se->vmsd->dev_unplug_pending) {
+            n++;
+        }
+    }
+
+    return n;
+}
+
+bool qemu_savevm_state_guest_unplug_pending(void)
+{
+    SaveStateEntry *se;
+    int n = 0;
+
+    QTAILQ_FOREACH(se, &savevm_state.handlers, entry) {
+        if (!se->vmsd || !se->vmsd->dev_unplug_pending) {
+            continue;
+        }
+        if (se->vmsd->dev_unplug_pending(se->opaque)) {
+            n++;
+        }
+    }
+
+    return n > 0;
+}
+
 void qemu_savevm_state_setup(QEMUFile *f)
 {
     SaveStateEntry *se;
@@ -1215,6 +1246,8 @@ int qemu_savevm_state_iterate(QEMUFile *f, bool postcopy)
         save_section_footer(f, se);
 
         if (ret < 0) {
+            error_report("failed to save SaveStateEntry with id(name): %d(%s)",
+                         se->section_id, se->idstr);
             qemu_file_set_error(f, ret);
         }
         if (ret <= 0) {
@@ -1314,7 +1347,7 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
                                                     bool in_postcopy,
                                                     bool inactivate_disks)
 {
-    QJSON *vmdesc;
+    g_autoptr(QJSON) vmdesc = NULL;
     int vmdesc_len;
     SaveStateEntry *se;
     int ret;
@@ -1375,7 +1408,6 @@ int qemu_savevm_state_complete_precopy_non_iterable(QEMUFile *f,
         qemu_put_be32(f, vmdesc_len);
         qemu_put_buffer(f, (uint8_t *)qjson_get_str(vmdesc), vmdesc_len);
     }
-    qjson_destroy(vmdesc);
 
     return 0;
 }
@@ -1836,6 +1868,8 @@ static void *postcopy_ram_listen_thread(void *opaque)
 
     rcu_unregister_thread();
     mis->have_listen_thread = false;
+    postcopy_state_set(POSTCOPY_INCOMING_END);
+
     return NULL;
 }
 
@@ -1866,7 +1900,7 @@ static int loadvm_postcopy_handle_listen(MigrationIncomingState *mis)
      * shouldn't be doing anything yet so don't actually expect requests
      */
     if (migrate_postcopy_ram()) {
-        if (postcopy_ram_enable_notify(mis)) {
+        if (postcopy_ram_incoming_setup(mis)) {
             postcopy_ram_incoming_cleanup(mis);
             return -1;
         }
@@ -1874,11 +1908,6 @@ static int loadvm_postcopy_handle_listen(MigrationIncomingState *mis)
 
     if (postcopy_notify(POSTCOPY_NOTIFY_INBOUND_LISTEN, &local_err)) {
         error_report_err(local_err);
-        return -1;
-    }
-
-    if (mis->have_listen_thread) {
-        error_report("CMD_POSTCOPY_RAM_LISTEN already has a listen thread");
         return -1;
     }
 
@@ -1935,7 +1964,7 @@ static void loadvm_postcopy_handle_run_bh(void *opaque)
 /* After all discards we can start running and asking for pages */
 static int loadvm_postcopy_handle_run(MigrationIncomingState *mis)
 {
-    PostcopyState ps = postcopy_state_set(POSTCOPY_INCOMING_RUNNING);
+    PostcopyState ps = postcopy_state_get();
 
     trace_loadvm_postcopy_handle_run();
     if (ps != POSTCOPY_INCOMING_LISTENING) {
@@ -1943,6 +1972,7 @@ static int loadvm_postcopy_handle_run(MigrationIncomingState *mis)
         return -1;
     }
 
+    postcopy_state_set(POSTCOPY_INCOMING_RUNNING);
     mis->bh = qemu_bh_new(loadvm_postcopy_handle_run_bh, mis);
     qemu_bh_schedule(mis->bh);
 
