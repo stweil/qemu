@@ -1302,10 +1302,6 @@ static uint64_t unassigned_mem_read(void *opaque, hwaddr addr,
                 addr, qemu_sprint_backtrace(buffer, sizeof(buffer)));
     }
     //~ vm_stop(0);
-    if (current_cpu != NULL) {
-        bool is_exec = current_cpu->mem_io_access_type == MMU_INST_FETCH;
-        cpu_unassigned_access(current_cpu, addr, false, is_exec, 0, size);
-    }
     return 0;
 }
 
@@ -1317,9 +1313,6 @@ static void unassigned_mem_write(void *opaque, hwaddr addr,
         fprintf(stderr, "Unassigned mem write " TARGET_FMT_plx
                 " = 0x%" PRIx64 " %s\n",
                 addr, val, qemu_sprint_backtrace(buffer, sizeof(buffer)));
-    }
-    if (current_cpu != NULL) {
-        cpu_unassigned_access(current_cpu, addr, true, false, 0, size);
     }
 }
 
