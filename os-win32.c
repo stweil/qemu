@@ -30,67 +30,6 @@
 #include "qemu-options.h"
 #include "sysemu/runstate.h"
 
-/***********************************************************/
-/* Functions missing in mingw */
-
-#if defined(CONFIG_THREAD)
-
-int clock_gettime(clockid_t clock_id, struct timespec *pTimespec)
-{
-  int result = 0;
-  if (clock_id == CLOCK_REALTIME && pTimespec != 0) {
-    DWORD t = GetTickCount();
-    const unsigned cps = 1000;
-    struct timespec ts;
-    ts.tv_sec  = t / cps;
-    ts.tv_nsec = (t % cps) * (1000000000UL / cps);
-    *pTimespec = ts;
-  } else {
-    errno = EINVAL;
-    result = -1;
-  }
-  return result;
-}
-
-int pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset)
-{
-    /* Dummy, do nothing. */
-    return EINVAL;
-}
-
-int sigfillset(sigset_t *set)
-{
-    int result = 0;
-    if (set) {
-        *(set) = (sigset_t)(-1);
-    } else {
-        errno = EINVAL;
-        result = -1;
-    }
-    return result;
-}
-
-#endif /* CONFIG_THREAD */
-
-int setenv(const char *name, const char *value, int overwrite)
-{
-    int result = 0;
-    if (overwrite || !getenv(name)) {
-        size_t length = strlen(name) + strlen(value) + 2;
-        char *string = g_malloc(length);
-        snprintf(string, length, "%s=%s", name, value);
-        result = putenv(string);
-
-        /* Windows takes a copy and does not continue to use our string.
-         * Therefore it can be safely freed on this platform.  POSIX code
-         * typically has to leak the string because according to the spec it
-         * becomes part of the environment.
-         */
-        g_free(string);
-    }
-    return result;
-}
-
 static BOOL WINAPI qemu_ctrl_handler(DWORD type)
 {
     qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_SIGNAL);

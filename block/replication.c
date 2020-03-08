@@ -306,12 +306,6 @@ out:
     return ret;
 }
 
-static bool replication_recurse_is_first_non_filter(BlockDriverState *bs,
-                                                    BlockDriverState *candidate)
-{
-    return bdrv_recurse_is_first_non_filter(bs->file->bs, candidate);
-}
-
 static void secondary_do_checkpoint(BDRVReplicationState *s, Error **errp)
 {
     Error *local_err = NULL;
@@ -456,6 +450,17 @@ static void replication_start(ReplicationState *rs, ReplicationMode mode,
     aio_context_acquire(aio_context);
     s = bs->opaque;
 
+    if (s->stage == BLOCK_REPLICATION_DONE ||
+        s->stage == BLOCK_REPLICATION_FAILOVER) {
+        /*
+         * This case happens when a secondary is promoted to primary.
+         * Ignore the request because the secondary side of replication
+         * doesn't have to do anything anymore.
+         */
+        aio_context_release(aio_context);
+        return;
+    }
+
     if (s->stage != BLOCK_REPLICATION_NONE) {
         error_setg(errp, "Block replication is running or done");
         aio_context_release(aio_context);
@@ -580,6 +585,17 @@ static void replication_do_checkpoint(ReplicationState *rs, Error **errp)
     aio_context_acquire(aio_context);
     s = bs->opaque;
 
+    if (s->stage == BLOCK_REPLICATION_DONE ||
+        s->stage == BLOCK_REPLICATION_FAILOVER) {
+        /*
+         * This case happens when a secondary was promoted to primary.
+         * Ignore the request because the secondary side of replication
+         * doesn't have to do anything anymore.
+         */
+        aio_context_release(aio_context);
+        return;
+    }
+
     if (s->mode == REPLICATION_MODE_SECONDARY) {
         secondary_do_checkpoint(s, errp);
     }
@@ -596,7 +612,7 @@ static void replication_get_error(ReplicationState *rs, Error **errp)
     aio_context_acquire(aio_context);
     s = bs->opaque;
 
-    if (s->stage != BLOCK_REPLICATION_RUNNING) {
+    if (s->stage == BLOCK_REPLICATION_NONE) {
         error_setg(errp, "Block replication is not running");
         aio_context_release(aio_context);
         return;
@@ -637,6 +653,17 @@ static void replication_stop(ReplicationState *rs, bool failover, Error **errp)
     aio_context = bdrv_get_aio_context(bs);
     aio_context_acquire(aio_context);
     s = bs->opaque;
+
+    if (s->stage == BLOCK_REPLICATION_DONE ||
+        s->stage == BLOCK_REPLICATION_FAILOVER) {
+        /*
+         * This case happens when a secondary was promoted to primary.
+         * Ignore the request because the secondary side of replication
+         * doesn't have to do anything anymore.
+         */
+        aio_context_release(aio_context);
+        return;
+    }
 
     if (s->stage != BLOCK_REPLICATION_RUNNING) {
         error_setg(errp, "Block replication is not running");
@@ -699,7 +726,6 @@ static BlockDriver bdrv_replication = {
     .bdrv_co_writev             = replication_co_writev,
 
     .is_filter                  = true,
-    .bdrv_recurse_is_first_non_filter = replication_recurse_is_first_non_filter,
 
     .has_variable_length        = true,
     .strong_runtime_opts        = replication_strong_runtime_opts,

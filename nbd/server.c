@@ -2400,7 +2400,7 @@ static coroutine_fn int nbd_handle_request(NBDClient *client,
                 }
             }
 
-            return ret;
+            return 0;
         } else {
             return nbd_send_generic_reply(client, request->handle, -EINVAL,
                                           "CMD_BLOCK_STATUS not negotiated",

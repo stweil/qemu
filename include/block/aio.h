@@ -42,6 +42,7 @@ void qemu_aio_unref(void *p);
 void qemu_aio_ref(void *p);
 
 typedef struct AioHandler AioHandler;
+typedef QLIST_HEAD(, AioHandler) AioHandlerList;
 typedef void QEMUBHFunc(void *opaque);
 typedef bool AioPollFn(void *opaque);
 typedef void IOHandler(void *opaque);
@@ -49,6 +50,20 @@ typedef void IOHandler(void *opaque);
 struct Coroutine;
 struct ThreadPool;
 struct LinuxAioState;
+struct LuringState;
+
+/*
+ * Each aio_bh_poll() call carves off a slice of the BH list, so that newly
+ * scheduled BHs are not processed until the next aio_bh_poll() call.  All
+ * active aio_bh_poll() calls chain their slices together in a list, so that
+ * nested aio_bh_poll() calls process all scheduled bottom halves.
+ */
+typedef QSLIST_HEAD(, QEMUBH) BHList;
+typedef struct BHListSlice BHListSlice;
+struct BHListSlice {
+    BHList bh_list;
+    QSIMPLEQ_ENTRY(BHListSlice) next;
+};
 
 struct AioContext {
     GSource source;
@@ -57,7 +72,10 @@ struct AioContext {
     QemuRecMutex lock;
 
     /* The list of registered AIO handlers.  Protected by ctx->list_lock. */
-    QLIST_HEAD(, AioHandler) aio_handlers;
+    AioHandlerList aio_handlers;
+
+    /* The list of AIO handlers to be deleted.  Protected by ctx->list_lock. */
+    AioHandlerList deleted_aio_handlers;
 
     /* Used to avoid unnecessary event_notifier_set calls in aio_notify;
      * accessed with atomic primitives.  If this field is 0, everything
@@ -90,8 +108,11 @@ struct AioContext {
      */
     QemuLockCnt list_lock;
 
-    /* Anchor of the list of Bottom Halves belonging to the context */
-    struct QEMUBH *first_bh;
+    /* Bottom Halves pending aio_bh_poll() processing */
+    BHList bh_list;
+
+    /* Chained BH list slices for each nested aio_bh_poll() call */
+    QSIMPLEQ_HEAD(, BHListSlice) bh_slice_list;
 
     /* Used by aio_notify.
      *
@@ -117,10 +138,18 @@ struct AioContext {
     struct ThreadPool *thread_pool;
 
 #ifdef CONFIG_LINUX_AIO
-    /* State for native Linux AIO.  Uses aio_context_acquire/release for
+    /*
+     * State for native Linux AIO.  Uses aio_context_acquire/release for
      * locking.
      */
     struct LinuxAioState *linux_aio;
+#endif
+#ifdef CONFIG_LINUX_IO_URING
+    /*
+     * State for Linux io_uring.  Uses aio_context_acquire/release for
+     * locking.
+     */
+    struct LuringState *linux_io_uring;
 #endif
 
     /* TimerLists for calling timers - one per clock type.  Has its own
@@ -386,6 +415,11 @@ struct LinuxAioState *aio_setup_linux_aio(AioContext *ctx, Error **errp);
 /* Return the LinuxAioState bound to this AioContext */
 struct LinuxAioState *aio_get_linux_aio(AioContext *ctx);
 
+/* Setup the LuringState bound to this AioContext */
+struct LuringState *aio_setup_linux_io_uring(AioContext *ctx, Error **errp);
+
+/* Return the LuringState bound to this AioContext */
+struct LuringState *aio_get_linux_io_uring(AioContext *ctx);
 /**
  * aio_timer_new_with_attrs:
  * @ctx: the aio context

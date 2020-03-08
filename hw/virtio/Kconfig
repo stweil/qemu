@@ -1,7 +1,15 @@
+config VHOST
+    bool
+
 config VIRTIO
     bool
 
 config VIRTIO_RNG
+    bool
+    default y
+    depends on VIRTIO
+
+config VIRTIO_IOMMU
     bool
     default y
     depends on VIRTIO

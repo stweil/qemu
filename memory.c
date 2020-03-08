@@ -436,7 +436,7 @@ static MemTxResult  memory_region_read_accessor(MemoryRegion *mr,
     tmp = mr->ops->read(mr->opaque, addr, size);
     if (mr->subpage) {
         trace_memory_region_subpage_read(get_cpu_index(), mr, addr, tmp, size);
-    } else if (TRACE_MEMORY_REGION_OPS_READ_ENABLED) {
+    } else if (trace_event_get_state_backends(TRACE_MEMORY_REGION_OPS_READ)) {
         hwaddr abs_addr = memory_region_to_absolute_addr(mr, addr);
         trace_memory_region_ops_read(get_cpu_index(), mr, abs_addr, tmp, size);
     }
@@ -458,7 +458,7 @@ static MemTxResult memory_region_read_with_attrs_accessor(MemoryRegion *mr,
     r = mr->ops->read_with_attrs(mr->opaque, addr, &tmp, size, attrs);
     if (mr->subpage) {
         trace_memory_region_subpage_read(get_cpu_index(), mr, addr, tmp, size);
-    } else if (TRACE_MEMORY_REGION_OPS_READ_ENABLED) {
+    } else if (trace_event_get_state_backends(TRACE_MEMORY_REGION_OPS_READ)) {
         hwaddr abs_addr = memory_region_to_absolute_addr(mr, addr);
         trace_memory_region_ops_read(get_cpu_index(), mr, abs_addr, tmp, size);
     }
@@ -478,7 +478,7 @@ static MemTxResult memory_region_write_accessor(MemoryRegion *mr,
 
     if (mr->subpage) {
         trace_memory_region_subpage_write(get_cpu_index(), mr, addr, tmp, size);
-    } else if (TRACE_MEMORY_REGION_OPS_WRITE_ENABLED) {
+    } else if (trace_event_get_state_backends(TRACE_MEMORY_REGION_OPS_WRITE)) {
         hwaddr abs_addr = memory_region_to_absolute_addr(mr, addr);
         trace_memory_region_ops_write(get_cpu_index(), mr, abs_addr, tmp, size);
     }
@@ -498,7 +498,7 @@ static MemTxResult memory_region_write_with_attrs_accessor(MemoryRegion *mr,
 
     if (mr->subpage) {
         trace_memory_region_subpage_write(get_cpu_index(), mr, addr, tmp, size);
-    } else if (TRACE_MEMORY_REGION_OPS_WRITE_ENABLED) {
+    } else if (trace_event_get_state_backends(TRACE_MEMORY_REGION_OPS_WRITE)) {
         hwaddr abs_addr = memory_region_to_absolute_addr(mr, addr);
         trace_memory_region_ops_write(get_cpu_index(), mr, abs_addr, tmp, size);
     }
@@ -796,9 +796,18 @@ static void address_space_update_ioeventfds(AddressSpace *as)
     FlatView *view;
     FlatRange *fr;
     unsigned ioeventfd_nb = 0;
-    MemoryRegionIoeventfd *ioeventfds = NULL;
+    unsigned ioeventfd_max;
+    MemoryRegionIoeventfd *ioeventfds;
     AddrRange tmp;
     unsigned i;
+
+    /*
+     * It is likely that the number of ioeventfds hasn't changed much, so use
+     * the previous size as the starting value, with some headroom to avoid
+     * gratuitous reallocations.
+     */
+    ioeventfd_max = QEMU_ALIGN_UP(as->ioeventfd_nb, 4);
+    ioeventfds = g_new(MemoryRegionIoeventfd, ioeventfd_max);
 
     view = address_space_get_flatview(as);
     FOR_EACH_FLAT_RANGE(fr, view) {
@@ -808,8 +817,11 @@ static void address_space_update_ioeventfds(AddressSpace *as)
                                              int128_make64(fr->offset_in_region)));
             if (addrrange_intersects(fr->addr, tmp)) {
                 ++ioeventfd_nb;
-                ioeventfds = g_realloc(ioeventfds,
-                                          ioeventfd_nb * sizeof(*ioeventfds));
+                if (ioeventfd_nb > ioeventfd_max) {
+                    ioeventfd_max = MAX(ioeventfd_max * 2, 4);
+                    ioeventfds = g_realloc(ioeventfds,
+                            ioeventfd_max * sizeof(*ioeventfds));
+                }
                 ioeventfds[ioeventfd_nb-1] = fr->mr->ioeventfds[i];
                 ioeventfds[ioeventfd_nb-1].addr = tmp;
             }
@@ -2258,6 +2270,18 @@ void memory_region_ram_resize(MemoryRegion *mr, ram_addr_t newsize, Error **errp
     qemu_ram_resize(mr->ram_block, newsize, errp);
 }
 
+
+void memory_region_do_writeback(MemoryRegion *mr, hwaddr addr, hwaddr size)
+{
+    /*
+     * Might be extended case needed to cover
+     * different types of memory regions
+     */
+    if (mr->ram_block && mr->dirty_log_mask) {
+        qemu_ram_writeback(mr->ram_block, addr, size);
+    }
+}
+
 /*
  * Call proper memory listeners about the change on the newly
  * added/removed CoalescedMemoryRange.
@@ -3030,7 +3054,6 @@ struct FlatViewInfo {
     bool dispatch_tree;
     bool owner;
     AccelClass *ac;
-    const char *ac_name;
 };
 
 static void mtree_print_flatview(gpointer key, gpointer value,
@@ -3100,7 +3123,7 @@ static void mtree_print_flatview(gpointer key, gpointer value,
                 if (fvi->ac->has_memory(current_machine, as,
                                         int128_get64(range->addr.start),
                                         MR_SIZE(range->addr.size) + 1)) {
-                    qemu_printf(" %s", fvi->ac_name);
+                    qemu_printf(" %s", fvi->ac->name);
                 }
             }
         }
@@ -3144,12 +3167,10 @@ void mtree_info(bool flatview, bool dispatch_tree, bool owner)
         };
         GArray *fv_address_spaces;
         GHashTable *views = g_hash_table_new(g_direct_hash, g_direct_equal);
-        AccelClass *ac = ACCEL_GET_CLASS(current_machine->accelerator);
+        AccelClass *ac = ACCEL_GET_CLASS(current_accel());
 
         if (ac->has_memory) {
             fvi.ac = ac;
-            fvi.ac_name = current_machine->accel ? current_machine->accel :
-                object_class_get_name(OBJECT_CLASS(ac));
         }
 
         /* Gather all FVs in one table */

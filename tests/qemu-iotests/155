@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Test whether the backing BDSs are correct after completion of a
 # mirror block job; in "existing" modes (drive-mirror with
@@ -163,12 +163,7 @@ class MirrorBaseClass(BaseClass):
 
         self.assert_qmp(result, 'return', {})
 
-        self.vm.event_wait('BLOCK_JOB_READY')
-
-        result = self.vm.qmp('block-job-complete', device='mirror-job')
-        self.assert_qmp(result, 'return', {})
-
-        self.vm.event_wait('BLOCK_JOB_COMPLETED')
+        self.complete_and_wait('mirror-job')
 
     def testFull(self):
         self.runMirror('full')

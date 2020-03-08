@@ -306,7 +306,7 @@ static int vhost_user_blk_connect(DeviceState *dev)
     s->connected = true;
 
     s->dev.nvqs = s->num_queues;
-    s->dev.vqs = s->vqs;
+    s->dev.vqs = s->vhost_vqs;
     s->dev.vq_index = 0;
     s->dev.backend_features = 0;
 
@@ -361,7 +361,7 @@ static gboolean vhost_user_blk_watch(GIOChannel *chan, GIOCondition cond,
     return true;
 }
 
-static void vhost_user_blk_event(void *opaque, int event)
+static void vhost_user_blk_event(void *opaque, QEMUChrEvent event)
 {
     DeviceState *dev = opaque;
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
@@ -382,6 +382,11 @@ static void vhost_user_blk_event(void *opaque, int event)
             g_source_remove(s->watch);
             s->watch = 0;
         }
+        break;
+    case CHR_EVENT_BREAK:
+    case CHR_EVENT_MUX_IN:
+    case CHR_EVENT_MUX_OUT:
+        /* Ignore */
         break;
     }
 }
@@ -415,13 +420,14 @@ static void vhost_user_blk_device_realize(DeviceState *dev, Error **errp)
     virtio_init(vdev, "virtio-blk", VIRTIO_ID_BLOCK,
                 sizeof(struct virtio_blk_config));
 
+    s->virtqs = g_new(VirtQueue *, s->num_queues);
     for (i = 0; i < s->num_queues; i++) {
-        virtio_add_queue(vdev, s->queue_size,
-                         vhost_user_blk_handle_output);
+        s->virtqs[i] = virtio_add_queue(vdev, s->queue_size,
+                                        vhost_user_blk_handle_output);
     }
 
     s->inflight = g_new0(struct vhost_inflight, 1);
-    s->vqs = g_new0(struct vhost_virtqueue, s->num_queues);
+    s->vhost_vqs = g_new0(struct vhost_virtqueue, s->num_queues);
     s->watch = 0;
     s->connected = false;
 
@@ -453,8 +459,12 @@ reconnect:
     return;
 
 virtio_err:
-    g_free(s->vqs);
+    g_free(s->vhost_vqs);
     g_free(s->inflight);
+    for (i = 0; i < s->num_queues; i++) {
+        virtio_delete_queue(s->virtqs[i]);
+    }
+    g_free(s->virtqs);
     virtio_cleanup(vdev);
     vhost_user_cleanup(&s->vhost_user);
 }
@@ -463,14 +473,20 @@ static void vhost_user_blk_device_unrealize(DeviceState *dev, Error **errp)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(dev);
     VHostUserBlk *s = VHOST_USER_BLK(dev);
+    int i;
 
     virtio_set_status(vdev, 0);
     qemu_chr_fe_set_handlers(&s->chardev,  NULL, NULL, NULL,
                              NULL, NULL, NULL, false);
     vhost_dev_cleanup(&s->dev);
     vhost_dev_free_inflight(s->inflight);
-    g_free(s->vqs);
+    g_free(s->vhost_vqs);
     g_free(s->inflight);
+
+    for (i = 0; i < s->num_queues; i++) {
+        virtio_delete_queue(s->virtqs[i]);
+    }
+    g_free(s->virtqs);
     virtio_cleanup(vdev);
     vhost_user_cleanup(&s->vhost_user);
 }
@@ -506,7 +522,7 @@ static void vhost_user_blk_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     VirtioDeviceClass *vdc = VIRTIO_DEVICE_CLASS(klass);
 
-    dc->props = vhost_user_blk_properties;
+    device_class_set_props(dc, vhost_user_blk_properties);
     dc->vmsd = &vmstate_vhost_user_blk;
     set_bit(DEVICE_CATEGORY_STORAGE, dc->categories);
     vdc->realize = vhost_user_blk_device_realize;

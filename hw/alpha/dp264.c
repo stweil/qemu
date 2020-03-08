@@ -19,6 +19,7 @@
 #include "hw/timer/i8254.h"
 #include "hw/isa/superio.h"
 #include "hw/dma/i8257.h"
+#include "net/net.h"
 #include "qemu/cutils.h"
 
 #define MAX_IDE_BUS 2
@@ -74,7 +75,7 @@ static void clipper_init(MachineState *machine)
     cpus[0]->env.trap_arg2 = smp_cpus;
 
     /* Init the chipset.  */
-    pci_bus = typhoon_init(ram_size, &isa_bus, &rtc_irq, cpus,
+    pci_bus = typhoon_init(machine->ram, &isa_bus, &rtc_irq, cpus,
                            clipper_pci_map_irq);
 
     /* Since we have an SRM-compatible PALcode, use the SRM epoch.  */
@@ -114,7 +115,7 @@ static void clipper_init(MachineState *machine)
         exit(1);
     }
     size = load_elf(palcode_filename, NULL, cpu_alpha_superpage_to_phys,
-                    NULL, &palcode_entry, &palcode_low, &palcode_high,
+                    NULL, &palcode_entry, &palcode_low, &palcode_high, NULL,
                     0, EM_ALPHA, 0, 0);
     if (size < 0) {
         error_report("could not load palcode '%s'", palcode_filename);
@@ -133,7 +134,7 @@ static void clipper_init(MachineState *machine)
         uint64_t param_offset;
 
         size = load_elf(kernel_filename, NULL, cpu_alpha_superpage_to_phys,
-                        NULL, &kernel_entry, &kernel_low, &kernel_high,
+                        NULL, &kernel_entry, &kernel_low, &kernel_high, NULL,
                         0, EM_ALPHA, 0, 0);
         if (size < 0) {
             error_report("could not load kernel '%s'", kernel_filename);
@@ -180,8 +181,9 @@ static void clipper_machine_init(MachineClass *mc)
     mc->init = clipper_init;
     mc->block_default_type = IF_IDE;
     mc->max_cpus = 4;
-    mc->is_default = 1;
+    mc->is_default = true;
     mc->default_cpu_type = ALPHA_CPU_TYPE_NAME("ev67");
+    mc->default_ram_id = "ram";
 }
 
 DEFINE_MACHINE("clipper", clipper_machine_init)

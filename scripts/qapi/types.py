@@ -241,10 +241,11 @@ void qapi_free_%(c_name)s(%(c_name)s *obj)
 class QAPISchemaGenTypeVisitor(QAPISchemaModularCVisitor):
 
     def __init__(self, prefix):
-        QAPISchemaModularCVisitor.__init__(
-            self, prefix, 'qapi-types', ' * Schema-defined QAPI types',
-            __doc__)
-        self._add_system_module(None, ' * Built-in QAPI types')
+        super().__init__(
+            prefix, 'qapi-types', ' * Schema-defined QAPI types',
+            ' * Built-in QAPI types', __doc__)
+
+    def _begin_system_module(self, name):
         self._genc.preamble_add(mcgen('''
 #include "qemu/osdep.h"
 #include "qapi/dealloc-visitor.h"

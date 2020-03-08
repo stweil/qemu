@@ -89,11 +89,6 @@ error in the future.
 The @code{-realtime mlock=on|off} argument has been replaced by the
 @code{-overcommit mem-lock=on|off} argument.
 
-@subsection -virtfs_synth (since 4.1)
-
-The ``-virtfs_synth'' argument is now deprecated. Please use ``-fsdev synth''
-and ``-device virtio-9p-...'' instead.
-
 @subsection -numa node,mem=@var{size} (since 4.1)
 
 The parameter @option{mem} of @option{-numa node} is used to assign a part of
@@ -118,15 +113,6 @@ QEMU using implicit generic or board specific splitting rule.
 Use @option{memdev} with @var{memory-backend-ram} backend or @option{mem} (if
 it's supported by used machine type) to define mapping explictly instead.
 
-@subsection -mem-path fallback to RAM (since 4.1)
-Currently if guest RAM allocation from file pointed by @option{mem-path}
-fails, QEMU falls back to allocating from RAM, which might result
-in unpredictable behavior since the backing file specified by the user
-is ignored. In the future, users will be responsible for making sure
-the backing storage specified with @option{-mem-path} can actually provide
-the guest RAM configured with @option{-m} and QEMU will fail to start up if
-RAM allocation is unsuccessful.
-
 @subsection RISC-V -bios (since 4.1)
 
 QEMU 4.1 introduced support for the -bios option in QEMU for RISC-V for the
@@ -146,6 +132,17 @@ QEMU 4.1 has three options, please migrate to one of these three:
       the QEMU release and no user interaction is required. All a user needs
       to do is specify the kernel they want to boot with the -kernel option
  3. ``-bios <file>`` - Tells QEMU to load the specified file as the firmwrae.
+
+@subsection -tb-size option (since 5.0)
+
+QEMU 5.0 introduced an alternative syntax to specify the size of the translation
+block cache, @option{-accel tcg,tb-size=}.  The new syntax deprecates the
+previously available @option{-tb-size} option.
+
+@subsection -show-cursor option (since 5.0)
+
+Use @option{-display sdl,show-cursor=on} or
+ @option{-display gtk,show-cursor=on} instead.
 
 @section QEMU Machine Protocol (QMP) commands
 
@@ -247,13 +244,6 @@ via the CPU ``mmu`` option when using the ``rv32`` or ``rv64`` CPUs.
 
 @section System emulator devices
 
-@subsection bluetooth (since 3.1)
-
-The bluetooth subsystem is unmaintained since many years and likely bitrotten
-quite a bit. It will be removed without replacement unless some users speaks
-up at the @email{qemu-devel@@nongnu.org} mailing list with information about
-their usecases.
-
 @subsection ide-drive (since 4.2)
 
 The 'ide-drive' device is deprecated. Users should use 'ide-hd' or
@@ -266,16 +256,15 @@ The 'scsi-disk' device is deprecated. Users should use 'scsi-hd' or
 
 @section System emulator machines
 
-@subsection pc-0.12, pc-0.13, pc-0.14 and pc-0.15 (since 4.0)
+@subsection mips r4k platform (since 5.0)
+
+This machine type is very old and unmaintained. Users should use the 'malta'
+machine type instead.
+
+@subsection pc-1.0, pc-1.1, pc-1.2 and pc-1.3 (since 5.0)
 
 These machine types are very old and likely can not be used for live migration
 from old QEMU versions anymore. A newer machine type should be used instead.
-
-@subsection prep (PowerPC) (since 3.1)
-
-This machine type uses an unmaintained firmware, broken in lots of ways,
-and unable to start post-2004 operating systems. 40p machine type should be
-used instead.
 
 @subsection spike_v1.9.1 and spike_v1.10 (since 4.1)
 
@@ -284,6 +273,17 @@ generic ``spike`` machine. If you need to specify an older version of the RISC-V
 spec you can use the ``-cpu rv64gcsu,priv_spec=v1.9.1`` command line argument.
 
 @section Device options
+
+@subsection Emulated device options
+
+@subsubsection -device virtio-blk,scsi=on|off (since 5.0.0)
+
+The virtio-blk SCSI passthrough feature is a legacy VIRTIO feature.  VIRTIO 1.0
+and later do not support it because the virtio-scsi device was introduced for
+full SCSI support.  Use virtio-scsi instead when SCSI passthrough is required.
+
+Note this also applies to ``-device virtio-blk-pci,scsi=on|off'', which is an
+alias.
 
 @subsection Block device options
 
@@ -309,51 +309,12 @@ The above, converted to the current supported format:
 
 @section Related binaries
 
-@subsection qemu-nbd --partition (since 4.0.0)
-
-The ``qemu-nbd --partition $digit'' code (also spelled @option{-P})
-can only handle MBR partitions, and has never correctly handled
-logical partitions beyond partition 5.  If you know the offset and
-length of the partition (perhaps by using @code{sfdisk} within the
-guest), you can achieve the effect of exporting just that subset of
-the disk by use of the @option{--image-opts} option with a raw
-blockdev using the @code{offset} and @code{size} parameters layered on
-top of any other existing blockdev. For example, if partition 1 is
-100MiB long starting at 1MiB, the old command:
-
-@code{qemu-nbd -t -P 1 -f qcow2 file.qcow2}
-
-can be rewritten as:
-
-@code{qemu-nbd -t --image-opts driver=raw,offset=1M,size=100M,file.driver=qcow2,file.backing.driver=file,file.backing.filename=file.qcow2}
-
-Alternatively, the @code{nbdkit} project provides a more powerful
-partition filter on top of its nbd plugin, which can be used to select
-an arbitrary MBR or GPT partition on top of any other full-image NBD
-export.  Using this to rewrite the above example results in:
-
-@code{qemu-nbd -t -k /tmp/sock -f qcow2 file.qcow2 &}
-@code{nbdkit -f --filter=partition nbd socket=/tmp/sock partition=1}
-
-Note that if you are exposing the export via /dev/nbd0, it is easier
-to just export the entire image and then mount only /dev/nbd0p1 than
-it is to reinvoke @command{qemu-nbd -c /dev/nbd0} limited to just a
-subset of the image.
-
 @subsection qemu-img convert -n -o (since 4.2.0)
 
 All options specified in @option{-o} are image creation options, so
 they have no effect when used with @option{-n} to skip image creation.
 Silently ignored options can be confusing, so this combination of
 options will be made an error in future versions.
-
-@section Build system
-
-@subsection Python 2 support (since 4.1.0)
-
-In the future, QEMU will require Python 3 to be available at
-build time.  Support for Python 2 in scripts shipped with QEMU
-is deprecated.
 
 @section Backwards compatibility
 
@@ -374,6 +335,14 @@ guarantees must resolve the CPU model aliases using te
 ``alias-of'' field returned by the ``query-cpu-definitions'' QMP
 command.
 
+While those guarantees are kept, the return value of
+``query-cpu-definitions'' will have existing CPU model aliases
+point to a version that doesn't break runnability guarantees
+(specifically, version 1 of those CPU models).  In future QEMU
+versions, aliases will point to newer CPU model versions
+depending on the machine type, so management software must
+resolve CPU model aliases before starting a virtual machine.
+
 
 @node Recently removed features
 @appendix Recently removed features
@@ -388,3 +357,21 @@ trouble after a recent upgrade.
 
 The "autoload" parameter has been ignored since 2.12.0. All bitmaps
 are automatically loaded from qcow2 images.
+
+@section Related binaries
+
+@subsection qemu-nbd --partition (removed in 5.0.0)
+
+The ``qemu-nbd --partition $digit'' code (also spelled @option{-P})
+could only handle MBR partitions, and never correctly handled logical
+partitions beyond partition 5.  Exporting a partition can still be
+done by utilizing the @option{--image-opts} option with a raw blockdev
+using the @code{offset} and @code{size} parameters layered on top of
+any other existing blockdev. For example, if partition 1 is 100MiB
+long starting at 1MiB, the old command:
+
+@code{qemu-nbd -t -P 1 -f qcow2 file.qcow2}
+
+can be rewritten as:
+
+@code{qemu-nbd -t --image-opts driver=raw,offset=1M,size=100M,file.driver=qcow2,file.file.driver=file,file.file.filename=file.qcow2}

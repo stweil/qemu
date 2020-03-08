@@ -46,6 +46,7 @@
 #include "migration/qemu-file-types.h"
 #include "migration/global_state.h"
 #include "migration/register.h"
+#include "migration/blocker.h"
 #include "mmu-hash64.h"
 #include "mmu-book3s-v3.h"
 #include "cpu-models.h"
@@ -76,10 +77,10 @@
 #include "hw/nmi.h"
 #include "hw/intc/intc.h"
 
-#include "qemu/cutils.h"
 #include "hw/ppc/spapr_cpu_core.h"
 #include "hw/mem/memory-device.h"
 #include "hw/ppc/spapr_tpm_proxy.h"
+#include "hw/ppc/spapr_nvdimm.h"
 
 #include "monitor/monitor.h"
 
@@ -675,6 +676,14 @@ static int spapr_populate_drmem_v2(SpaprMachineState *spapr, void *fdt,
         size = di->size;
         node = di->node;
 
+        /*
+         * The NVDIMM area is hotpluggable after the NVDIMM is unplugged. The
+         * area is marked hotpluggable in the next iteration for the bigger
+         * chunk including the NVDIMM occupied area.
+         */
+        if (info->value->type == MEMORY_DEVICE_INFO_KIND_NVDIMM)
+            continue;
+
         /* Entry for hot-pluggable area */
         if (cur_addr < addr) {
             drc = spapr_drc_by_id(TYPE_SPAPR_DRC_LMB, cur_addr / lmb_size);
@@ -879,7 +888,7 @@ static int spapr_dt_cas_updates(SpaprMachineState *spapr, void *fdt,
         g_assert(smc->dr_lmb_enabled);
         ret = spapr_populate_drconf_memory(spapr, fdt);
         if (ret) {
-            goto out;
+            return ret;
         }
     }
 
@@ -890,74 +899,8 @@ static int spapr_dt_cas_updates(SpaprMachineState *spapr, void *fdt,
             return offset;
         }
     }
-    ret = spapr_ovec_populate_dt(fdt, offset, spapr->ov5_cas,
-                                 "ibm,architecture-vec-5");
-
-out:
-    return ret;
-}
-
-static bool spapr_hotplugged_dev_before_cas(void)
-{
-    Object *drc_container, *obj;
-    ObjectProperty *prop;
-    ObjectPropertyIterator iter;
-
-    drc_container = container_get(object_get_root(), "/dr-connector");
-    object_property_iter_init(&iter, drc_container);
-    while ((prop = object_property_iter_next(&iter))) {
-        if (!strstart(prop->type, "link<", NULL)) {
-            continue;
-        }
-        obj = object_property_get_link(drc_container, prop->name, NULL);
-        if (spapr_drc_needed(obj)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void *spapr_build_fdt(SpaprMachineState *spapr, bool reset);
-
-int spapr_h_cas_compose_response(SpaprMachineState *spapr,
-                                 target_ulong addr, target_ulong size,
-                                 SpaprOptionVector *ov5_updates)
-{
-    void *fdt;
-    SpaprDeviceTreeUpdateHeader hdr = { .version_id = 1 };
-
-    if (spapr_hotplugged_dev_before_cas()) {
-        return 1;
-    }
-
-    if (size < sizeof(hdr) || size > FW_MAX_SIZE) {
-        error_report("SLOF provided an unexpected CAS buffer size "
-                     TARGET_FMT_lu " (min: %zu, max: %u)",
-                     size, sizeof(hdr), FW_MAX_SIZE);
-        exit(EXIT_FAILURE);
-    }
-
-    size -= sizeof(hdr);
-
-    fdt = spapr_build_fdt(spapr, false);
-    _FDT((fdt_pack(fdt)));
-
-    if (fdt_totalsize(fdt) + sizeof(hdr) > size) {
-        g_free(fdt);
-        trace_spapr_cas_failed(size);
-        return -1;
-    }
-
-    cpu_physical_memory_write(addr, &hdr, sizeof(hdr));
-    cpu_physical_memory_write(addr + sizeof(hdr), fdt, fdt_totalsize(fdt));
-    trace_spapr_cas_continue(fdt_totalsize(fdt) + sizeof(hdr));
-
-    g_free(spapr->fdt_blob);
-    spapr->fdt_size = fdt_totalsize(fdt);
-    spapr->fdt_initial_size = spapr->fdt_size;
-    spapr->fdt_blob = fdt;
-
-    return 0;
+    return spapr_ovec_populate_dt(fdt, offset, spapr->ov5_cas,
+                                  "ibm,architecture-vec-5");
 }
 
 static void spapr_dt_rtas(SpaprMachineState *spapr, void *fdt)
@@ -1121,7 +1064,7 @@ static void spapr_dt_chosen(SpaprMachineState *spapr, void *fdt)
     }
 
     if (spapr->kernel_size) {
-        uint64_t kprop[2] = { cpu_to_be64(KERNEL_LOAD_ADDR),
+        uint64_t kprop[2] = { cpu_to_be64(spapr->kernel_addr),
                               cpu_to_be64(spapr->kernel_size) };
 
         _FDT(fdt_setprop(fdt, chosen, "qemu,boot-kernel",
@@ -1197,7 +1140,7 @@ static void spapr_dt_hypervisor(SpaprMachineState *spapr, void *fdt)
     }
 }
 
-static void *spapr_build_fdt(SpaprMachineState *spapr, bool reset)
+void *spapr_build_fdt(SpaprMachineState *spapr, bool reset, size_t space)
 {
     MachineState *machine = MACHINE(spapr);
     MachineClass *mc = MACHINE_GET_CLASS(machine);
@@ -1207,8 +1150,8 @@ static void *spapr_build_fdt(SpaprMachineState *spapr, bool reset)
     SpaprPhbState *phb;
     char *buf;
 
-    fdt = g_malloc0(FDT_MAX_SIZE);
-    _FDT((fdt_create_empty_tree(fdt, FDT_MAX_SIZE)));
+    fdt = g_malloc0(space);
+    _FDT((fdt_create_empty_tree(fdt, space)));
 
     /* Root node */
     _FDT(fdt_setprop_string(fdt, 0, "device_type", "chrp"));
@@ -1309,7 +1252,8 @@ static void *spapr_build_fdt(SpaprMachineState *spapr, bool reset)
     /* Build memory reserve map */
     if (reset) {
         if (spapr->kernel_size) {
-            _FDT((fdt_add_mem_rsv(fdt, KERNEL_LOAD_ADDR, spapr->kernel_size)));
+            _FDT((fdt_add_mem_rsv(fdt, spapr->kernel_addr,
+                                  spapr->kernel_size)));
         }
         if (spapr->initrd_size) {
             _FDT((fdt_add_mem_rsv(fdt, spapr->initrd_base,
@@ -1332,12 +1276,19 @@ static void *spapr_build_fdt(SpaprMachineState *spapr, bool reset)
         }
     }
 
+    /* NVDIMM devices */
+    if (mc->nvdimm_supported) {
+        spapr_dt_persistent_memory(fdt);
+    }
+
     return fdt;
 }
 
 static uint64_t translate_kernel_address(void *opaque, uint64_t addr)
 {
-    return (addr & 0x0fffffff) + KERNEL_LOAD_ADDR;
+    SpaprMachineState *spapr = opaque;
+
+    return (addr & 0x0fffffff) + spapr->kernel_addr;
 }
 
 static void emulate_spapr_hypercall(PPCVirtualHypervisor *vhyp,
@@ -1661,6 +1612,7 @@ static void spapr_machine_reset(MachineState *machine)
     void *fdt;
     int rc;
 
+    kvmppc_svm_off(&error_fatal);
     spapr_caps_apply(spapr);
 
     first_ppc_cpu = POWERPC_CPU(first_cpu);
@@ -1723,18 +1675,12 @@ static void spapr_machine_reset(MachineState *machine)
      */
     fdt_addr = MIN(spapr->rma_size, RTAS_MAX_ADDR) - FDT_MAX_SIZE;
 
-    fdt = spapr_build_fdt(spapr, true);
+    fdt = spapr_build_fdt(spapr, true, FDT_MAX_SIZE);
 
     rc = fdt_pack(fdt);
 
     /* Should only fail if we've built a corrupted tree */
     assert(rc == 0);
-
-    if (fdt_totalsize(fdt) > FDT_MAX_SIZE) {
-        error_report("FDT too big ! 0x%x bytes (max is 0x%x)",
-                     fdt_totalsize(fdt), FDT_MAX_SIZE);
-        exit(1);
-    }
 
     /* Load the fdt */
     qemu_fdt_dumpdtb(fdt, fdt_totalsize(fdt));
@@ -1749,6 +1695,14 @@ static void spapr_machine_reset(MachineState *machine)
     first_ppc_cpu->env.gpr[5] = 0;
 
     spapr->cas_reboot = false;
+
+    spapr->mc_status = -1;
+    spapr->guest_machine_check_addr = -1;
+
+    /* Signal all vCPUs waiting on this condition */
+    qemu_cond_broadcast(&spapr->mc_delivery_cond);
+
+    migrate_del_blocker(spapr->fwnmi_migration_blocker);
 }
 
 static void spapr_create_nvram(SpaprMachineState *spapr)
@@ -1910,8 +1864,6 @@ static bool spapr_ov5_cas_needed(void *opaque)
 {
     SpaprMachineState *spapr = opaque;
     SpaprOptionVector *ov5_mask = spapr_ovec_new();
-    SpaprOptionVector *ov5_legacy = spapr_ovec_new();
-    SpaprOptionVector *ov5_removed = spapr_ovec_new();
     bool cas_needed;
 
     /* Prior to the introduction of SpaprOptionVector, we had two option
@@ -1943,17 +1895,11 @@ static bool spapr_ov5_cas_needed(void *opaque)
     spapr_ovec_set(ov5_mask, OV5_DRCONF_MEMORY);
     spapr_ovec_set(ov5_mask, OV5_DRMEM_V2);
 
-    /* spapr_ovec_diff returns true if bits were removed. we avoid using
-     * the mask itself since in the future it's possible "legacy" bits may be
-     * removed via machine options, which could generate a false positive
-     * that breaks migration.
-     */
-    spapr_ovec_intersect(ov5_legacy, spapr->ov5, ov5_mask);
-    cas_needed = spapr_ovec_diff(ov5_removed, spapr->ov5, ov5_legacy);
+    /* We need extra information if we have any bits outside the mask
+     * defined above */
+    cas_needed = !spapr_ovec_subset(spapr->ov5, ov5_mask);
 
     spapr_ovec_cleanup(ov5_mask);
-    spapr_ovec_cleanup(ov5_legacy);
-    spapr_ovec_cleanup(ov5_removed);
 
     return cas_needed;
 }
@@ -2039,6 +1985,42 @@ static const VMStateDescription vmstate_spapr_dtb = {
     },
 };
 
+static bool spapr_fwnmi_needed(void *opaque)
+{
+    SpaprMachineState *spapr = (SpaprMachineState *)opaque;
+
+    return spapr->guest_machine_check_addr != -1;
+}
+
+static int spapr_fwnmi_pre_save(void *opaque)
+{
+    SpaprMachineState *spapr = (SpaprMachineState *)opaque;
+
+    /*
+     * Check if machine check handling is in progress and print a
+     * warning message.
+     */
+    if (spapr->mc_status != -1) {
+        warn_report("A machine check is being handled during migration. The"
+                "handler may run and log hardware error on the destination");
+    }
+
+    return 0;
+}
+
+static const VMStateDescription vmstate_spapr_machine_check = {
+    .name = "spapr_machine_check",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = spapr_fwnmi_needed,
+    .pre_save = spapr_fwnmi_pre_save,
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT64(guest_machine_check_addr, SpaprMachineState),
+        VMSTATE_INT32(mc_status, SpaprMachineState),
+        VMSTATE_END_OF_LIST()
+    },
+};
+
 static const VMStateDescription vmstate_spapr = {
     .name = "spapr",
     .version_id = 3,
@@ -2072,6 +2054,8 @@ static const VMStateDescription vmstate_spapr = {
         &vmstate_spapr_dtb,
         &vmstate_spapr_cap_large_decr,
         &vmstate_spapr_cap_ccf_assist,
+        &vmstate_spapr_cap_fwnmi,
+        &vmstate_spapr_machine_check,
         NULL
     }
 };
@@ -2564,7 +2548,7 @@ static void spapr_set_vsmt_mode(SpaprMachineState *spapr, Error **errp)
                                       " requires the use of VSMT mode %d.\n",
                                       smp_threads, kvm_smt, spapr->vsmt);
                 }
-                kvmppc_hint_smt_possible(&local_err);
+                kvmppc_error_append_smt_possible_hint(&local_err);
                 goto out;
             }
         }
@@ -2662,12 +2646,12 @@ static void spapr_machine_init(MachineState *machine)
 {
     SpaprMachineState *spapr = SPAPR_MACHINE(machine);
     SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(machine);
+    MachineClass *mc = MACHINE_GET_CLASS(machine);
     const char *kernel_filename = machine->kernel_filename;
     const char *initrd_filename = machine->initrd_filename;
     PCIHostState *phb;
     int i;
     MemoryRegion *sysmem = get_system_memory();
-    MemoryRegion *ram = g_new(MemoryRegion, 1);
     hwaddr node0_size = spapr_node0_size(machine);
     long load_limit, fw_size;
     char *filename;
@@ -2846,10 +2830,8 @@ static void spapr_machine_init(MachineState *machine)
         kvmppc_enable_h_page_init();
     }
 
-    /* allocate RAM */
-    memory_region_allocate_system_memory(ram, NULL, "ppc_spapr.ram",
-                                         machine->ram_size);
-    memory_region_add_subregion(sysmem, 0, ram);
+    /* map RAM */
+    memory_region_add_subregion(sysmem, 0, machine->ram);
 
     /* always allocate the device memory information */
     machine->device_memory = g_malloc0(sizeof(*machine->device_memory));
@@ -2885,6 +2867,17 @@ static void spapr_machine_init(MachineState *machine)
 
     if (smc->dr_lmb_enabled) {
         spapr_create_lmb_dr_connectors(spapr);
+    }
+
+    if (spapr_get_cap(spapr, SPAPR_CAP_FWNMI_MCE) == SPAPR_CAP_ON) {
+        /* Create the error string for live migration blocker */
+        error_setg(&spapr->fwnmi_migration_blocker,
+            "A machine check is being handled during migration. The handler"
+            "may run and log hardware error on the destination");
+    }
+
+    if (mc->nvdimm_supported) {
+        spapr_create_nvdimm_dr_connectors(spapr);
     }
 
     /* Set up RTAS event infrastructure */
@@ -2974,13 +2967,14 @@ static void spapr_machine_init(MachineState *machine)
         uint64_t lowaddr = 0;
 
         spapr->kernel_size = load_elf(kernel_filename, NULL,
-                                      translate_kernel_address, NULL,
-                                      NULL, &lowaddr, NULL, 1,
+                                      translate_kernel_address, spapr,
+                                      NULL, &lowaddr, NULL, NULL, 1,
                                       PPC_ELF_MACHINE, 0, 0);
         if (spapr->kernel_size == ELF_LOAD_WRONG_ENDIAN) {
             spapr->kernel_size = load_elf(kernel_filename, NULL,
-                                          translate_kernel_address, NULL, NULL,
-                                          &lowaddr, NULL, 0, PPC_ELF_MACHINE,
+                                          translate_kernel_address, spapr, NULL,
+                                          &lowaddr, NULL, NULL, 0,
+                                          PPC_ELF_MACHINE,
                                           0, 0);
             spapr->kernel_le = spapr->kernel_size > 0;
         }
@@ -2995,7 +2989,7 @@ static void spapr_machine_init(MachineState *machine)
             /* Try to locate the initrd in the gap between the kernel
              * and the firmware. Add a bit of space just in case
              */
-            spapr->initrd_base = (KERNEL_LOAD_ADDR + spapr->kernel_size
+            spapr->initrd_base = (spapr->kernel_addr + spapr->kernel_size
                                   + 0x1ffff) & ~0xffff;
             spapr->initrd_size = load_image_targphys(initrd_filename,
                                                      spapr->initrd_base,
@@ -3028,7 +3022,7 @@ static void spapr_machine_init(MachineState *machine)
      * interface, this is a legacy from the sPAPREnvironment structure
      * which predated MachineState but had a similar function */
     vmstate_register(NULL, 0, &vmstate_spapr, spapr);
-    register_savevm_live("spapr/htab", -1, 1,
+    register_savevm_live("spapr/htab", VMSTATE_INSTANCE_ID_ANY, 1,
                          &savevm_htab_handlers, spapr);
 
     qbus_set_hotplug_handler(sysbus_get_default(), OBJECT(machine),
@@ -3050,6 +3044,8 @@ static void spapr_machine_init(MachineState *machine)
 
         kvmppc_spapr_enable_inkernel_multitce();
     }
+
+    qemu_cond_init(&spapr->mc_delivery_cond);
 }
 
 static int spapr_kvm_type(MachineState *machine, const char *vm_type)
@@ -3239,6 +3235,18 @@ static void spapr_set_vsmt(Object *obj, Visitor *v, const char *name,
     visit_type_uint32(v, name, (uint32_t *)opaque, errp);
 }
 
+static void spapr_get_kernel_addr(Object *obj, Visitor *v, const char *name,
+                                  void *opaque, Error **errp)
+{
+    visit_type_uint64(v, name, (uint64_t *)opaque, errp);
+}
+
+static void spapr_set_kernel_addr(Object *obj, Visitor *v, const char *name,
+                                  void *opaque, Error **errp)
+{
+    visit_type_uint64(v, name, (uint64_t *)opaque, errp);
+}
+
 static char *spapr_get_ic_mode(Object *obj, Error **errp)
 {
     SpaprMachineState *spapr = SPAPR_MACHINE(obj);
@@ -3344,6 +3352,14 @@ static void spapr_instance_init(Object *obj)
     object_property_add_bool(obj, "vfio-no-msix-emulation",
                              spapr_get_msix_emulation, NULL, NULL);
 
+    object_property_add(obj, "kernel-addr", "uint64", spapr_get_kernel_addr,
+                        spapr_set_kernel_addr, NULL, &spapr->kernel_addr,
+                        &error_abort);
+    object_property_set_description(obj, "kernel-addr",
+                                    stringify(KERNEL_LOAD_ADDR)
+                                    " for -kernel is the default",
+                                    NULL);
+    spapr->kernel_addr = KERNEL_LOAD_ADDR;
     /* The machine class defines the default interrupt controller mode */
     spapr->irq = smc->irq;
     object_property_add_str(obj, "ic-mode", spapr_get_ic_mode,
@@ -3454,7 +3470,8 @@ static void spapr_memory_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
     Error *local_err = NULL;
     SpaprMachineState *ms = SPAPR_MACHINE(hotplug_dev);
     PCDIMMDevice *dimm = PC_DIMM(dev);
-    uint64_t size, addr;
+    uint64_t size, addr, slot;
+    bool is_nvdimm = object_dynamic_cast(OBJECT(dev), TYPE_NVDIMM);
 
     size = memory_device_get_region_size(MEMORY_DEVICE(dev), &error_abort);
 
@@ -3463,14 +3480,24 @@ static void spapr_memory_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
         goto out;
     }
 
-    addr = object_property_get_uint(OBJECT(dimm),
-                                    PC_DIMM_ADDR_PROP, &local_err);
-    if (local_err) {
-        goto out_unplug;
+    if (!is_nvdimm) {
+        addr = object_property_get_uint(OBJECT(dimm),
+                                        PC_DIMM_ADDR_PROP, &local_err);
+        if (local_err) {
+            goto out_unplug;
+        }
+        spapr_add_lmbs(dev, addr, size,
+                       spapr_ovec_test(ms->ov5_cas, OV5_HP_EVT),
+                       &local_err);
+    } else {
+        slot = object_property_get_uint(OBJECT(dimm),
+                                        PC_DIMM_SLOT_PROP, &local_err);
+        if (local_err) {
+            goto out_unplug;
+        }
+        spapr_add_nvdimm(dev, slot, &local_err);
     }
 
-    spapr_add_lmbs(dev, addr, size, spapr_ovec_test(ms->ov5_cas, OV5_HP_EVT),
-                   &local_err);
     if (local_err) {
         goto out_unplug;
     }
@@ -3488,6 +3515,8 @@ static void spapr_memory_pre_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
 {
     const SpaprMachineClass *smc = SPAPR_MACHINE_GET_CLASS(hotplug_dev);
     SpaprMachineState *spapr = SPAPR_MACHINE(hotplug_dev);
+    const MachineClass *mc = MACHINE_CLASS(smc);
+    bool is_nvdimm = object_dynamic_cast(OBJECT(dev), TYPE_NVDIMM);
     PCDIMMDevice *dimm = PC_DIMM(dev);
     Error *local_err = NULL;
     uint64_t size;
@@ -3499,16 +3528,27 @@ static void spapr_memory_pre_plug(HotplugHandler *hotplug_dev, DeviceState *dev,
         return;
     }
 
+    if (is_nvdimm && !mc->nvdimm_supported) {
+        error_setg(errp, "NVDIMM hotplug not supported for this machine");
+        return;
+    }
+
     size = memory_device_get_region_size(MEMORY_DEVICE(dimm), &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
     }
 
-    if (size % SPAPR_MEMORY_BLOCK_SIZE) {
+    if (!is_nvdimm && size % SPAPR_MEMORY_BLOCK_SIZE) {
         error_setg(errp, "Hotplugged memory size must be a multiple of "
-                      "%" PRIu64 " MB", SPAPR_MEMORY_BLOCK_SIZE / MiB);
+                   "%" PRIu64 " MB", SPAPR_MEMORY_BLOCK_SIZE / MiB);
         return;
+    } else if (is_nvdimm) {
+        spapr_nvdimm_validate_opts(NVDIMM(dev), size, &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            return;
+        }
     }
 
     memdev = object_property_get_link(OBJECT(dimm), PC_DIMM_MEMDEV_PROP,
@@ -3647,6 +3687,12 @@ static void spapr_memory_unplug_request(HotplugHandler *hotplug_dev,
     uint64_t size, addr_start, addr;
     int i;
     SpaprDrc *drc;
+
+    if (object_dynamic_cast(OBJECT(dev), TYPE_NVDIMM)) {
+        error_setg(&local_err,
+                   "nvdimm device hot unplug is not supported yet.");
+        goto out;
+    }
 
     size = memory_device_get_region_size(MEMORY_DEVICE(dimm), &error_abort);
     nr_lmbs = size / SPAPR_MEMORY_BLOCK_SIZE;
@@ -4275,6 +4321,42 @@ static void spapr_pic_print_info(InterruptStatsProvider *obj,
                    kvm_irqchip_in_kernel() ? "in-kernel" : "emulated");
 }
 
+/*
+ * This is a XIVE only operation
+ */
+static int spapr_match_nvt(XiveFabric *xfb, uint8_t format,
+                           uint8_t nvt_blk, uint32_t nvt_idx,
+                           bool cam_ignore, uint8_t priority,
+                           uint32_t logic_serv, XiveTCTXMatch *match)
+{
+    SpaprMachineState *spapr = SPAPR_MACHINE(xfb);
+    XivePresenter *xptr = XIVE_PRESENTER(spapr->active_intc);
+    XivePresenterClass *xpc = XIVE_PRESENTER_GET_CLASS(xptr);
+    int count;
+
+    count = xpc->match_nvt(xptr, format, nvt_blk, nvt_idx, cam_ignore,
+                           priority, logic_serv, match);
+    if (count < 0) {
+        return count;
+    }
+
+    /*
+     * When we implement the save and restore of the thread interrupt
+     * contexts in the enter/exit CPU handlers of the machine and the
+     * escalations in QEMU, we should be able to handle non dispatched
+     * vCPUs.
+     *
+     * Until this is done, the sPAPR machine should find at least one
+     * matching context always.
+     */
+    if (count == 0) {
+        qemu_log_mask(LOG_GUEST_ERROR, "XIVE: NVT %x/%x is not dispatched\n",
+                      nvt_blk, nvt_idx);
+    }
+
+    return count;
+}
+
 int spapr_get_vcpu_id(PowerPCCPU *cpu)
 {
     return cpu->vcpu_id;
@@ -4371,6 +4453,7 @@ static void spapr_machine_class_init(ObjectClass *oc, void *data)
     PPCVirtualHypervisorClass *vhc = PPC_VIRTUAL_HYPERVISOR_CLASS(oc);
     XICSFabricClass *xic = XICS_FABRIC_CLASS(oc);
     InterruptStatsProviderClass *ispc = INTERRUPT_STATS_PROVIDER_CLASS(oc);
+    XiveFabricClass *xfc = XIVE_FABRIC_CLASS(oc);
 
     mc->desc = "pSeries Logical Partition (PAPR compliant)";
     mc->ignore_boot_device_suffixes = true;
@@ -4387,6 +4470,7 @@ static void spapr_machine_class_init(ObjectClass *oc, void *data)
     mc->no_parallel = 1;
     mc->default_boot_order = "";
     mc->default_ram_size = 512 * MiB;
+    mc->default_ram_id = "ppc_spapr.ram";
     mc->default_display = "std";
     mc->kvm_type = spapr_kvm_type;
     machine_class_allow_dynamic_sysbus_dev(mc, TYPE_SPAPR_PCI_HOST_BRIDGE);
@@ -4405,6 +4489,7 @@ static void spapr_machine_class_init(ObjectClass *oc, void *data)
     smc->update_dt_enabled = true;
     mc->default_cpu_type = POWERPC_CPU_TYPE_NAME("power9_v2.0");
     mc->has_hotpluggable_cpus = true;
+    mc->nvdimm_supported = true;
     smc->resize_hpt_default = SPAPR_RESIZE_HPT_ENABLED;
     fwc->get_dev_path = spapr_get_fw_dev_path;
     nc->nmi_monitor_handler = spapr_nmi;
@@ -4440,13 +4525,15 @@ static void spapr_machine_class_init(ObjectClass *oc, void *data)
     smc->default_caps.caps[SPAPR_CAP_HPT_MAXPAGESIZE] = 16; /* 64kiB */
     smc->default_caps.caps[SPAPR_CAP_NESTED_KVM_HV] = SPAPR_CAP_OFF;
     smc->default_caps.caps[SPAPR_CAP_LARGE_DECREMENTER] = SPAPR_CAP_ON;
-    smc->default_caps.caps[SPAPR_CAP_CCF_ASSIST] = SPAPR_CAP_OFF;
+    smc->default_caps.caps[SPAPR_CAP_CCF_ASSIST] = SPAPR_CAP_ON;
+    smc->default_caps.caps[SPAPR_CAP_FWNMI_MCE] = SPAPR_CAP_ON;
     spapr_caps_add_properties(smc, &error_abort);
     smc->irq = &spapr_irq_dual;
     smc->dr_phb_enabled = true;
     smc->linux_pci_probe = true;
     smc->smp_threads_vsmt = true;
     smc->nr_xirqs = SPAPR_NR_XIRQS;
+    xfc->match_nvt = spapr_match_nvt;
 }
 
 static const TypeInfo spapr_machine_info = {
@@ -4465,9 +4552,16 @@ static const TypeInfo spapr_machine_info = {
         { TYPE_PPC_VIRTUAL_HYPERVISOR },
         { TYPE_XICS_FABRIC },
         { TYPE_INTERRUPT_STATS_PROVIDER },
+        { TYPE_XIVE_FABRIC },
         { }
     },
 };
+
+static void spapr_machine_latest_class_options(MachineClass *mc)
+{
+    mc->alias = "pseries";
+    mc->is_default = true;
+}
 
 #define DEFINE_SPAPR_MACHINE(suffix, verstr, latest)                 \
     static void spapr_machine_##suffix##_class_init(ObjectClass *oc, \
@@ -4476,8 +4570,7 @@ static const TypeInfo spapr_machine_info = {
         MachineClass *mc = MACHINE_CLASS(oc);                        \
         spapr_machine_##suffix##_class_options(mc);                  \
         if (latest) {                                                \
-            mc->alias = "pseries";                                   \
-            mc->is_default = 1;                                      \
+            spapr_machine_latest_class_options(mc);                  \
         }                                                            \
     }                                                                \
     static const TypeInfo spapr_machine_##suffix##_info = {          \
@@ -4492,14 +4585,30 @@ static const TypeInfo spapr_machine_info = {
     type_init(spapr_machine_register_##suffix)
 
 /*
- * pseries-4.2
+ * pseries-5.0
  */
-static void spapr_machine_4_2_class_options(MachineClass *mc)
+static void spapr_machine_5_0_class_options(MachineClass *mc)
 {
     /* Defaults for the latest behaviour inherited from the base class */
 }
 
-DEFINE_SPAPR_MACHINE(4_2, "4.2", true);
+DEFINE_SPAPR_MACHINE(5_0, "5.0", true);
+
+/*
+ * pseries-4.2
+ */
+static void spapr_machine_4_2_class_options(MachineClass *mc)
+{
+    SpaprMachineClass *smc = SPAPR_MACHINE_CLASS(mc);
+
+    spapr_machine_5_0_class_options(mc);
+    compat_props_add(mc->compat_props, hw_compat_4_2, hw_compat_4_2_len);
+    smc->default_caps.caps[SPAPR_CAP_CCF_ASSIST] = SPAPR_CAP_OFF;
+    smc->default_caps.caps[SPAPR_CAP_FWNMI_MCE] = SPAPR_CAP_OFF;
+    mc->nvdimm_supported = false;
+}
+
+DEFINE_SPAPR_MACHINE(4_2, "4.2", false);
 
 /*
  * pseries-4.1

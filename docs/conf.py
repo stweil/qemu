@@ -28,6 +28,16 @@
 
 import os
 import sys
+import sphinx
+from sphinx.errors import VersionRequirementError
+
+# Make Sphinx fail cleanly if using an old Python, rather than obscurely
+# failing because some code in one of our extensions doesn't work there.
+# Unfortunately this doesn't display very neatly (there's an unavoidable
+# Python backtrace) but at least the information gets printed...
+if sys.version_info < (3,5):
+    raise VersionRequirementError(
+        "QEMU requires a Sphinx that uses Python 3.5 or better\n")
 
 # The per-manual conf.py will set qemu_docdir for a single-manual build;
 # otherwise set it here if this is an entire-manual-set build.
@@ -54,7 +64,7 @@ needs_sphinx = '1.3'
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
-extensions = ['qmp_lexer']
+extensions = ['kerneldoc', 'qmp_lexer', 'hxtool']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -216,3 +226,9 @@ texinfo_documents = [
 
 
 
+# We use paths starting from qemu_docdir here so that you can run
+# sphinx-build from anywhere and the kerneldoc extension can still
+# find everything.
+kerneldoc_bin = os.path.join(qemu_docdir, '../scripts/kernel-doc')
+kerneldoc_srctree = os.path.join(qemu_docdir, '..')
+hxtool_srctree = os.path.join(qemu_docdir, '..')

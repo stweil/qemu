@@ -130,6 +130,8 @@ static int csr_register_map[] = {
     CSR_MCAUSE,
     CSR_MTVAL,
     CSR_MIP,
+    CSR_MTINST,
+    CSR_MTVAL2,
     CSR_PMPCFG0,
     CSR_PMPCFG1,
     CSR_PMPCFG2,
@@ -252,12 +254,11 @@ static int csr_register_map[] = {
     CSR_HEDELEG,
     CSR_HIDELEG,
     CSR_HIE,
-    CSR_HTVEC,
-    CSR_HSCRATCH,
-    CSR_HEPC,
-    CSR_HCAUSE,
-    CSR_HBADADDR,
+    CSR_HCOUNTEREN,
+    CSR_HTVAL,
     CSR_HIP,
+    CSR_HTINST,
+    CSR_HGATP,
     CSR_MBASE,
     CSR_MBOUND,
     CSR_MIBASE,
@@ -303,7 +304,12 @@ int riscv_cpu_gdb_write_register(CPUState *cs, uint8_t *mem_buf, int n)
 static int riscv_gdb_get_fpu(CPURISCVState *env, uint8_t *mem_buf, int n)
 {
     if (n < 32) {
-        return gdb_get_reg64(mem_buf, env->fpr[n]);
+        if (env->misa & RVD) {
+            return gdb_get_reg64(mem_buf, env->fpr[n]);
+        }
+        if (env->misa & RVF) {
+            return gdb_get_reg32(mem_buf, env->fpr[n]);
+        }
     /* there is hole between ft11 and fflags in fpu.xml */
     } else if (n < 36 && n > 32) {
         target_ulong val = 0;
@@ -403,23 +409,20 @@ void riscv_cpu_register_gdb_regs_for_features(CPUState *cs)
 {
     RISCVCPU *cpu = RISCV_CPU(cs);
     CPURISCVState *env = &cpu->env;
-#if defined(TARGET_RISCV32)
-    if (env->misa & RVF) {
+    if (env->misa & RVD) {
+        gdb_register_coprocessor(cs, riscv_gdb_get_fpu, riscv_gdb_set_fpu,
+                                 36, "riscv-64bit-fpu.xml", 0);
+    } else if (env->misa & RVF) {
         gdb_register_coprocessor(cs, riscv_gdb_get_fpu, riscv_gdb_set_fpu,
                                  36, "riscv-32bit-fpu.xml", 0);
     }
-
+#if defined(TARGET_RISCV32)
     gdb_register_coprocessor(cs, riscv_gdb_get_csr, riscv_gdb_set_csr,
                              240, "riscv-32bit-csr.xml", 0);
 
     gdb_register_coprocessor(cs, riscv_gdb_get_virtual, riscv_gdb_set_virtual,
                              1, "riscv-32bit-virtual.xml", 0);
 #elif defined(TARGET_RISCV64)
-    if (env->misa & RVF) {
-        gdb_register_coprocessor(cs, riscv_gdb_get_fpu, riscv_gdb_set_fpu,
-                                 36, "riscv-64bit-fpu.xml", 0);
-    }
-
     gdb_register_coprocessor(cs, riscv_gdb_get_csr, riscv_gdb_set_csr,
                              240, "riscv-64bit-csr.xml", 0);
 
