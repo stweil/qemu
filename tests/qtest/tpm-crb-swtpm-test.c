@@ -18,6 +18,10 @@
 #include "libqtest.h"
 #include "qemu/module.h"
 #include "tpm-tests.h"
+#include "hw/acpi/tpm.h"
+
+/* Not used but needed for linking */
+uint64_t tpm_tis_base_addr = TPM_TIS_ADDR_BASE;
 
 typedef struct TestState {
     char *src_tpm_path;
@@ -29,7 +33,8 @@ static void tpm_crb_swtpm_test(const void *data)
 {
     const TestState *ts = data;
 
-    tpm_test_swtpm_test(ts->src_tpm_path, tpm_util_crb_transfer, "tpm-crb");
+    tpm_test_swtpm_test(ts->src_tpm_path, tpm_util_crb_transfer,
+                        "tpm-crb", NULL);
 }
 
 static void tpm_crb_swtpm_migration_test(const void *data)
@@ -37,7 +42,7 @@ static void tpm_crb_swtpm_migration_test(const void *data)
     const TestState *ts = data;
 
     tpm_test_swtpm_migration_test(ts->src_tpm_path, ts->dst_tpm_path, ts->uri,
-                                  tpm_util_crb_transfer, "tpm-crb");
+                                  tpm_util_crb_transfer, "tpm-crb", NULL);
 }
 
 int main(int argc, char **argv)
