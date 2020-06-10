@@ -144,7 +144,6 @@ static Chardev **serial_hds;
 Chardev *parallel_hds[MAX_PARALLEL_PORTS];
 int win2k_install_hack = 0;
 int singlestep = 0;
-int acpi_enabled = 1;
 int no_hpet = 0;
 int fd_bootchk = 1;
 static int no_reboot;
@@ -2804,6 +2803,9 @@ static void create_default_memdev(MachineState *ms, const char *path)
     object_property_set_int(obj, ms->ram_size, "size", &error_fatal);
     object_property_add_child(object_get_objects_root(), mc->default_ram_id,
                               obj, &error_fatal);
+    /* Ensure backend's memory region name is equal to mc->default_ram_id */
+    object_property_set_bool(obj, false, "x-use-canonical-path-for-ramblock-id",
+                             &error_fatal);
     user_creatable_complete(USER_CREATABLE(obj), &error_fatal);
     object_unref(obj);
     object_property_set_str(OBJECT(ms), mc->default_ram_id, "memory-backend",
@@ -3516,7 +3518,8 @@ void qemu_init(int argc, char **argv, char **envp)
                 vnc_parse(optarg, &error_fatal);
                 break;
             case QEMU_OPTION_no_acpi:
-                acpi_enabled = 0;
+                olist = qemu_find_opts("machine");
+                qemu_opts_parse_noisily(olist, "acpi=off", false);
                 break;
             case QEMU_OPTION_no_hpet:
                 no_hpet = 1;
