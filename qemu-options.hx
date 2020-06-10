@@ -1,10 +1,10 @@
-HXCOMM Use DEFHEADING() to define headings in both help text and texi
-HXCOMM Text between STEXI and ETEXI are copied to texi version and
-HXCOMM discarded from C version
+HXCOMM Use DEFHEADING() to define headings in both help text and rST.
+HXCOMM Text between SRST and ERST is copied to the rST version and
+HXCOMM discarded from C version.
 HXCOMM DEF(option, HAS_ARG/0, opt_enum, opt_help, arch_mask) is used to
 HXCOMM construct option structures, enums and help message for specified
 HXCOMM architectures.
-HXCOMM HXCOMM can be used for comments, discarded from both texi and C
+HXCOMM HXCOMM can be used for comments, discarded from both rST and C.
 
 DEFHEADING(Standard options:)
 
@@ -551,7 +551,7 @@ DEF("audiodev", HAS_ARG, QEMU_OPTION_audiodev,
     "                in|out.frequency= frequency to use with fixed settings\n"
     "                in|out.channels= number of channels to use with fixed settings\n"
     "                in|out.format= sample format to use with fixed settings\n"
-    "                valid values: s8, s16, s32, u8, u16, u32\n"
+    "                valid values: s8, s16, s32, u8, u16, u32, f32\n"
     "                in|out.voices= number of voices to use\n"
     "                in|out.buffer-length= length of buffer in microseconds\n"
     "-audiodev none,id=id,[,prop[=value][,...]]\n"
@@ -647,7 +647,7 @@ SRST
     ``in|out.format=format``
         Specify the sample format to use when using fixed-settings.
         Valid values are: ``s8``, ``s16``, ``s32``, ``u8``, ``u16``,
-        ``u32``. Default is ``s16``.
+        ``u32``, ``f32``. Default is ``s16``.
 
     ``in|out.voices=voices``
         Specify the number of voices to use. Default is 1.
@@ -4228,11 +4228,10 @@ DEF("trace-unassigned", 0, QEMU_OPTION_trace_unassigned,
     "-trace-unassigned\n"
     "                Trace unassigned memory or i/o accesses\n",
     QEMU_ARCH_ALL)
-STEXI
-@item -trace-unassigned
-@findex -trace-unassigned
-Trace unassigned memory or i/o accesses to stderr.
-ETEXI
+SRST
+``-trace-unassigned``
+    Trace unassigned memory or i/o accesses to stderr.
+ERST
 
 DEF("trace", HAS_ARG, QEMU_OPTION_trace,
     "-trace [[enable=]<pattern>][,events=<file>][,file=<file>]\n"

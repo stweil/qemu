@@ -540,6 +540,10 @@
 #                      compression, so set the decompress-threads to the number about 1/4
 #                      of compress-threads is adequate.
 #
+# @throttle-trigger-threshold: The ratio of bytes_dirty_period and bytes_xfer_period
+#                              to trigger throttling. It is expressed as percentage.
+#                              The default value is 50. (Since 5.0)
+#
 # @cpu-throttle-initial: Initial percentage of time guest cpus are throttled
 #                        when migration auto-converge is activated. The
 #                        default value is 20. (Since 2.7)
@@ -625,7 +629,7 @@
   'data': ['announce-initial', 'announce-max',
            'announce-rounds', 'announce-step',
            'compress-level', 'compress-threads', 'decompress-threads',
-           'compress-wait-thread',
+           'compress-wait-thread', 'throttle-trigger-threshold',
            'cpu-throttle-initial', 'cpu-throttle-increment',
            'tls-creds', 'tls-hostname', 'tls-authz', 'max-bandwidth',
            'downtime-limit', 'x-checkpoint-delay', 'block-incremental',
@@ -659,6 +663,10 @@
 #                        send the page uncompressed. (Since 3.1)
 #
 # @decompress-threads: decompression thread count
+#
+# @throttle-trigger-threshold: The ratio of bytes_dirty_period and bytes_xfer_period
+#                              to trigger throttling. It is expressed as percentage.
+#                              The default value is 50. (Since 5.0)
 #
 # @cpu-throttle-initial: Initial percentage of time guest cpus are
 #                        throttled when migration auto-converge is activated.
@@ -752,6 +760,7 @@
             '*compress-threads': 'int',
             '*compress-wait-thread': 'bool',
             '*decompress-threads': 'int',
+            '*throttle-trigger-threshold': 'int',
             '*cpu-throttle-initial': 'int',
             '*cpu-throttle-increment': 'int',
             '*tls-creds': 'StrOrNull',
@@ -812,6 +821,10 @@
 #                        send the page uncompressed. (Since 3.1)
 #
 # @decompress-threads: decompression thread count
+#
+# @throttle-trigger-threshold: The ratio of bytes_dirty_period and bytes_xfer_period
+#                              to trigger throttling. It is expressed as percentage.
+#                              The default value is 50. (Since 5.0)
 #
 # @cpu-throttle-initial: Initial percentage of time guest cpus are
 #                        throttled when migration auto-converge is activated.
@@ -905,6 +918,7 @@
             '*compress-threads': 'uint8',
             '*compress-wait-thread': 'bool',
             '*decompress-threads': 'uint8',
+            '*throttle-trigger-threshold': 'uint8',
             '*cpu-throttle-initial': 'uint8',
             '*cpu-throttle-increment': 'uint8',
             '*tls-creds': 'str',
@@ -1196,9 +1210,11 @@
 #
 # @value: maximum downtime in seconds
 #
-# Returns: nothing on success
+# Features:
+# @deprecated: This command is deprecated.  Use
+#     'migrate-set-parameters' instead.
 #
-# Notes: This command is deprecated in favor of 'migrate-set-parameters'
+# Returns: nothing on success
 #
 # Since: 0.14.0
 #
@@ -1208,7 +1224,8 @@
 # <- { "return": {} }
 #
 ##
-{ 'command': 'migrate_set_downtime', 'data': {'value': 'number'} }
+{ 'command': 'migrate_set_downtime', 'data': {'value': 'number'},
+  'features': [ 'deprecated' ] }
 
 ##
 # @migrate_set_speed:
@@ -1217,9 +1234,11 @@
 #
 # @value: maximum speed in bytes per second.
 #
-# Returns: nothing on success
+# Features:
+# @deprecated: This command is deprecated.  Use
+#     'migrate-set-parameters' instead.
 #
-# Notes: This command is deprecated in favor of 'migrate-set-parameters'
+# Returns: nothing on success
 #
 # Since: 0.14.0
 #
@@ -1229,7 +1248,8 @@
 # <- { "return": {} }
 #
 ##
-{ 'command': 'migrate_set_speed', 'data': {'value': 'int'} }
+{ 'command': 'migrate_set_speed', 'data': {'value': 'int'},
+  'features': [ 'deprecated' ] }
 
 ##
 # @migrate-set-cache-size:
@@ -1238,12 +1258,14 @@
 #
 # @value: cache size in bytes
 #
+# Features:
+# @deprecated: This command is deprecated.  Use
+#     'migrate-set-parameters' instead.
+#
 # The size will be rounded down to the nearest power of 2.
 # The cache size can be modified before and during ongoing migration
 #
 # Returns: nothing on success
-#
-# Notes: This command is deprecated in favor of 'migrate-set-parameters'
 #
 # Since: 1.2
 #
@@ -1254,16 +1276,19 @@
 # <- { "return": {} }
 #
 ##
-{ 'command': 'migrate-set-cache-size', 'data': {'value': 'int'} }
+{ 'command': 'migrate-set-cache-size', 'data': {'value': 'int'},
+  'features': [ 'deprecated' ] }
 
 ##
 # @query-migrate-cache-size:
 #
 # Query migration XBZRLE cache size
 #
-# Returns: XBZRLE cache size in bytes
+# Features:
+# @deprecated: This command is deprecated.  Use
+#     'query-migrate-parameters' instead.
 #
-# Notes: This command is deprecated in favor of 'query-migrate-parameters'
+# Returns: XBZRLE cache size in bytes
 #
 # Since: 1.2
 #
@@ -1273,7 +1298,8 @@
 # <- { "return": 67108864 }
 #
 ##
-{ 'command': 'query-migrate-cache-size', 'returns': 'int' }
+{ 'command': 'query-migrate-cache-size', 'returns': 'int',
+  'features': [ 'deprecated' ] }
 
 ##
 # @migrate:

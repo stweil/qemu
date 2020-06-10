@@ -53,7 +53,7 @@ GlobalProperty hw_compat_4_0[] = {
     { "secondary-vga",  "edid", "false" },
     { "bochs-display",  "edid", "false" },
     { "virtio-vga",     "edid", "false" },
-    { "virtio-gpu",     "edid", "false" },
+    { "virtio-gpu-device", "edid", "false" },
     { "virtio-device", "use-started", "false" },
     { "virtio-balloon-device", "qemu-4-0-config-size", "true" },
     { "pl031", "migrate-tick-offset", "false" },
@@ -425,6 +425,14 @@ static void machine_set_memory_encryption(Object *obj, const char *value,
 
     g_free(ms->memory_encryption);
     ms->memory_encryption = g_strdup(value);
+
+    /*
+     * With memory encryption, the host can't see the real contents of RAM,
+     * so there's no point in it trying to merge areas.
+     */
+    if (value) {
+        machine_set_mem_merge(obj, false, errp);
+    }
 }
 
 static bool machine_get_nvdimm(Object *obj, Error **errp)
@@ -749,6 +757,7 @@ static void smp_parse(MachineState *ms, QemuOpts *opts)
         ms->smp.cpus = cpus;
         ms->smp.cores = cores;
         ms->smp.threads = threads;
+        ms->smp.sockets = sockets;
     }
 
     if (ms->smp.cpus > 1) {

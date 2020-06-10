@@ -794,7 +794,7 @@ rm -f $(MANUAL_BUILDDIR)/$1/objects.inv $(MANUAL_BUILDDIR)/$1/searchindex.js $(M
 endef
 
 distclean: clean
-	rm -f config-host.mak config-host.h* config-host.ld $(DOCS) qemu-options.texi qemu-monitor.texi qemu-monitor-info.texi
+	rm -f config-host.mak config-host.h* config-host.ld $(DOCS)
 	rm -f tests/tcg/config-*.mak
 	rm -f config-all-devices.mak config-all-disas.mak config.status
 	rm -f $(SUBDIR_DEVICES_MAK)
@@ -847,7 +847,7 @@ u-boot.e500 u-boot-sam460-20100605.bin \
 qemu_vga.ndrv \
 edk2-licenses.txt \
 hppa-firmware.img \
-opensbi-riscv32-virt-fw_jump.bin \
+opensbi-riscv32-sifive_u-fw_jump.bin opensbi-riscv32-virt-fw_jump.bin \
 opensbi-riscv64-sifive_u-fw_jump.bin opensbi-riscv64-virt-fw_jump.bin
 
 
@@ -1083,9 +1083,10 @@ sphinxdocs: $(MANUAL_BUILDDIR)/devel/index.html \
 # a single doctree: https://github.com/sphinx-doc/sphinx/issues/2946
 build-manual = $(call quiet-command,CONFDIR="$(qemu_confdir)" $(SPHINX_BUILD) $(if $(V),,-q) -W -b $2 -D version=$(VERSION) -D release="$(FULL_VERSION)" -d .doctrees/$1-$2 $(SRC_PATH)/docs/$1 $(MANUAL_BUILDDIR)/$1 ,"SPHINX","$(MANUAL_BUILDDIR)/$1")
 # We assume all RST files in the manual's directory are used in it
-manual-deps = $(wildcard $(SRC_PATH)/docs/$1/*.rst) \
+manual-deps = $(wildcard $(SRC_PATH)/docs/$1/*.rst $(SRC_PATH)/docs/$1/*/*.rst) \
               $(SRC_PATH)/docs/defs.rst.inc \
-              $(SRC_PATH)/docs/$1/conf.py $(SRC_PATH)/docs/conf.py
+              $(SRC_PATH)/docs/$1/conf.py $(SRC_PATH)/docs/conf.py \
+              $(SRC_PATH)/docs/sphinx/*.py
 # Macro to write out the rule and dependencies for building manpages
 # Usage: $(call define-manpage-rule,manualname,manpage1 manpage2...[,extradeps])
 # 'extradeps' is optional, and specifies extra files (eg .hx files) that
@@ -1126,15 +1127,6 @@ $(MANUAL_BUILDDIR)/index.html: $(SRC_PATH)/docs/index.html.in qemu-version.h
 	@mkdir -p "$(MANUAL_BUILDDIR)"
 	$(call quiet-command, sed "s|@@VERSION@@|${VERSION}|g" $< >$@, \
              "GEN","$@")
-
-qemu-options.texi: $(SRC_PATH)/qemu-options.hx $(SRC_PATH)/scripts/hxtool
-	$(call quiet-command,sh $(SRC_PATH)/scripts/hxtool -t < $< > $@,"GEN","$@")
-
-qemu-monitor.texi: $(SRC_PATH)/hmp-commands.hx $(SRC_PATH)/scripts/hxtool
-	$(call quiet-command,sh $(SRC_PATH)/scripts/hxtool -t < $< > $@,"GEN","$@")
-
-qemu-monitor-info.texi: $(SRC_PATH)/hmp-commands-info.hx $(SRC_PATH)/scripts/hxtool
-	$(call quiet-command,sh $(SRC_PATH)/scripts/hxtool -t < $< > $@,"GEN","$@")
 
 docs/interop/qemu-qmp-qapi.texi: qapi/qapi-doc.texi
 	@cp -p $< $@
@@ -1248,50 +1240,57 @@ endif
 include $(SRC_PATH)/tests/docker/Makefile.include
 include $(SRC_PATH)/tests/vm/Makefile.include
 
+print-help-run = printf "  %-30s - %s\\n" "$1" "$2"
+print-help = $(quiet-@)$(call print-help-run,$1,$2)
+
 .PHONY: help
 help:
 	@echo  'Generic targets:'
-	@echo  '  all             - Build all'
+	$(call print-help,all,Build all)
 ifdef CONFIG_MODULES
-	@echo  '  modules         - Build all modules'
+	$(call print-help,modules,Build all modules)
 endif
-	@echo  '  dir/file.o      - Build specified target only'
-	@echo  '  install         - Install QEMU, documentation and tools'
-	@echo  '  ctags/TAGS      - Generate tags file for editors'
-	@echo  '  cscope          - Generate cscope index'
+	$(call print-help,dir/file.o,Build specified target only)
+	$(call print-help,install,Install QEMU, documentation and tools)
+	$(call print-help,ctags/TAGS,Generate tags file for editors)
+	$(call print-help,cscope,Generate cscope index)
 	@echo  ''
 	@$(if $(TARGET_DIRS), \
 		echo 'Architecture specific targets:'; \
 		$(foreach t, $(TARGET_DIRS), \
-		printf "  %-30s - Build for %s\\n" $(t)/all $(t);) \
+		$(call print-help-run,$(t)/all,Build for $(t));) \
+		echo '')
+	@$(if $(TOOLS), \
+		echo 'Tools targets:'; \
+		$(foreach t, $(TOOLS), \
+		$(call print-help-run,$(t),Build $(shell basename $(t)) tool);) \
 		echo '')
 	@echo  'Cleaning targets:'
-	@echo  '  clean           - Remove most generated files but keep the config'
+	$(call print-help,clean,Remove most generated files but keep the config)
 ifdef CONFIG_GCOV
-	@echo  '  clean-coverage  - Remove coverage files'
+	$(call print-help,clean-coverage,Remove coverage files)
 endif
-	@echo  '  distclean       - Remove all generated files'
-	@echo  '  dist            - Build a distributable tarball'
+	$(call print-help,distclean,Remove all generated files)
+	$(call print-help,dist,Build a distributable tarball)
 	@echo  ''
 	@echo  'Test targets:'
-	@echo  '  check           - Run all tests (check-help for details)'
-	@echo  '  docker          - Help about targets running tests inside containers'
-	@echo  '  vm-help         - Help about targets running tests inside VM'
+	$(call print-help,check,Run all tests (check-help for details))
+	$(call print-help,docker,Help about targets running tests inside containers)
+	$(call print-help,vm-help,Help about targets running tests inside VM)
 	@echo  ''
 	@echo  'Documentation targets:'
-	@echo  '  html info pdf txt'
-	@echo  '                  - Build documentation in specified format'
+	$(call print-help,html info pdf txt,Build documentation in specified format)
 ifdef CONFIG_GCOV
-	@echo  '  coverage-report - Create code coverage report'
+	$(call print-help,coverage-report,Create code coverage report)
 endif
 	@echo  ''
 ifdef CONFIG_WIN32
 	@echo  'Windows targets:'
-	@echo  '  installer       - Build NSIS-based installer for QEMU'
+	$(call print-help,installer,Build NSIS-based installer for QEMU)
 ifdef QEMU_GA_MSI_ENABLED
-	@echo  '  msi             - Build MSI-based installer for qemu-ga'
+	$(call print-help,msi,Build MSI-based installer for qemu-ga)
 endif
 	@echo  ''
 endif
-	@echo  '  $(MAKE) [targets]      (quiet build, default)'
-	@echo  '  $(MAKE) V=1 [targets]  (verbose build)'
+	$(call print-help,$(MAKE) [targets],(quiet build, default))
+	$(call print-help,$(MAKE) V=1 [targets],(verbose build))

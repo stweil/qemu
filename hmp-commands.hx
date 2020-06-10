@@ -1,9 +1,9 @@
-HXCOMM Use DEFHEADING() to define headings in both help text and texi
-HXCOMM Text between STEXI and ETEXI are copied to texi version and
-HXCOMM discarded from C version
+HXCOMM Use DEFHEADING() to define headings in both help text and rST.
+HXCOMM Text between SRST and ERST is copied to the rST version and
+HXCOMM discarded from C version.
 HXCOMM DEF(command, args, callback, arg_string, help) is used to construct
 HXCOMM monitor commands
-HXCOMM HXCOMM can be used for comments, discarded from both texi and C
+HXCOMM HXCOMM can be used for comments, discarded from both rST and C.
 
 
     {
@@ -1369,8 +1369,8 @@ ERST
 #ifdef CONFIG_SLIRP
     {
         .name       = "hostfwd_add",
-        .args_type  = "arg1:s,arg2:s?,arg3:s?",
-        .params     = "[hub_id name]|[netdev_id] [tcp|udp]:[hostaddr]:hostport-[guestaddr]:guestport",
+        .args_type  = "arg1:s,arg2:s?",
+        .params     = "[netdev_id] [tcp|udp]:[hostaddr]:hostport-[guestaddr]:guestport",
         .help       = "redirect TCP or UDP connections from host to guest (requires -net user)",
         .cmd        = hmp_hostfwd_add,
     },
@@ -1383,8 +1383,8 @@ ERST
 #ifdef CONFIG_SLIRP
     {
         .name       = "hostfwd_remove",
-        .args_type  = "arg1:s,arg2:s?,arg3:s?",
-        .params     = "[hub_id name]|[netdev_id] [tcp|udp]:[hostaddr]:hostport",
+        .args_type  = "arg1:s,arg2:s?",
+        .params     = "[netdev_id] [tcp|udp]:[hostaddr]:hostport",
         .help       = "remove host-to-guest TCP or UDP redirection",
         .cmd        = hmp_hostfwd_remove,
     },

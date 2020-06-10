@@ -30,11 +30,14 @@ import logging
 import atexit
 import io
 from collections import OrderedDict
+import faulthandler
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 from qemu import qtest
 
 assert sys.version_info >= (3,6)
+
+faulthandler.enable()
 
 # This will not work if arguments contain spaces but is necessary if we
 # want to support the override options that ./check supports.
@@ -624,7 +627,10 @@ class VM(qtest.QEMUQtestMachine):
                         if use_log:
                             log('Job failed: %s' % (j['error']))
             elif status == 'ready':
-                self.qmp_log('job-complete', id=job)
+                if use_log:
+                    self.qmp_log('job-complete', id=job)
+                else:
+                    self.qmp('job-complete', id=job)
             elif status == 'pending' and not auto_finalize:
                 if pre_finalize:
                     pre_finalize()
@@ -919,7 +925,7 @@ class QMPTestCase(unittest.TestCase):
         self.assert_qmp(event, 'data/type', 'mirror')
 
     def pause_wait(self, job_id='job0'):
-        with Timeout(1, "Timeout waiting for job to pause"):
+        with Timeout(3, "Timeout waiting for job to pause"):
             while True:
                 result = self.vm.qmp('query-block-jobs')
                 found = False

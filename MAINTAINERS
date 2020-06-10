@@ -101,7 +101,8 @@ F: include/hw/watchdog/wdt_diag288.h
 F: pc-bios/s390-ccw/
 F: pc-bios/s390-ccw.img
 F: target/s390x/
-F: docs/vfio-ap.txt
+F: docs/system/target-s390x.rst
+F: docs/system/s390x/
 F: tests/migration/s390x/
 K: ^Subject:.*(?i)s390x?
 T: git https://github.com/cohuck/qemu.git s390-next
@@ -155,6 +156,7 @@ F: include/hw/cpu/a*mpcore.h
 F: disas/arm.c
 F: disas/arm-a64.cc
 F: disas/libvixl/
+F: docs/system/target-arm.rst
 
 ARM SMMU
 M: Eric Auger <eric.auger@redhat.com>
@@ -208,8 +210,8 @@ F: hw/microblaze/
 F: disas/microblaze.c
 
 MIPS TCG CPUs
-M: Aurelien Jarno <aurelien@aurel32.net>
-M: Aleksandar Markovic <amarkovic@wavecomp.com>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
+R: Aurelien Jarno <aurelien@aurel32.net>
 R: Aleksandar Rikalo <aleksandar.rikalo@rt-rk.com>
 S: Maintained
 F: target/mips/
@@ -225,6 +227,7 @@ F: include/hw/mips/
 F: include/hw/misc/mips_*
 F: include/hw/timer/mips_gictimer.h
 F: tests/acceptance/linux_ssh_mips_malta.py
+F: tests/acceptance/machine_mips_malta.py
 F: tests/tcg/mips/
 K: ^Subject:.*(?i)mips
 
@@ -274,6 +277,11 @@ F: hw/riscv/
 F: include/hw/riscv/
 F: linux-user/host/riscv32/
 F: linux-user/host/riscv64/
+
+RENESAS RX CPUs
+M: Yoshinori Sato <ysato@users.sourceforge.jp>
+S: Maintained
+F: target/rx/
 
 S390 TCG CPUs
 M: Richard Henderson <rth@twiddle.net>
@@ -366,7 +374,7 @@ S: Maintained
 F: target/arm/kvm.c
 
 MIPS KVM CPUs
-M: Aleksandar Markovic <aleksandar.m.mail@gmail.com>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
 S: Odd Fixes
 F: target/mips/kvm.c
 
@@ -435,6 +443,17 @@ F: include/hw/block/dataplane/xen*
 F: include/hw/xen/
 F: include/sysemu/xen-mapcache.h
 
+Guest CPU Cores (HAXM)
+---------------------
+X86 HAXM CPUs
+M: Wenchao Wang <wenchao.wang@intel.com>
+M: Colin Xu <colin.xu@intel.com>
+L: haxm-team@intel.com
+W: https://github.com/intel/haxm/issues
+S: Maintained
+F: include/sysemu/hax.h
+F: target/i386/hax-*
+
 Hosts
 -----
 LINUX
@@ -490,6 +509,15 @@ S: Odd Fixes
 F: hw/*/allwinner*
 F: include/hw/*/allwinner*
 F: hw/arm/cubieboard.c
+
+Allwinner-h3
+M: Niek Linnenbank <nieklinnenbank@gmail.com>
+L: qemu-arm@nongnu.org
+S: Maintained
+F: hw/*/allwinner-h3*
+F: include/hw/*/allwinner-h3*
+F: hw/arm/orangepi.c
+F: docs/system/orangepi.rst
 
 ARM PrimeCell and CMSDK devices
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -615,6 +643,7 @@ F: hw/arm/integratorcp.c
 F: hw/misc/arm_integrator_debug.c
 F: include/hw/misc/arm_integrator_debug.h
 F: tests/acceptance/machine_arm_integratorcp.py
+F: docs/system/arm/integratorcp.rst
 
 MCIMX6UL EVK / i.MX6ul
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -673,6 +702,7 @@ M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
 S: Odd Fixes
 F: hw/arm/musicpal.c
+F: docs/system/arm/musicpal.rst
 
 nSeries
 M: Andrzej Zaborowski <balrogg@gmail.com>
@@ -689,6 +719,7 @@ F: include/hw/display/blizzard.h
 F: include/hw/input/tsc2xxx.h
 F: include/hw/misc/cbus.h
 F: tests/acceptance/machine_arm_n8x0.py
+F: docs/system/arm/nseries.rst
 
 Palm
 M: Andrzej Zaborowski <balrogg@gmail.com>
@@ -698,6 +729,7 @@ S: Odd Fixes
 F: hw/arm/palm.c
 F: hw/input/tsc210x.c
 F: include/hw/input/tsc2xxx.h
+F: docs/system/arm/palm.rst
 
 Raspberry Pi
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -719,6 +751,7 @@ F: hw/arm/realview*
 F: hw/cpu/realview_mpcore.c
 F: hw/intc/realview_gic.c
 F: include/hw/intc/realview_gic.h
+F: docs/system/arm/realview.rst
 
 PXA2XX
 M: Andrzej Zaborowski <balrogg@gmail.com>
@@ -738,6 +771,7 @@ F: hw/misc/max111x.c
 F: include/hw/arm/pxa.h
 F: include/hw/arm/sharpsl.h
 F: include/hw/display/tc6393xb.h
+F: docs/system/arm/xscale.rst
 
 SABRELITE / i.MX6
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -748,6 +782,8 @@ F: hw/arm/sabrelite.c
 F: hw/arm/fsl-imx6.c
 F: hw/misc/imx6_*.c
 F: hw/ssi/imx_spi.c
+F: hw/usb/imx-usb-phy.c
+F: include/hw/usb/imx-usb-phy.h
 F: include/hw/arm/fsl-imx6.h
 F: include/hw/misc/imx6_*.h
 F: include/hw/ssi/imx_spi.h
@@ -773,6 +809,7 @@ L: qemu-arm@nongnu.org
 S: Maintained
 F: hw/*/stellaris*
 F: include/hw/input/gamepad.h
+F: docs/system/arm/stellaris.rst
 
 Versatile Express
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -786,6 +823,7 @@ L: qemu-arm@nongnu.org
 S: Maintained
 F: hw/*/versatile*
 F: hw/misc/arm_sysctl.c
+F: docs/system/arm/versatile.rst
 
 Virt
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -998,7 +1036,7 @@ F: hw/display/jazz_led.c
 F: hw/dma/rc4030.c
 
 Malta
-M: Aleksandar Markovic <amarkovic@wavecomp.com>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
 M: Philippe Mathieu-Daudé <f4bug@amsat.org>
 R: Aurelien Jarno <aurelien@aurel32.net>
 S: Maintained
@@ -1011,21 +1049,22 @@ F: tests/acceptance/linux_ssh_mips_malta.py
 F: tests/acceptance/machine_mips_malta.py
 
 Mipssim
-M: Aleksandar Markovic <amarkovic@wavecomp.com>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
 R: Aleksandar Rikalo <aleksandar.rikalo@rt-rk.com>
 S: Odd Fixes
 F: hw/mips/mips_mipssim.c
 F: hw/net/mipsnet.c
 
 R4000
-M: Aurelien Jarno <aurelien@aurel32.net>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
+R: Aurelien Jarno <aurelien@aurel32.net>
 R: Aleksandar Rikalo <aleksandar.rikalo@rt-rk.com>
 S: Obsolete
 F: hw/mips/mips_r4k.c
 
 Fulong 2E
 M: Philippe Mathieu-Daudé <f4bug@amsat.org>
-M: Aleksandar Markovic <amarkovic@wavecomp.com>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
 S: Odd Fixes
 F: hw/mips/mips_fulong2e.c
 F: hw/isa/vt82c686.c
@@ -1573,7 +1612,7 @@ F: hw/s390x/ap-bridge.c
 F: include/hw/s390x/ap-device.h
 F: include/hw/s390x/ap-bridge.h
 F: hw/vfio/ap.c
-F: docs/system/vfio-ap.rst
+F: docs/system/s390x/vfio-ap.rst
 L: qemu-s390x@nongnu.org
 
 vhost
@@ -1885,6 +1924,8 @@ L: qemu-block@nongnu.org
 S: Supported
 F: util/async.c
 F: util/aio-*.c
+F: util/aio-*.h
+F: util/fdmon-*.c
 F: block/io.c
 F: migration/block*
 F: include/block/aio.h
@@ -1920,6 +1961,7 @@ Block QAPI, monitor, command line
 M: Markus Armbruster <armbru@redhat.com>
 S: Supported
 F: blockdev.c
+F: blockdev-hmp-cmds.c
 F: block/qapi.c
 F: qapi/block*.json
 F: qapi/transaction.json
@@ -2015,6 +2057,7 @@ F: include/exec/ramblock.h
 F: memory.c
 F: include/exec/memory-internal.h
 F: exec.c
+F: scripts/coccinelle/memory-region-housekeeping.cocci
 
 SPICE
 M: Gerd Hoffmann <kraxel@redhat.com>
@@ -2104,6 +2147,11 @@ S: Odd fixes
 F: python/qemu/*py
 F: scripts/*.py
 F: tests/*.py
+
+Benchmark util
+M: Vladimir Sementsov-Ogievskiy <vsementsov@virtuozzo.com>
+S: Maintained
+F: scripts/simplebench/
 
 QAPI
 M: Markus Armbruster <armbru@redhat.com>
@@ -2448,6 +2496,9 @@ S: Maintained
 F: linux-user/
 F: default-configs/*-linux-user.mak
 F: scripts/qemu-binfmt-conf.sh
+F: scripts/update-syscalltbl.sh
+F: scripts/update-mips-syscall-args.sh
+F: scripts/gensyscalls.sh
 
 Tiny Code Generator (TCG)
 -------------------------
@@ -2486,7 +2537,8 @@ F: tcg/i386/
 F: disas/i386.c
 
 MIPS TCG target
-M: Aurelien Jarno <aurelien@aurel32.net>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
+R: Aurelien Jarno <aurelien@aurel32.net>
 R: Aleksandar Rikalo <aleksandar.rikalo@rt-rk.com>
 S: Maintained
 F: tcg/mips/
@@ -2814,7 +2866,7 @@ S: Odd Fixes
 F: scripts/git-submodule.sh
 
 UI translations
-M: Aleksandar Markovic <aleksandar.m.mail@gmail.com>
+M: Aleksandar Markovic <aleksandar.qemu.devel@gmail.com>
 F: po/*.po
 
 Sphinx documentation configuration and build machinery

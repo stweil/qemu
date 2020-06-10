@@ -270,7 +270,8 @@ class QEMUMachine(object):
                 self._vm_monitor = os.path.join(self._sock_dir,
                                                 self._name + "-monitor.sock")
                 self._remove_files.append(self._vm_monitor)
-            self._qmp = qmp.QEMUMonitorProtocol(self._vm_monitor, server=True)
+            self._qmp = qmp.QEMUMonitorProtocol(self._vm_monitor, server=True,
+                                                nickname=self._name)
 
     def _post_launch(self):
         if self._qmp:
@@ -358,6 +359,7 @@ class QEMUMachine(object):
                     if not has_quit:
                         self._qmp.cmd('quit')
                     self._qmp.close()
+                    self._popen.wait(timeout=3)
                 except:
                     self._popen.kill()
             self._popen.wait()
