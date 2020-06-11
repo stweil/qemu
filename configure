@@ -3711,7 +3711,11 @@ int main(void) {
   return conv != (iconv_t) -1;
 }
 EOF
-  iconv_prefix_list="/usr/local:/usr"
+  if test -z "$cross_prefix"; then
+    iconv_prefix_list="/usr/local:/usr"
+  else
+    iconv_prefix_list="/usr/$cross_prefix"
+  fi
   iconv_lib_list=":-liconv"
   IFS=:
   for iconv_prefix in $iconv_prefix_list; do
