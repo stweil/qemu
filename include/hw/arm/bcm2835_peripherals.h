@@ -18,7 +18,6 @@
 #include "hw/display/bcm2835_fb.h"
 #include "hw/dma/bcm2835_dma.h"
 #include "hw/intc/bcm2835_ic.h"
-#include "hw/misc/bcm2835_mphi.h"
 #include "hw/misc/bcm2835_power.h"
 #include "hw/misc/bcm2835_property.h"
 #include "hw/misc/bcm2835_rng.h"
@@ -58,7 +57,6 @@ typedef struct BCM2835PeripheralState {
     BCM2835FBState fb;
     BCM2835DMAState dma;
     BCM2835ICState ic;
-    BCM2835MphiState mphi;
     BCM2835PowerState power;
     BCM2835PropertyState property;
     BCM2835RngState rng;

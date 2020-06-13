@@ -69,6 +69,7 @@ static void bcm2835_peripherals_init(Object *obj)
     sysbus_init_child_obj(obj, "aux", &s->aux, sizeof(s->aux),
                           TYPE_BCM2835_AUX);
 
+#if 0
     /* System timer */
     object_initialize(&s->st, sizeof(s->st), TYPE_BCM2835_ST);
     object_property_add_child(obj, "systimer", OBJECT(&s->st), NULL);
@@ -86,11 +87,7 @@ static void bcm2835_peripherals_init(Object *obj)
 
     object_property_add_const_link(OBJECT(&s->usb), "dma_mr",
                                    OBJECT(&s->gpu_bus_mr), &error_abort);
-
-    /* MPHI - Message-based Parallel Host Interface */
-    object_initialize(&s->mphi, sizeof(s->mphi), TYPE_BCM2835_MPHI);
-    object_property_add_child(obj, "mphi", OBJECT(&s->mphi), NULL);
-    qdev_set_parent_bus(DEVICE(&s->mphi), sysbus_get_default());
+#endif
 
     /* Mailboxes */
     sysbus_init_child_obj(obj, "mbox", &s->mboxes, sizeof(s->mboxes),
@@ -99,10 +96,12 @@ static void bcm2835_peripherals_init(Object *obj)
     object_property_add_const_link(OBJECT(&s->mboxes), "mbox-mr",
                                    OBJECT(&s->mbox_mr));
 
+#if 0
     /* Power management */
     object_initialize(&s->power, sizeof(s->power), TYPE_BCM2835_POWER);
     object_property_add_child(obj, "power", OBJECT(&s->power), NULL);
     qdev_set_parent_bus(DEVICE(&s->power), sysbus_get_default());
+#endif
 
     /* Framebuffer */
     sysbus_init_child_obj(obj, "fb", &s->fb, sizeof(s->fb), TYPE_BCM2835_FB);
@@ -154,7 +153,7 @@ static void bcm2835_peripherals_init(Object *obj)
     object_property_add_const_link(OBJECT(&s->gpio), "sdbus-sdhost",
                                    OBJECT(&s->sdhost.sdbus));
 
-    /* Mphi */
+    /* MPHI - Message-based Parallel Host Interface */
     sysbus_init_child_obj(obj, "mphi", &s->mphi, sizeof(s->mphi),
                           TYPE_BCM2835_MPHI);
 
@@ -253,6 +252,7 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
         qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ,
                                INTERRUPT_AUX));
 
+#if 0
     /* System timer */
     object_property_set_bool(OBJECT(&s->st), true, "realized", &err);
     if (err) {
@@ -313,6 +313,7 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->mphi), 0,
         qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_GPU_IRQ,
                                INTERRUPT_HOSTPORT));
+#endif
 
     /* Mailboxes */
     object_property_set_bool(OBJECT(&s->mboxes), true, "realized", &err);
@@ -327,6 +328,7 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
         qdev_get_gpio_in_named(DEVICE(&s->ic), BCM2835_IC_ARM_IRQ,
                                INTERRUPT_ARM_MAILBOX));
 
+#if 0
     /* Power management */
     object_property_set_bool(OBJECT(&s->power), true, "realized", &err);
     if (err) {
@@ -338,6 +340,7 @@ static void bcm2835_peripherals_realize(DeviceState *dev, Error **errp)
                 sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->power), 0));
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->power), 0,
                        qdev_get_gpio_in(DEVICE(&s->mboxes), MBOX_CHAN_POWER));
+#endif
 
     /* Framebuffer */
     vcram_size = object_property_get_uint(OBJECT(s), "vcram-size", &err);
