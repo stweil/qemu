@@ -1,163 +1,191 @@
 /*
- * Raspberry Pi emulation (c) 2012 Gregory Estrade
- * This code is licensed under the GNU GPLv2 and later.
+ * BCM2835 SOC MPHI emulation
+ *
+ * Very basic emulation, only providing the FIQ interrupt needed to
+ * allow the dwc-otg USB host controller driver in the Raspbian kernel
+ * to function.
+ *
+ * Copyright (c) 2020 Paul Zimmerman <pauldzim@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
  */
 
 #include "qemu/osdep.h"
-#include "qemu/log.h"
-#include "hw/irq.h"               /* qemu_set_irq */
+#include "qapi/error.h"
 #include "hw/misc/bcm2835_mphi.h"
-#include "migration/vmstate.h"    /* VMStateDescription */
+#include "migration/vmstate.h"
+#include "qemu/error-report.h"
+#include "qemu/log.h"
+#include "qemu/main-loop.h"
 
-static void bcm2835_mphi_update_irq(BCM2835MphiState *s)
+static inline void mphi_raise_irq(BCM2835MphiState *s)
 {
-    if (s->mphi_intstat) {
-        qemu_set_irq(s->irq, 1);
-    } else {
-        qemu_set_irq(s->irq, 0);
-    }
+    qemu_set_irq(s->irq, 1);
 }
 
-static uint64_t bcm2835_mphi_read(void *opaque, hwaddr offset,
-    unsigned size)
+static inline void mphi_lower_irq(BCM2835MphiState *s)
 {
-    BCM2835MphiState *s = (BCM2835MphiState *)opaque;
-    uint32_t res = 0;
+    qemu_set_irq(s->irq, 0);
+}
 
-    assert(size == 4);
+static uint64_t mphi_reg_read(void *ptr, hwaddr addr, unsigned size)
+{
+    BCM2835MphiState *s = ptr;
+    uint32_t val = 0;
 
-    switch (offset) {
-    case 0x00:    /* mphi_base */
-        res = s->mphi_base;
+    switch (addr) {
+    case 0x28:  /* outdda */
+        val = s->outdda;
         break;
-    case 0x28:    /* mphi_outdda */
-        res = s->mphi_outdda;
+    case 0x2c:  /* outddb */
+        val = s->outddb;
         break;
-    case 0x2c:    /* mphi_outddb */
-        res = s->mphi_outddb;
+    case 0x4c:  /* ctrl */
+        val = s->ctrl;
+        val |= 1 << 17;
         break;
-    case 0x4c:    /* mphi_ctrl */
-        res = s->mphi_ctrl;
+    case 0x50:  /* intstat */
+        val = s->intstat;
         break;
-    case 0x50:    /* mphi_intstat */
-        res = s->mphi_intstat;
+    case 0x1f0: /* swirq_set */
+        val = s->swirq;
         break;
-
+    case 0x1f4: /* swirq_clr */
+        val = s->swirq;
+        break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-            "bcm2835_mphi_read: Bad offset %x\n", (int)offset);
-        res = 0;
+        qemu_log_mask(LOG_UNIMP, "read from unknown register");
         break;
     }
 
-    return res;
+    return val;
 }
 
-static void bcm2835_mphi_write(void *opaque, hwaddr offset,
-    uint64_t value, unsigned size)
+static void mphi_reg_write(void *ptr, hwaddr addr, uint64_t val, unsigned size)
 {
-    BCM2835MphiState *s = (BCM2835MphiState *)opaque;
-    int set_irq = 0;
+    BCM2835MphiState *s = ptr;
+    int do_irq = 0;
 
-    assert(size == 4);
-
-    switch (offset) {
-    case 0x00:    /* mphi_base */
-        s->mphi_base = value;
+    switch (addr) {
+    case 0x28:  /* outdda */
+        s->outdda = val;
         break;
-    case 0x28:    /* mphi_outdda */
-        s->mphi_outdda = value;
-        break;
-    case 0x2c:    /* mphi_outddb */
-        s->mphi_outddb = value;
-        if (value & (1 << 29)) {
-            /* Enable MPHI interrupt */
-            s->mphi_intstat |= (1 << 16);
-            set_irq = 1;
+    case 0x2c:  /* outddb */
+        s->outddb = val;
+        if (val & (1 << 29)) {
+            do_irq = 1;
         }
         break;
-    case 0x4c:    /* mphi_ctrl */
-        s->mphi_ctrl &= ~(1 << 31);
-        s->mphi_ctrl |= value & (1 << 31);
-
-        s->mphi_ctrl &= ~(3 << 16);
-        if (value & (1 << 16)) {
-            s->mphi_ctrl |= (3 << 16);
+    case 0x4c:  /* ctrl */
+        s->ctrl = val;
+        if (val & (1 << 16)) {
+            do_irq = -1;
         }
-
         break;
-    case 0x50:    /* mphi_intstat */
-        s->mphi_intstat &= ~value;
-        set_irq = 1;
+    case 0x50:  /* intstat */
+        s->intstat = val;
+        if (val & ((1 << 16) | (1 << 29))) {
+            do_irq = -1;
+        }
         break;
-
+    case 0x1f0: /* swirq_set */
+        s->swirq |= val;
+        do_irq = 1;
+        break;
+    case 0x1f4: /* swirq_clr */
+        s->swirq &= ~val;
+        do_irq = -1;
+        break;
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-            "bcm2835_mphi_write: Bad offset %x\n", (int)offset);
-        break;
+        qemu_log_mask(LOG_UNIMP, "write to unknown register");
+        return;
     }
 
-    if (set_irq) {
-        bcm2835_mphi_update_irq(s);
+    if (do_irq > 0) {
+        mphi_raise_irq(s);
+    } else if (do_irq < 0) {
+        mphi_lower_irq(s);
     }
 }
 
-static const MemoryRegionOps bcm2835_mphi_ops = {
-    .read = bcm2835_mphi_read,
-    .write = bcm2835_mphi_write,
-    .endianness = DEVICE_NATIVE_ENDIAN,
+static const MemoryRegionOps mphi_mmio_ops = {
+    .read = mphi_reg_read,
+    .write = mphi_reg_write,
+    .impl.min_access_size = 4,
+    .impl.max_access_size = 4,
+    .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static const VMStateDescription vmstate_bcm2835_mphi = {
-    .name = TYPE_BCM2835_MPHI,
+static void mphi_reset(DeviceState *dev)
+{
+    BCM2835MphiState *s = BCM2835_MPHI(dev);
+
+    s->outdda = 0;
+    s->outddb = 0;
+    s->ctrl = 0;
+    s->intstat = 0;
+    s->swirq = 0;
+}
+
+static void mphi_realize(DeviceState *dev, Error **errp)
+{
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
+    BCM2835MphiState *s = BCM2835_MPHI(dev);
+
+    sysbus_init_irq(sbd, &s->irq);
+}
+
+static void mphi_init(Object *obj)
+{
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
+    BCM2835MphiState *s = BCM2835_MPHI(obj);
+
+    memory_region_init_io(&s->iomem, obj, &mphi_mmio_ops, s, "mphi", MPHI_MMIO_SIZE);
+    sysbus_init_mmio(sbd, &s->iomem);
+}
+
+const VMStateDescription vmstate_mphi_state = {
+    .name = "mphi",
     .version_id = 1,
     .minimum_version_id = 1,
-    .minimum_version_id_old = 1,
-    .fields      = (VMStateField[]) {
+    .fields = (VMStateField[]) {
+        VMSTATE_UINT32(outdda, BCM2835MphiState),
+        VMSTATE_UINT32(outddb, BCM2835MphiState),
+        VMSTATE_UINT32(ctrl, BCM2835MphiState),
+        VMSTATE_UINT32(intstat, BCM2835MphiState),
+        VMSTATE_UINT32(swirq, BCM2835MphiState),
         VMSTATE_END_OF_LIST()
     }
 };
 
-static void bcm2835_mphi_init(Object *obj)
-{
-    BCM2835MphiState *s = BCM2835_MPHI(obj);
-
-    memory_region_init_io(&s->iomem, obj, &bcm2835_mphi_ops, s,
-                          TYPE_BCM2835_MPHI, 0x1000);
-    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
-    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
-}
-
-static void bcm2835_mphi_realize(DeviceState *dev, Error **errp)
-{
-    BCM2835MphiState *s = BCM2835_MPHI(dev);
-
-    s->mphi_base = 0;
-    s->mphi_ctrl = 0;
-    s->mphi_outdda = 0;
-    s->mphi_outddb = 0;
-    s->mphi_intstat = 0;
-}
-
-static void bcm2835_mphi_class_init(ObjectClass *klass, void *data)
+static void mphi_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
-    dc->realize = bcm2835_mphi_realize;
-    dc->vmsd = &vmstate_bcm2835_mphi;
+    dc->realize = mphi_realize;
+    dc->reset = mphi_reset;
+    dc->vmsd = &vmstate_mphi_state;
 }
 
-static TypeInfo bcm2835_mphi_info = {
+static const TypeInfo bcm2835_mphi_type_info = {
     .name          = TYPE_BCM2835_MPHI,
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(BCM2835MphiState),
-    .class_init    = bcm2835_mphi_class_init,
-    .instance_init = bcm2835_mphi_init,
+    .instance_init = mphi_init,
+    .class_init    = mphi_class_init,
 };
 
 static void bcm2835_mphi_register_types(void)
 {
-    type_register_static(&bcm2835_mphi_info);
+    type_register_static(&bcm2835_mphi_type_info);
 }
 
 type_init(bcm2835_mphi_register_types)

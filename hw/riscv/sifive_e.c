@@ -79,7 +79,7 @@ static void riscv_sifive_e_init(MachineState *machine)
 {
     const struct MemmapEntry *memmap = sifive_e_memmap;
 
-    SiFiveEState *s = g_new0(SiFiveEState, 1);
+    SiFiveEState *s = RISCV_E_MACHINE(machine);
     MemoryRegion *sys_mem = get_system_memory();
     MemoryRegion *main_mem = g_new(MemoryRegion, 1);
     int i;
@@ -115,6 +115,35 @@ static void riscv_sifive_e_init(MachineState *machine)
     }
 }
 
+static void sifive_e_machine_instance_init(Object *obj)
+{
+}
+
+static void sifive_e_machine_class_init(ObjectClass *oc, void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    mc->desc = "RISC-V Board compatible with SiFive E SDK";
+    mc->init = riscv_sifive_e_init;
+    mc->max_cpus = 1;
+    mc->default_cpu_type = SIFIVE_E_CPU;
+}
+
+static const TypeInfo sifive_e_machine_typeinfo = {
+    .name       = MACHINE_TYPE_NAME("sifive_e"),
+    .parent     = TYPE_MACHINE,
+    .class_init = sifive_e_machine_class_init,
+    .instance_init = sifive_e_machine_instance_init,
+    .instance_size = sizeof(SiFiveEState),
+};
+
+static void sifive_e_machine_init_register_types(void)
+{
+    type_register_static(&sifive_e_machine_typeinfo);
+}
+
+type_init(sifive_e_machine_init_register_types)
+
 static void riscv_sifive_e_soc_init(Object *obj)
 {
     MachineState *ms = MACHINE(qdev_get_machine());
@@ -123,8 +152,6 @@ static void riscv_sifive_e_soc_init(Object *obj)
     object_initialize_child(obj, "cpus", &s->cpus,
                             sizeof(s->cpus), TYPE_RISCV_HART_ARRAY,
                             &error_abort, NULL);
-    object_property_set_str(OBJECT(&s->cpus), SIFIVE_E_CPU, "cpu-type",
-                            &error_abort);
     object_property_set_int(OBJECT(&s->cpus), ms->smp.cpus, "num-harts",
                             &error_abort);
     sysbus_init_child_obj(obj, "riscv.sifive.e.gpio0",
@@ -141,6 +168,8 @@ static void riscv_sifive_e_soc_realize(DeviceState *dev, Error **errp)
     SiFiveESoCState *s = RISCV_E_SOC(dev);
     MemoryRegion *sys_mem = get_system_memory();
 
+    object_property_set_str(OBJECT(&s->cpus), ms->cpu_type, "cpu-type",
+                            &error_abort);
     object_property_set_bool(OBJECT(&s->cpus), true, "realized",
                             &error_abort);
 
@@ -213,15 +242,6 @@ static void riscv_sifive_e_soc_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(sys_mem, memmap[SIFIVE_E_XIP].base,
         &s->xip_mem);
 }
-
-static void riscv_sifive_e_machine_init(MachineClass *mc)
-{
-    mc->desc = "RISC-V Board compatible with SiFive E SDK";
-    mc->init = riscv_sifive_e_init;
-    mc->max_cpus = 1;
-}
-
-DEFINE_MACHINE("sifive_e", riscv_sifive_e_machine_init)
 
 static void riscv_sifive_e_soc_class_init(ObjectClass *oc, void *data)
 {
