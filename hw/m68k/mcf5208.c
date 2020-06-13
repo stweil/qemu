@@ -172,8 +172,8 @@ static uint64_t m5208_sys_read(void *opaque, hwaddr addr,
     }
 }
 
-static void QEMU_NORETURN m5208_sys_write(void *opaque, hwaddr addr,
-                                          uint64_t value, unsigned size)
+static void m5208_sys_write(void *opaque, hwaddr addr,
+                            uint64_t value, unsigned size)
 {
     qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset 0x%" HWADDR_PRIX "\n",
                   __func__, addr);
