@@ -47,12 +47,6 @@ The 'file' driver for drives is no longer appropriate for character or host
 devices and will only accept regular files (S_IFREG). The correct driver
 for these file types is 'host_cdrom' or 'host_device' as appropriate.
 
-``-net ...,name=``\ *name* (since 3.1)
-''''''''''''''''''''''''''''''''''''''
-
-The ``name`` parameter of the ``-net`` option is a synonym
-for the ``id`` parameter, which should now be used instead.
-
 ``-smp`` (invalid topologies) (since 3.1)
 '''''''''''''''''''''''''''''''''''''''''
 
@@ -88,6 +82,15 @@ should specify an ``audiodev=`` property.  Additionally, when using
 vnc, you should specify an ``audiodev=`` propery if you plan to
 transmit audio through the VNC protocol.
 
+Creating sound card devices using ``-soundhw`` (since 5.1)
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+Sound card devices should be created using ``-device`` instead.  The
+names are the same for most devices.  The exceptions are ``hda`` which
+needs two devices (``-device intel-hda -device hda-duplex``) and
+``pcspk`` which can be activated using ``-machine
+pcspk-audiodev=<name>``.
+
 ``-mon ...,control=readline,pretty=on|off`` (since 4.1)
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
@@ -100,23 +103,6 @@ error in the future.
 
 The ``-realtime mlock=on|off`` argument has been replaced by the
 ``-overcommit mem-lock=on|off`` argument.
-
-``-numa node,mem=``\ *size* (since 4.1)
-'''''''''''''''''''''''''''''''''''''''
-
-The parameter ``mem`` of ``-numa node`` is used to assign a part of
-guest RAM to a NUMA node. But when using it, it's impossible to manage specified
-RAM chunk on the host side (like bind it to a host node, setting bind policy, ...),
-so guest end-ups with the fake NUMA configuration with suboptiomal performance.
-However since 2014 there is an alternative way to assign RAM to a NUMA node
-using parameter ``memdev``, which does the same as ``mem`` and adds
-means to actualy manage node RAM on the host side. Use parameter ``memdev``
-with *memory-backend-ram* backend as an replacement for parameter ``mem``
-to achieve the same fake NUMA effect or a properly configured
-*memory-backend-file* backend to actually benefit from NUMA configuration.
-In future new machine versions will not accept the option but it will still
-work with old machine types. User can check QAPI schema to see if the legacy
-option is supported by looking at MachineInfo::numa-mem-supported property.
 
 ``-numa`` node (without memory specified) (since 4.1)
 '''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -169,6 +155,40 @@ previously available ``-tb-size`` option.
 
 Use ``-display sdl,show-cursor=on`` or
  ``-display gtk,show-cursor=on`` instead.
+
+``Configuring floppies with ``-global``
+'''''''''''''''''''''''''''''''''''''''
+
+Use ``-device floppy,...`` instead:
+::
+
+    -global isa-fdc.driveA=...
+    -global sysbus-fdc.driveA=...
+    -global SUNW,fdtwo.drive=...
+
+become
+::
+
+    -device floppy,unit=0,drive=...
+
+and
+::
+
+    -global isa-fdc.driveB=...
+    -global sysbus-fdc.driveB=...
+
+become
+::
+
+    -device floppy,unit=1,drive=...
+
+``-drive`` with bogus interface type
+''''''''''''''''''''''''''''''''''''
+
+Drives with interface types other than ``if=none`` are for onboard
+devices.  It is possible to use drives the board doesn't pick up with
+-device.  This usage is now deprecated.  Use ``if=none`` instead.
+
 
 QEMU Machine Protocol (QMP) commands
 ------------------------------------
@@ -393,16 +413,51 @@ The above, converted to the current supported format::
 
   json:{"file.driver":"rbd", "file.pool":"rbd", "file.image":"name"}
 
+linux-user mode CPUs
+--------------------
+
+``tilegx`` CPUs (since 5.1.0)
+'''''''''''''''''''''''''''''
+
+The ``tilegx`` guest CPU support (which was only implemented in
+linux-user mode) is deprecated and will be removed in a future version
+of QEMU. Support for this CPU was removed from the upstream Linux
+kernel in 2018, and has also been dropped from glibc.
+
 Related binaries
 ----------------
 
-``qemu-img convert -n -o`` (since 4.2.0)
-''''''''''''''''''''''''''''''''''''''''
+qemu-img amend to adjust backing file (since 5.1)
+'''''''''''''''''''''''''''''''''''''''''''''''''
 
-All options specified in ``-o`` are image creation options, so
-they have no effect when used with ``-n`` to skip image creation.
-Silently ignored options can be confusing, so this combination of
-options will be made an error in future versions.
+The use of ``qemu-img amend`` to modify the name or format of a qcow2
+backing image is deprecated; this functionality was never fully
+documented or tested, and interferes with other amend operations that
+need access to the original backing image (such as deciding whether a
+v3 zero cluster may be left unallocated when converting to a v2
+image).  Rather, any changes to the backing chain should be performed
+with ``qemu-img rebase -u`` either before or after the remaining
+changes being performed by amend, as appropriate.
+
+qemu-img backing file without format (since 5.1)
+''''''''''''''''''''''''''''''''''''''''''''''''
+
+The use of ``qemu-img create``, ``qemu-img rebase``, or ``qemu-img
+convert`` to create or modify an image that depends on a backing file
+now recommends that an explicit backing format be provided.  This is
+for safety: if QEMU probes a different format than what you thought,
+the data presented to the guest will be corrupt; similarly, presenting
+a raw image to a guest allows a potential security exploit if a future
+probe sees a non-raw image based on guest writes.
+
+To avoid the warning message, or even future refusal to create an
+unsafe image, you must pass ``-o backing_fmt=`` (or the shorthand
+``-F`` during create) to specify the intended backing format.  You may
+use ``qemu-img rebase -u`` to retroactively add a backing format to an
+existing image.  However, be aware that there are already potential
+security risks to blindly using ``qemu-img info`` to probe the format
+of an untrusted backing image, when deciding what format to add into
+an existing image.
 
 Backwards compatibility
 -----------------------
@@ -440,6 +495,15 @@ Recently removed features
 What follows is a record of recently removed, formerly deprecated
 features that serves as a record for users who have encountered
 trouble after a recent upgrade.
+
+System emulator command line arguments
+--------------------------------------
+
+``-net ...,name=``\ *name* (removed in 5.1)
+'''''''''''''''''''''''''''''''''''''''''''
+
+The ``name`` parameter of the ``-net`` option was a synonym
+for the ``id`` parameter, which should now be used instead.
 
 QEMU Machine Protocol (QMP) commands
 ------------------------------------
@@ -500,8 +564,8 @@ spec you can use the ``-cpu rv64gcsu,priv_spec=v1.10.0`` command line argument.
 Related binaries
 ----------------
 
-``qemu-nbd --partition`` (removed in 5.0.0)
-'''''''''''''''''''''''''''''''''''''''''''
+``qemu-nbd --partition`` (removed in 5.0)
+'''''''''''''''''''''''''''''''''''''''''
 
 The ``qemu-nbd --partition $digit`` code (also spelled ``-P``)
 could only handle MBR partitions, and never correctly handled logical
@@ -516,3 +580,41 @@ long starting at 1MiB, the old command::
 can be rewritten as::
 
   qemu-nbd -t --image-opts driver=raw,offset=1M,size=100M,file.driver=qcow2,file.file.driver=file,file.file.filename=file.qcow2
+
+``qemu-img convert -n -o`` (removed in 5.1)
+'''''''''''''''''''''''''''''''''''''''''''
+
+All options specified in ``-o`` are image creation options, so
+they are now rejected when used with ``-n`` to skip image creation.
+
+
+``qemu-img create -b bad file $size`` (removed in 5.1)
+''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+When creating an image with a backing file that could not be opened,
+``qemu-img create`` used to issue a warning about the failure but
+proceed with the image creation if an explicit size was provided.
+However, as the ``-u`` option exists for this purpose, it is safer to
+enforce that any failure to open the backing image (including if the
+backing file is missing or an incorrect format was specified) is an
+error when ``-u`` is not used.
+
+Command line options
+--------------------
+
+``-numa node,mem=``\ *size* (removed in 5.1)
+''''''''''''''''''''''''''''''''''''''''''''
+
+The parameter ``mem`` of ``-numa node`` was used to assign a part of
+guest RAM to a NUMA node. But when using it, it's impossible to manage a specified
+RAM chunk on the host side (like bind it to a host node, setting bind policy, ...),
+so the guest ends up with the fake NUMA configuration with suboptiomal performance.
+However since 2014 there is an alternative way to assign RAM to a NUMA node
+using parameter ``memdev``, which does the same as ``mem`` and adds
+means to actually manage node RAM on the host side. Use parameter ``memdev``
+with *memory-backend-ram* backend as replacement for parameter ``mem``
+to achieve the same fake NUMA effect or a properly configured
+*memory-backend-file* backend to actually benefit from NUMA configuration.
+New machine versions (since 5.1) will not accept the option but it will still
+work with old machine types. User can check the QAPI schema to see if the legacy
+option is supported by looking at MachineInfo::numa-mem-supported property.

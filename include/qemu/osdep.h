@@ -104,7 +104,7 @@ extern int daemon(int, int);
 #include <setjmp.h>
 #include <signal.h>
 
-#ifdef __OpenBSD__
+#ifdef HAVE_SYS_SIGNAL_H
 #include <sys/signal.h>
 #endif
 
@@ -236,18 +236,62 @@ extern int daemon(int, int);
 #define SIZE_MAX ((size_t)-1)
 #endif
 
-#ifndef MIN
-#define MIN(a, b) (((a) < (b)) ? (a) : (b))
-#endif
-#ifndef MAX
-#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+/*
+ * Two variations of MIN/MAX macros. The first is for runtime use, and
+ * evaluates arguments only once (so it is safe even with side
+ * effects), but will not work in constant contexts (such as array
+ * size declarations) because of the '{}'.  The second is for constant
+ * expression use, where evaluating arguments twice is safe because
+ * the result is going to be constant anyway, but will not work in a
+ * runtime context because of a void expression where a value is
+ * expected.  Thus, both gcc and clang will fail to compile if you use
+ * the wrong macro (even if the error may seem a bit cryptic).
+ *
+ * Note that neither form is usable as an #if condition; if you truly
+ * need to write conditional code that depends on a minimum or maximum
+ * determined by the pre-processor instead of the compiler, you'll
+ * have to open-code it.  Sadly, Coverity is severely confused by the
+ * constant variants, so we have to dumb things down there.
+ */
+#undef MIN
+#define MIN(a, b)                                       \
+    ({                                                  \
+        typeof(1 ? (a) : (b)) _a = (a), _b = (b);       \
+        _a < _b ? _a : _b;                              \
+    })
+#undef MAX
+#define MAX(a, b)                                       \
+    ({                                                  \
+        typeof(1 ? (a) : (b)) _a = (a), _b = (b);       \
+        _a > _b ? _a : _b;                              \
+    })
+
+#ifdef __COVERITY__
+# define MIN_CONST(a, b) ((a) < (b) ? (a) : (b))
+# define MAX_CONST(a, b) ((a) > (b) ? (a) : (b))
+#else
+# define MIN_CONST(a, b)                                        \
+    __builtin_choose_expr(                                      \
+        __builtin_constant_p(a) && __builtin_constant_p(b),     \
+        (a) < (b) ? (a) : (b),                                  \
+        ((void)0))
+# define MAX_CONST(a, b)                                        \
+    __builtin_choose_expr(                                      \
+        __builtin_constant_p(a) && __builtin_constant_p(b),     \
+        (a) > (b) ? (a) : (b),                                  \
+        ((void)0))
 #endif
 
-/* Minimum function that returns zero only iff both values are zero.
- * Intended for use with unsigned values only. */
+/*
+ * Minimum function that returns zero only if both values are zero.
+ * Intended for use with unsigned values only.
+ */
 #ifndef MIN_NON_ZERO
-#define MIN_NON_ZERO(a, b) ((a) == 0 ? (b) : \
-                                ((b) == 0 ? (a) : (MIN(a, b))))
+#define MIN_NON_ZERO(a, b)                              \
+    ({                                                  \
+        typeof(1 ? (a) : (b)) _a = (a), _b = (b);       \
+        _a == 0 ? _b : (_b == 0 || _b > _a) ? _a : _b;  \
+    })
 #endif
 
 /* Round number down to multiple */
@@ -386,6 +430,10 @@ void qemu_anon_ram_free(void *ptr, size_t size);
 #if defined(__linux__) || defined(__FreeBSD__) ||               \
     defined(__FreeBSD_kernel__) || defined(__DragonFly__)
 #define HAVE_CHARDEV_PARPORT 1
+#endif
+
+#if defined(__HAIKU__)
+#define SIGIO SIGPOLL
 #endif
 
 #if defined(CONFIG_LINUX)
@@ -606,5 +654,15 @@ static inline void qemu_reset_optind(void)
     optind = 0;
 #endif
 }
+
+/**
+ * qemu_get_host_name:
+ * @errp: Error object
+ *
+ * Operating system agnostic way of querying host name.
+ *
+ * Returns allocated hostname (caller should free), NULL on failure.
+ */
+char *qemu_get_host_name(Error **errp);
 
 #endif

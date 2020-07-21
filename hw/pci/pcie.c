@@ -460,7 +460,7 @@ void pcie_cap_slot_plug_cb(HotplugHandler *hotplug_dev, DeviceState *dev,
 void pcie_cap_slot_unplug_cb(HotplugHandler *hotplug_dev, DeviceState *dev,
                              Error **errp)
 {
-    object_property_set_bool(OBJECT(dev), false, "realized", &error_abort);
+    qdev_unrealize(dev);
 }
 
 static void pcie_unplug_device(PCIBus *bus, PCIDevice *dev, void *opaque)
@@ -574,7 +574,7 @@ void pcie_cap_slot_init(PCIDevice *dev, PCIESlot *s)
     dev->exp.hpev_notified = false;
 
     qbus_set_hotplug_handler(BUS(pci_bridge_get_sec_bus(PCI_BRIDGE(dev))),
-                             OBJECT(dev), NULL);
+                             OBJECT(dev));
 }
 
 void pcie_cap_slot_reset(PCIDevice *dev)

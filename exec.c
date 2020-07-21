@@ -77,6 +77,10 @@
 
 #include "monitor/monitor.h"
 
+#ifdef CONFIG_LIBDAXCTL
+#include <daxctl/libdaxctl.h>
+#endif
+
 //#define DEBUG_SUBPAGE
 
 #if !defined(CONFIG_USER_ONLY)
@@ -93,12 +97,6 @@ AddressSpace address_space_memory;
 
 static MemoryRegion io_mem_unassigned;
 #endif
-
-CPUTailQ cpus = QTAILQ_HEAD_INITIALIZER(cpus);
-
-/* current CPU in the current thread. It is only valid inside
-   cpu_exec() */
-__thread CPUState *current_cpu;
 
 uintptr_t qemu_host_page_size;
 intptr_t qemu_host_page_mask;
@@ -828,22 +826,6 @@ const VMStateDescription vmstate_cpu_common = {
     }
 };
 
-#endif
-
-CPUState *qemu_get_cpu(int index)
-{
-    CPUState *cpu;
-
-    CPU_FOREACH(cpu) {
-        if (cpu->cpu_index == index) {
-            return cpu;
-        }
-    }
-
-    return NULL;
-}
-
-#if !defined(CONFIG_USER_ONLY)
 void cpu_address_space_init(CPUState *cpu, int asidx,
                             const char *prefix, MemoryRegion *mr)
 {
@@ -892,6 +874,7 @@ void cpu_exec_unrealizefn(CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
 
+    tlb_destroy(cpu);
     cpu_list_remove(cpu);
 
     if (cc->vmsd != NULL) {
@@ -1749,6 +1732,46 @@ static int64_t get_file_size(int fd)
     return size;
 }
 
+static int64_t get_file_align(int fd)
+{
+    int64_t align = -1;
+#if defined(__linux__) && defined(CONFIG_LIBDAXCTL)
+    struct stat st;
+
+    if (fstat(fd, &st) < 0) {
+        return -errno;
+    }
+
+    /* Special handling for devdax character devices */
+    if (S_ISCHR(st.st_mode)) {
+        g_autofree char *path = NULL;
+        g_autofree char *rpath = NULL;
+        struct daxctl_ctx *ctx;
+        struct daxctl_region *region;
+        int rc = 0;
+
+        path = g_strdup_printf("/sys/dev/char/%d:%d",
+                    major(st.st_rdev), minor(st.st_rdev));
+        rpath = realpath(path, NULL);
+
+        rc = daxctl_new(&ctx);
+        if (rc) {
+            return -1;
+        }
+
+        daxctl_region_foreach(ctx, region) {
+            if (strstr(rpath, daxctl_region_get_path(region))) {
+                align = daxctl_region_get_align(region);
+                break;
+            }
+        }
+        daxctl_unref(ctx);
+    }
+#endif /* defined(__linux__) && defined(CONFIG_LIBDAXCTL) */
+
+    return align;
+}
+
 static int file_ram_open(const char *path,
                          const char *region_name,
                          bool *created,
@@ -2300,7 +2323,7 @@ RAMBlock *qemu_ram_alloc_from_fd(ram_addr_t size, MemoryRegion *mr,
 {
     RAMBlock *new_block;
     Error *local_err = NULL;
-    int64_t file_size;
+    int64_t file_size, file_align;
 
     /* Just support these ram flags by now. */
     assert((ram_flags & ~(RAM_SHARED | RAM_PMEM)) == 0);
@@ -2333,6 +2356,14 @@ RAMBlock *qemu_ram_alloc_from_fd(ram_addr_t size, MemoryRegion *mr,
         error_setg(errp, "backing store size 0x%" PRIx64
                    " does not match 'size' option 0x" RAM_ADDR_FMT,
                    file_size, size);
+        return NULL;
+    }
+
+    file_align = get_file_align(fd);
+    if (file_align > 0 && mr && file_align > mr->align) {
+        error_setg(errp, "backing store align 0x%" PRIx64
+                   " is larger than 'align' option 0x%" PRIx64,
+                   file_align, mr->align);
         return NULL;
     }
 
@@ -3551,6 +3582,7 @@ void *address_space_map(AddressSpace *as,
 
     if (!memory_access_is_direct(mr, is_write)) {
         if (atomic_xchg(&bounce.in_use, true)) {
+            *plen = 0;
             return NULL;
         }
         /* Avoid unbounded allocations */
@@ -3729,7 +3761,7 @@ static inline MemoryRegion *address_space_translate_cached(
 /* Called from RCU critical section. address_space_read_cached uses this
  * out of line function when the target is an MMIO or IOMMU region.
  */
-void
+MemTxResult
 address_space_read_cached_slow(MemoryRegionCache *cache, hwaddr addr,
                                    void *buf, hwaddr len)
 {
@@ -3739,15 +3771,15 @@ address_space_read_cached_slow(MemoryRegionCache *cache, hwaddr addr,
     l = len;
     mr = address_space_translate_cached(cache, addr, &addr1, &l, false,
                                         MEMTXATTRS_UNSPECIFIED);
-    flatview_read_continue(cache->fv,
-                           addr, MEMTXATTRS_UNSPECIFIED, buf, len,
-                           addr1, l, mr);
+    return flatview_read_continue(cache->fv,
+                                  addr, MEMTXATTRS_UNSPECIFIED, buf, len,
+                                  addr1, l, mr);
 }
 
 /* Called from RCU critical section. address_space_write_cached uses this
  * out of line function when the target is an MMIO or IOMMU region.
  */
-void
+MemTxResult
 address_space_write_cached_slow(MemoryRegionCache *cache, hwaddr addr,
                                     const void *buf, hwaddr len)
 {
@@ -3757,9 +3789,9 @@ address_space_write_cached_slow(MemoryRegionCache *cache, hwaddr addr,
     l = len;
     mr = address_space_translate_cached(cache, addr, &addr1, &l, true,
                                         MEMTXATTRS_UNSPECIFIED);
-    flatview_write_continue(cache->fv,
-                            addr, MEMTXATTRS_UNSPECIFIED, buf, len,
-                            addr1, l, mr);
+    return flatview_write_continue(cache->fv,
+                                   addr, MEMTXATTRS_UNSPECIFIED, buf, len,
+                                   addr1, l, mr);
 }
 
 #define ARG1_DECL                MemoryRegionCache *cache
@@ -3782,6 +3814,7 @@ int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
     while (len > 0) {
         int asidx;
         MemTxAttrs attrs;
+        MemTxResult res;
 
         page = addr & TARGET_PAGE_MASK;
         phys_addr = cpu_get_phys_page_attrs_debug(cpu, page, &attrs);
@@ -3794,11 +3827,14 @@ int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
             l = len;
         phys_addr += (addr & ~TARGET_PAGE_MASK);
         if (is_write) {
-            address_space_write_rom(cpu->cpu_ases[asidx].as, phys_addr,
-                                    attrs, buf, l);
+            res = address_space_write_rom(cpu->cpu_ases[asidx].as, phys_addr,
+                                          attrs, buf, l);
         } else {
-            address_space_read(cpu->cpu_ases[asidx].as, phys_addr, attrs, buf,
-                               l);
+            res = address_space_read(cpu->cpu_ases[asidx].as, phys_addr,
+                                     attrs, buf, l);
+        }
+        if (res != MEMTX_OK) {
+            return -1;
         }
         len -= l;
         buf += l;
@@ -4060,6 +4096,58 @@ void mtree_print_dispatch(AddressSpaceDispatch *d, MemoryRegion *root)
             mtree_print_phys_entries(jprev, j, prev.skip, prev.ptr);
         }
     }
+}
+
+/*
+ * If positive, discarding RAM is disabled. If negative, discarding RAM is
+ * required to work and cannot be disabled.
+ */
+static int ram_block_discard_disabled;
+
+int ram_block_discard_disable(bool state)
+{
+    int old;
+
+    if (!state) {
+        atomic_dec(&ram_block_discard_disabled);
+        return 0;
+    }
+
+    do {
+        old = atomic_read(&ram_block_discard_disabled);
+        if (old < 0) {
+            return -EBUSY;
+        }
+    } while (atomic_cmpxchg(&ram_block_discard_disabled, old, old + 1) != old);
+    return 0;
+}
+
+int ram_block_discard_require(bool state)
+{
+    int old;
+
+    if (!state) {
+        atomic_inc(&ram_block_discard_disabled);
+        return 0;
+    }
+
+    do {
+        old = atomic_read(&ram_block_discard_disabled);
+        if (old > 0) {
+            return -EBUSY;
+        }
+    } while (atomic_cmpxchg(&ram_block_discard_disabled, old, old - 1) != old);
+    return 0;
+}
+
+bool ram_block_discard_is_disabled(void)
+{
+    return atomic_read(&ram_block_discard_disabled) > 0;
+}
+
+bool ram_block_discard_is_required(void)
+{
+    return atomic_read(&ram_block_discard_disabled) < 0;
 }
 
 #endif
