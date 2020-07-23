@@ -2,7 +2,7 @@
 
 ; This NSIS script creates an installer for QEMU on Windows.
 
-; Copyright (C) 2006-2012 Stefan Weil
+; Copyright (C) 2006-2020 Stefan Weil
 ;
 ; This program is free software: you can redistribute it and/or modify
 ; it under the terms of the GNU General Public License as published by
@@ -42,6 +42,9 @@
 
 ; Use maximum compression.
 SetCompressor /SOLID lzma
+
+; Generate a Unicode installer.
+Unicode true
 
 !include "MUI2.nsh"
 
