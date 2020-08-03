@@ -47,6 +47,17 @@ sudo apt-get install --no-install-recommends \
 # Workaround for buggy cross pkg-config.
 sudo ln -sf $PWD/.github/workflows/pkg-config-crosswrapper /usr/bin/$HOST-pkg-config
 
+# Get header files for WHPX API from Mingw-w64 git master.
+(
+cd /usr/$HOST/include
+sudo curl -s -o winhvemulation.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvemulation.h?format=raw
+sudo curl -s -o winhvplatform.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatform.h?format=raw
+sudo curl -s -o winhvplatformdefs.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatformdefs.h?format=raw
+sudo ln -s winhvemulation.h WinHvEmulation.h
+sudo ln -s winhvplatform.h WinHvPlatform.h
+sudo ln -s winhvplatformdefs.h WinHvPlatformDefs.h
+)
+
 DLL_PATH=$PWD/dll/$HOST
 
 mkdir -p $DISTDIR
