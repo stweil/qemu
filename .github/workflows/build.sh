@@ -49,7 +49,8 @@ sudo ln -sf $PWD/.github/workflows/pkg-config-crosswrapper /usr/bin/$HOST-pkg-co
 
 # Get header files for WHPX API from Mingw-w64 git master.
 (
-cd /usr/$HOST/include
+sudo mkdir -p /usr/$HOST/sys-include
+cd /usr/$HOST/sys-include
 sudo curl -s -o winhvemulation.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvemulation.h?format=raw
 sudo curl -s -o winhvplatform.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatform.h?format=raw
 sudo curl -s -o winhvplatformdefs.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatformdefs.h?format=raw
@@ -105,9 +106,9 @@ mkdir -p $BUILDDIR && cd $BUILDDIR
 #~ file /usr/bin/*gcc*
 
 # Run configure.
-#~ --enable-whpx
 ../../../configure --cross-prefix=$HOST- --disable-guest-agent-msi \
-    --disable-werror --extra-cflags="-I $mingw/include" \
+    --disable-werror --enable-whpx \
+    --extra-cflags="-I $mingw/include" \
     --extra-ldflags="-L $mingw/lib"
 
 cp config.log $DISTDIR/
