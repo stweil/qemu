@@ -3036,7 +3036,7 @@ static unsigned int crisv32_decoder(CPUCRISState *env, DisasContext *dc)
     return insn_len;
 }
 
-#include "translate_v10.inc.c"
+#include "translate_v10.c.inc"
 
 /*
  * Delay slots on QEMU/CRIS.

@@ -1,7 +1,7 @@
 #ifndef LIBQOS_PC_H
 #define LIBQOS_PC_H
 
-#include "libqos/libqos.h"
+#include "libqos.h"
 
 GCC_FMT_ATTR(1, 0)
 QOSState *qtest_pc_vboot(const char *cmdline_fmt, va_list ap);

@@ -26,7 +26,7 @@
 #include "qemu/qemu-print.h"
 #include "qemu-common.h"            /* trace_unassigned */
 #include "qom/object.h"
-#include "trace-root.h"
+#include "trace/trace-root.h"
 
 #include "exec/memory-internal.h"
 #include "exec/ram_addr.h"
