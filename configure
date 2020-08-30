@@ -570,6 +570,7 @@ rng_none="no"
 secret_keyring=""
 libdaxctl=""
 meson=""
+ninja=""
 skip_meson=no
 gettext=""
 
@@ -881,6 +882,7 @@ MINGW32*)
   fi
   QEMU_INCLUDES="-I\$(SRC_PATH)/hosts/w32/include $QEMU_INCLUDES"
   supported_os="yes"
+  pie="no"
 ;;
 GNU/kFreeBSD)
   bsd="yes"
@@ -1079,6 +1081,8 @@ for opt do
   --skip-meson) skip_meson=yes
   ;;
   --meson=*) meson="$optarg"
+  ;;
+  --ninja=*) ninja="$optarg"
   ;;
   --smbd=*) smbd="$optarg"
   ;;
@@ -1848,6 +1852,7 @@ Advanced options (experts only):
   --python=PYTHON          use specified python [$python]
   --sphinx-build=SPHINX    use specified sphinx-build [$sphinx_build]
   --meson=MESON            use specified meson [$meson]
+  --ninja=NINJA            use specified ninja [$ninja]
   --smbd=SMBD              use specified smbd [$smbd]
   --with-git=GIT           use specified git [$git]
   --static                 enable static build [$static]
@@ -2086,6 +2091,16 @@ case "$meson" in
     *) meson=$(command -v meson) ;;
 esac
 
+# Probe for ninja (used for compdb)
+
+if test -z "$ninja"; then
+    for c in ninja ninja-build samu; do
+        if has $c; then
+            ninja=$(command -v "$c")
+            break
+        fi
+    done
+fi
 
 # Check that the C compiler works. Doing this here before testing
 # the host CPU ensures that we had a valid CC to autodetect the
@@ -3957,20 +3972,6 @@ if test "$modules" = yes; then
     if test "$shacmd" = ""; then
         error_exit "one of the checksum commands is required to enable modules: $shacmd_probe"
     fi
-fi
-
-##########################################
-# pixman support probe
-
-if test "$softmmu" = "no"; then
-  pixman_cflags=
-  pixman_libs=
-elif $pkg_config --atleast-version=0.21.8 pixman-1 > /dev/null 2>&1; then
-  pixman_cflags=$($pkg_config --cflags pixman-1)
-  pixman_libs=$($pkg_config --libs pixman-1)
-else
-  error_exit "pixman >= 0.21.8 not present." \
-      "Please install the pixman devel package."
 fi
 
 ##########################################
@@ -6698,8 +6699,8 @@ echo_version() {
     fi
 }
 
-# prepend pixman and ftd flags after all config tests are done
-QEMU_CFLAGS="$pixman_cflags $fdt_cflags $QEMU_CFLAGS"
+# prepend ftd flags after all config tests are done
+QEMU_CFLAGS="$fdt_cflags $QEMU_CFLAGS"
 QEMU_LDFLAGS="$fdt_ldflags $QEMU_LDFLAGS"
 
 config_host_mak="config-host.mak"
@@ -8106,9 +8107,6 @@ fi
 
 done # for target in $targets
 
-echo "PIXMAN_CFLAGS=$pixman_cflags" >> $config_host_mak
-echo "PIXMAN_LIBS=$pixman_libs" >> $config_host_mak
-
 if [ "$fdt" = "git" ]; then
   subdirs="$subdirs dtc"
 fi
@@ -8264,7 +8262,7 @@ fi
 mv $cross config-meson.cross
 
 rm -rf meson-private meson-info meson-logs
-NINJA=$PWD/ninjatool $meson setup \
+NINJA=${ninja:-$PWD/ninjatool} $meson setup \
         --prefix "${pre_prefix}$prefix" \
         --libdir "${pre_prefix}$libdir" \
         --libexecdir "${pre_prefix}$libexecdir" \
