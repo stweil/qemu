@@ -38,7 +38,7 @@ ui_modules = {}
 
 if config_host.has_key('CONFIG_CURSES')
   curses_ss = ss.source_set()
-  curses_ss.add(when: [curses, iconv], if_true: files('curses.c'))
+  curses_ss.add(when: [curses, iconv], if_true: [files('curses.c'), pixman])
   ui_modules += {'curses' : curses_ss}
 endif
 
@@ -46,7 +46,7 @@ if config_host.has_key('CONFIG_GTK') and config_host.has_key('CONFIG_VTE')
   softmmu_ss.add(when: 'CONFIG_WIN32', if_true: files('win32-kbd-hook.c'))
 
   gtk_ss = ss.source_set()
-  gtk_ss.add(gtk, vte, files('gtk.c'))
+  gtk_ss.add(gtk, vte, pixman, files('gtk.c'))
   gtk_ss.add(when: [x11, 'CONFIG_X11'], if_true: files('x_keymap.c'))
   gtk_ss.add(when: [opengl, 'CONFIG_OPENGL'], if_true: files('gtk-egl.c'))
   gtk_ss.add(when: [opengl, 'CONFIG_GTK_GL'], if_true: files('gtk-gl-area.c'))
@@ -69,7 +69,7 @@ endif
 
 if config_host.has_key('CONFIG_SPICE') and config_host.has_key('CONFIG_GIO')
   spice_ss = ss.source_set()
-  spice_ss.add(spice, gio, files('spice-app.c'))
+  spice_ss.add(spice, gio, pixman, files('spice-app.c'))
   ui_modules += {'spice-app': spice_ss}
 endif
 
