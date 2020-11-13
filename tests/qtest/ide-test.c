@@ -757,7 +757,7 @@ static void test_flush_nodev(void)
     QPCIDevice *dev;
     QPCIBar bmdma_bar, ide_bar;
 
-    qts = ide_test_start("");
+    qts = ide_test_start("%s", "");
 
     dev = get_pci_device(qts, &bmdma_bar, &ide_bar);
 
