@@ -99,6 +99,12 @@
 #define L2E_SIZE_NORMAL   (sizeof(uint64_t))
 #define L2E_SIZE_EXTENDED (sizeof(uint64_t) * 2)
 
+/* Size of L1 table entries */
+#define L1E_SIZE (sizeof(uint64_t))
+
+/* Size of reftable entries */
+#define REFTABLE_ENTRY_SIZE (sizeof(uint64_t))
+
 #define MIN_CLUSTER_BITS 9
 #define MAX_CLUSTER_BITS 21
 
@@ -200,6 +206,7 @@ typedef struct QEMU_PACKED QCowSnapshotHeader {
 typedef struct QEMU_PACKED QCowSnapshotExtraData {
     uint64_t vm_state_size_large;
     uint64_t disk_size;
+    uint64_t icount;
 } QCowSnapshotExtraData;
 
 
@@ -213,6 +220,8 @@ typedef struct QCowSnapshot {
     uint32_t date_sec;
     uint32_t date_nsec;
     uint64_t vm_clock_nsec;
+    /* icount value for the moment when snapshot was taken */
+    uint64_t icount;
     /* Size of all extra data, including QCowSnapshotExtraData if available */
     uint32_t extra_data_size;
     /* Data beyond QCowSnapshotExtraData, if any */
@@ -855,8 +864,8 @@ int64_t qcow2_alloc_bytes(BlockDriverState *bs, int size);
 void qcow2_free_clusters(BlockDriverState *bs,
                           int64_t offset, int64_t size,
                           enum qcow2_discard_type type);
-void qcow2_free_any_clusters(BlockDriverState *bs, uint64_t l2_entry,
-                             int nb_clusters, enum qcow2_discard_type type);
+void qcow2_free_any_cluster(BlockDriverState *bs, uint64_t l2_entry,
+                            enum qcow2_discard_type type);
 
 int qcow2_update_snapshot_refcount(BlockDriverState *bs,
     int64_t l1_table_offset, int l1_size, int addend);
@@ -895,9 +904,9 @@ int qcow2_encrypt_sectors(BDRVQcow2State *s, int64_t sector_num,
 int qcow2_get_host_offset(BlockDriverState *bs, uint64_t offset,
                           unsigned int *bytes, uint64_t *host_offset,
                           QCow2SubclusterType *subcluster_type);
-int qcow2_alloc_cluster_offset(BlockDriverState *bs, uint64_t offset,
-                               unsigned int *bytes, uint64_t *host_offset,
-                               QCowL2Meta **m);
+int qcow2_alloc_host_offset(BlockDriverState *bs, uint64_t offset,
+                            unsigned int *bytes, uint64_t *host_offset,
+                            QCowL2Meta **m);
 int qcow2_alloc_compressed_cluster_offset(BlockDriverState *bs,
                                           uint64_t offset,
                                           int compressed_size,

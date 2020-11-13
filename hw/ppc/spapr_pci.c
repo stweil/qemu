@@ -52,6 +52,7 @@
 #include "sysemu/kvm.h"
 #include "sysemu/hostmem.h"
 #include "sysemu/numa.h"
+#include "hw/ppc/spapr_numa.h"
 
 /* Copied from the kernel arch/powerpc/platforms/pseries/msi.c */
 #define RTAS_QUERY_FN           0
@@ -1538,7 +1539,6 @@ static void spapr_pci_plug(HotplugHandler *plug_handler,
     PCIDevice *pdev = PCI_DEVICE(plugged_dev);
     PCIDeviceClass *pc = PCI_DEVICE_GET_CLASS(plugged_dev);
     SpaprDrc *drc = drc_from_dev(phb, pdev);
-    Error *local_err = NULL;
     PCIBus *bus = PCI_BUS(qdev_get_parent_bus(DEVICE(pdev)));
     uint32_t slotnr = PCI_SLOT(pdev->devfn);
 
@@ -1571,15 +1571,13 @@ static void spapr_pci_plug(HotplugHandler *plug_handler,
      */
     if (plugged_dev->hotplugged && bus->devices[PCI_DEVFN(slotnr, 0)] &&
         PCI_FUNC(pdev->devfn) != 0) {
-        error_setg(errp, "PCI: slot %d function 0 already ocuppied by %s,"
+        error_setg(errp, "PCI: slot %d function 0 already occupied by %s,"
                    " additional functions can no longer be exposed to guest.",
                    slotnr, bus->devices[PCI_DEVFN(slotnr, 0)]->name);
         return;
     }
 
-    spapr_drc_attach(drc, DEVICE(pdev), &local_err);
-    if (local_err) {
-        error_propagate(errp, local_err);
+    if (!spapr_drc_attach(drc, DEVICE(pdev), errp)) {
         return;
     }
 
@@ -2321,11 +2319,6 @@ int spapr_dt_phb(SpaprMachineState *spapr, SpaprPhbState *phb,
         cpu_to_be32(1),
         cpu_to_be32(RTAS_IBM_RESET_PE_DMA_WINDOW)
     };
-    uint32_t associativity[] = {cpu_to_be32(0x4),
-                                cpu_to_be32(0x0),
-                                cpu_to_be32(0x0),
-                                cpu_to_be32(0x0),
-                                cpu_to_be32(phb->numa_node)};
     SpaprTceTable *tcet;
     SpaprDrc *drc;
     Error *err = NULL;
@@ -2358,8 +2351,7 @@ int spapr_dt_phb(SpaprMachineState *spapr, SpaprPhbState *phb,
 
     /* Advertise NUMA via ibm,associativity */
     if (phb->numa_node != -1) {
-        _FDT(fdt_setprop(fdt, bus_off, "ibm,associativity", associativity,
-                         sizeof(associativity)));
+        spapr_numa_write_associativity_dt(spapr, fdt, bus_off, phb->numa_node);
     }
 
     /* Build the interrupt-map, this must matches what is done
@@ -2469,7 +2461,9 @@ static int spapr_switch_one_vga(DeviceState *dev, void *opaque)
     bool be = *(bool *)opaque;
 
     if (object_dynamic_cast(OBJECT(dev), "VGA")
-        || object_dynamic_cast(OBJECT(dev), "secondary-vga")) {
+        || object_dynamic_cast(OBJECT(dev), "secondary-vga")
+        || object_dynamic_cast(OBJECT(dev), "bochs-display")
+        || object_dynamic_cast(OBJECT(dev), "virtio-vga")) {
         object_property_set_bool(OBJECT(dev), "big-endian-framebuffer", be,
                                  &error_abort);
     }

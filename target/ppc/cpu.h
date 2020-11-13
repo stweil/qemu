@@ -23,6 +23,7 @@
 #include "qemu/int128.h"
 #include "exec/cpu-defs.h"
 #include "cpu-qom.h"
+#include "qom/object.h"
 
 #define TCG_GUEST_DEFAULT_MO 0
 
@@ -614,7 +615,7 @@ enum {
 #define FPSCR_VXCVI  8  /* Floating-point invalid operation exception (int)  */
 #define FPSCR_VE     7  /* Floating-point invalid operation exception enable */
 #define FPSCR_OE     6  /* Floating-point overflow exception enable          */
-#define FPSCR_UE     5  /* Floating-point undeflow exception enable          */
+#define FPSCR_UE     5  /* Floating-point underflow exception enable          */
 #define FPSCR_ZE     4  /* Floating-point zero divide exception enable       */
 #define FPSCR_XE     3  /* Floating-point inexact exception enable           */
 #define FPSCR_NI     2  /* Floating-point non-IEEE mode                      */
@@ -1221,14 +1222,8 @@ struct PPCVirtualHypervisorClass {
 };
 
 #define TYPE_PPC_VIRTUAL_HYPERVISOR "ppc-virtual-hypervisor"
-#define PPC_VIRTUAL_HYPERVISOR(obj)                 \
-    OBJECT_CHECK(PPCVirtualHypervisor, (obj), TYPE_PPC_VIRTUAL_HYPERVISOR)
-#define PPC_VIRTUAL_HYPERVISOR_CLASS(klass)         \
-    OBJECT_CLASS_CHECK(PPCVirtualHypervisorClass, (klass), \
-                       TYPE_PPC_VIRTUAL_HYPERVISOR)
-#define PPC_VIRTUAL_HYPERVISOR_GET_CLASS(obj) \
-    OBJECT_GET_CLASS(PPCVirtualHypervisorClass, (obj), \
-                     TYPE_PPC_VIRTUAL_HYPERVISOR)
+DECLARE_OBJ_CHECKERS(PPCVirtualHypervisor, PPCVirtualHypervisorClass,
+                     PPC_VIRTUAL_HYPERVISOR, TYPE_PPC_VIRTUAL_HYPERVISOR)
 #endif /* CONFIG_USER_ONLY */
 
 void ppc_cpu_do_interrupt(CPUState *cpu);
@@ -1357,10 +1352,10 @@ bool ppc_check_compat(PowerPCCPU *cpu, uint32_t compat_pvr,
 bool ppc_type_check_compat(const char *cputype, uint32_t compat_pvr,
                            uint32_t min_compat_pvr, uint32_t max_compat_pvr);
 
-void ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr, Error **errp);
+int ppc_set_compat(PowerPCCPU *cpu, uint32_t compat_pvr, Error **errp);
 
 #if !defined(CONFIG_USER_ONLY)
-void ppc_set_compat_all(uint32_t compat_pvr, Error **errp);
+int ppc_set_compat_all(uint32_t compat_pvr, Error **errp);
 #endif
 int ppc_compat_max_vthreads(PowerPCCPU *cpu);
 void ppc_compat_add_property(Object *obj, const char *name,
@@ -2336,13 +2331,13 @@ enum {
     /* Internal hardware exception sources */
     PPC_INTERRUPT_DECR,           /* Decrementer exception                */
     PPC_INTERRUPT_HDECR,          /* Hypervisor decrementer exception     */
-    PPC_INTERRUPT_PIT,            /* Programmable inteval timer interrupt */
+    PPC_INTERRUPT_PIT,            /* Programmable interval timer interrupt */
     PPC_INTERRUPT_FIT,            /* Fixed interval timer interrupt       */
     PPC_INTERRUPT_WDT,            /* Watchdog timer interrupt             */
     PPC_INTERRUPT_CDOORBELL,      /* Critical doorbell interrupt          */
     PPC_INTERRUPT_DOORBELL,       /* Doorbell interrupt                   */
     PPC_INTERRUPT_PERFM,          /* Performance monitor interrupt        */
-    PPC_INTERRUPT_HMI,            /* Hypervisor Maintainance interrupt    */
+    PPC_INTERRUPT_HMI,            /* Hypervisor Maintenance interrupt    */
     PPC_INTERRUPT_HDOORBELL,      /* Hypervisor Doorbell interrupt        */
     PPC_INTERRUPT_HVIRT,          /* Hypervisor virtualization interrupt  */
 };

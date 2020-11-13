@@ -34,7 +34,6 @@
 #include "qemu/module.h"
 #include "io/channel-file.h"
 
-static char temp_file[] = "/tmp/vmst.test.XXXXXX";
 static int temp_fd;
 
 
@@ -881,8 +880,8 @@ static gint interval_cmp(gconstpointer a, gconstpointer b, gpointer user_data)
 /* ID comparison function */
 static gint int_cmp(gconstpointer a, gconstpointer b, gpointer user_data)
 {
-    uint ua = GPOINTER_TO_UINT(a);
-    uint ub = GPOINTER_TO_UINT(b);
+    guint ua = GPOINTER_TO_UINT(a);
+    guint ub = GPOINTER_TO_UINT(b);
     return (ua > ub) - (ua < ub);
 }
 
@@ -1055,9 +1054,6 @@ static gboolean match_interval_mapping_node(gpointer key,
     TestGTreeMapping *map_a, *map_b;
     TestGTreeInterval *a, *b;
     struct match_node_data *d = (struct match_node_data *)data;
-    char *str = g_strdup_printf("dest");
-
-    g_free(str);
     a = (TestGTreeInterval *)key;
     b = (TestGTreeInterval *)d->key;
 
@@ -1487,6 +1483,8 @@ static void test_tmp_struct(void)
 
 int main(int argc, char **argv)
 {
+    g_autofree char *temp_file = g_strdup_printf("%s/vmst.test.XXXXXX",
+                                                 g_get_tmp_dir());
     temp_fd = mkstemp(temp_file);
 
     module_call_init(MODULE_INIT_QOM);

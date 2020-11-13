@@ -34,6 +34,7 @@
 #include "qapi/error.h"
 #include "mfi.h"
 #include "migration/vmstate.h"
+#include "qom/object.h"
 
 #define MEGASAS_VERSION_GEN1 "1.70"
 #define MEGASAS_VERSION_GEN2 "1.80"
@@ -72,7 +73,7 @@ typedef struct MegasasCmd {
     struct MegasasState *state;
 } MegasasCmd;
 
-typedef struct MegasasState {
+struct MegasasState {
     /*< private >*/
     PCIDevice parent_obj;
     /*< public >*/
@@ -116,28 +117,26 @@ typedef struct MegasasState {
     MegasasCmd frames[MEGASAS_MAX_FRAMES];
     DECLARE_BITMAP(frame_map, MEGASAS_MAX_FRAMES);
     SCSIBus bus;
-} MegasasState;
+};
+typedef struct MegasasState MegasasState;
 
-typedef struct MegasasBaseClass {
+struct MegasasBaseClass {
     PCIDeviceClass parent_class;
     const char *product_name;
     const char *product_version;
     int mmio_bar;
     int ioport_bar;
     int osts;
-} MegasasBaseClass;
+};
+typedef struct MegasasBaseClass MegasasBaseClass;
 
 #define TYPE_MEGASAS_BASE "megasas-base"
 #define TYPE_MEGASAS_GEN1 "megasas"
 #define TYPE_MEGASAS_GEN2 "megasas-gen2"
 
-#define MEGASAS(obj) \
-    OBJECT_CHECK(MegasasState, (obj), TYPE_MEGASAS_BASE)
+DECLARE_OBJ_CHECKERS(MegasasState, MegasasBaseClass,
+                     MEGASAS, TYPE_MEGASAS_BASE)
 
-#define MEGASAS_CLASS(oc) \
-    OBJECT_CLASS_CHECK(MegasasBaseClass, (oc), TYPE_MEGASAS_BASE)
-#define MEGASAS_GET_CLASS(oc) \
-    OBJECT_GET_CLASS(MegasasBaseClass, (oc), TYPE_MEGASAS_BASE)
 
 #define MEGASAS_INTR_DISABLED_MASK 0xFFFFFFFF
 
@@ -278,10 +277,10 @@ static int megasas_map_sgl(MegasasState *s, MegasasCmd *cmd, union mfi_sgl *sgl)
 
     cmd->flags = le16_to_cpu(cmd->frame->header.flags);
     iov_count = cmd->frame->header.sge_count;
-    if (iov_count > MEGASAS_MAX_SGE) {
+    if (!iov_count || iov_count > MEGASAS_MAX_SGE) {
         trace_megasas_iovec_sgl_overflow(cmd->index, iov_count,
                                          MEGASAS_MAX_SGE);
-        return iov_count;
+        return -1;
     }
     pci_dma_sglist_init(&cmd->qsg, PCI_DEVICE(s), iov_count);
     for (i = 0; i < iov_count; i++) {
@@ -311,7 +310,7 @@ static int megasas_map_sgl(MegasasState *s, MegasasCmd *cmd, union mfi_sgl *sgl)
     return 0;
 unmap:
     qemu_sglist_destroy(&cmd->qsg);
-    return iov_count - i;
+    return -1;
 }
 
 /*

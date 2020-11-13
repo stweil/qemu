@@ -60,6 +60,7 @@
 #include "qemu/main-loop.h"
 #include "exec/log.h"
 #include "sysemu/cpus.h"
+#include "sysemu/cpu-timers.h"
 #include "sysemu/tcg.h"
 
 /* #define DEBUG_TB_INVALIDATE */
@@ -372,7 +373,7 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
 
  found:
     if (reset_icount && (tb_cflags(tb) & CF_USE_ICOUNT)) {
-        assert(use_icount);
+        assert(icount_enabled());
         /* Reset the cycle counter to the start of the block
            and shift if to the number of actually executed instructions */
         cpu_neg(cpu)->icount_decr.u16.low += num_insns - i;
@@ -380,9 +381,9 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     restore_state_to_opc(env, tb, data);
 
 #ifdef CONFIG_PROFILER
-    atomic_set(&prof->restore_time,
+    qatomic_set(&prof->restore_time,
                 prof->restore_time + profile_getclock() - ti);
-    atomic_set(&prof->restore_count, prof->restore_count + 1);
+    qatomic_set(&prof->restore_count, prof->restore_count + 1);
 #endif
     return 0;
 }
@@ -512,7 +513,7 @@ static PageDesc *page_find_alloc(tb_page_addr_t index, int alloc)
 
     /* Level 2..N-1.  */
     for (i = v_l2_levels; i > 0; i--) {
-        void **p = atomic_rcu_read(lp);
+        void **p = qatomic_rcu_read(lp);
 
         if (p == NULL) {
             void *existing;
@@ -521,7 +522,7 @@ static PageDesc *page_find_alloc(tb_page_addr_t index, int alloc)
                 return NULL;
             }
             p = g_new0(void *, V_L2_SIZE);
-            existing = atomic_cmpxchg(lp, NULL, p);
+            existing = qatomic_cmpxchg(lp, NULL, p);
             if (unlikely(existing)) {
                 g_free(p);
                 p = existing;
@@ -531,7 +532,7 @@ static PageDesc *page_find_alloc(tb_page_addr_t index, int alloc)
         lp = p + ((index >> (i * V_L2_BITS)) & (V_L2_SIZE - 1));
     }
 
-    pd = atomic_rcu_read(lp);
+    pd = qatomic_rcu_read(lp);
     if (pd == NULL) {
         void *existing;
 
@@ -548,7 +549,7 @@ static PageDesc *page_find_alloc(tb_page_addr_t index, int alloc)
             }
         }
 #endif
-        existing = atomic_cmpxchg(lp, NULL, pd);
+        existing = qatomic_cmpxchg(lp, NULL, pd);
         if (unlikely(existing)) {
 #ifndef CONFIG_USER_ONLY
             {
@@ -1256,7 +1257,7 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     tcg_region_reset_all();
     /* XXX: flush processor icache at this point if cache flush is
        expensive */
-    atomic_mb_set(&tb_ctx.tb_flush_count, tb_ctx.tb_flush_count + 1);
+    qatomic_mb_set(&tb_ctx.tb_flush_count, tb_ctx.tb_flush_count + 1);
 
 done:
     mmap_unlock();
@@ -1268,7 +1269,7 @@ done:
 void tb_flush(CPUState *cpu)
 {
     if (tcg_enabled()) {
-        unsigned tb_flush_count = atomic_mb_read(&tb_ctx.tb_flush_count);
+        unsigned tb_flush_count = qatomic_mb_read(&tb_ctx.tb_flush_count);
 
         if (cpu_in_exclusive_context(cpu)) {
             do_tb_flush(cpu, RUN_ON_CPU_HOST_INT(tb_flush_count));
@@ -1361,7 +1362,7 @@ static inline void tb_remove_from_jmp_list(TranslationBlock *orig, int n_orig)
     int n;
 
     /* mark the LSB of jmp_dest[] so that no further jumps can be inserted */
-    ptr = atomic_or_fetch(&orig->jmp_dest[n_orig], 1);
+    ptr = qatomic_or_fetch(&orig->jmp_dest[n_orig], 1);
     dest = (TranslationBlock *)(ptr & ~1);
     if (dest == NULL) {
         return;
@@ -1372,7 +1373,7 @@ static inline void tb_remove_from_jmp_list(TranslationBlock *orig, int n_orig)
      * While acquiring the lock, the jump might have been removed if the
      * destination TB was invalidated; check again.
      */
-    ptr_locked = atomic_read(&orig->jmp_dest[n_orig]);
+    ptr_locked = qatomic_read(&orig->jmp_dest[n_orig]);
     if (ptr_locked != ptr) {
         qemu_spin_unlock(&dest->jmp_lock);
         /*
@@ -1418,7 +1419,7 @@ static inline void tb_jmp_unlink(TranslationBlock *dest)
 
     TB_FOR_EACH_JMP(dest, tb, n) {
         tb_reset_jump(tb, n);
-        atomic_and(&tb->jmp_dest[n], (uintptr_t)NULL | 1);
+        qatomic_and(&tb->jmp_dest[n], (uintptr_t)NULL | 1);
         /* No need to clear the list entry; setting the dest ptr is enough */
     }
     dest->jmp_list_head = (uintptr_t)NULL;
@@ -1442,7 +1443,7 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
 
     /* make sure no further incoming jumps will be chained to this TB */
     qemu_spin_lock(&tb->jmp_lock);
-    atomic_set(&tb->cflags, tb->cflags | CF_INVALID);
+    qatomic_set(&tb->cflags, tb->cflags | CF_INVALID);
     qemu_spin_unlock(&tb->jmp_lock);
 
     /* remove the TB from the hash list */
@@ -1469,8 +1470,8 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     /* remove the TB from the hash list */
     h = tb_jmp_cache_hash_func(tb->pc);
     CPU_FOREACH(cpu) {
-        if (atomic_read(&cpu->tb_jmp_cache[h]) == tb) {
-            atomic_set(&cpu->tb_jmp_cache[h], NULL);
+        if (qatomic_read(&cpu->tb_jmp_cache[h]) == tb) {
+            qatomic_set(&cpu->tb_jmp_cache[h], NULL);
         }
     }
 
@@ -1481,7 +1482,7 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     /* suppress any remaining jumps to this TB */
     tb_jmp_unlink(tb);
 
-    atomic_set(&tcg_ctx->tb_phys_invalidate_count,
+    qatomic_set(&tcg_ctx->tb_phys_invalidate_count,
                tcg_ctx->tb_phys_invalidate_count + 1);
 }
 
@@ -1736,7 +1737,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 
 #ifdef CONFIG_PROFILER
     /* includes aborted translations because of exceptions */
-    atomic_set(&prof->tb_count1, prof->tb_count1 + 1);
+    qatomic_set(&prof->tb_count1, prof->tb_count1 + 1);
     ti = profile_getclock();
 #endif
 
@@ -1761,8 +1762,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 
 #ifdef CONFIG_PROFILER
-    atomic_set(&prof->tb_count, prof->tb_count + 1);
-    atomic_set(&prof->interm_time, prof->interm_time + profile_getclock() - ti);
+    qatomic_set(&prof->tb_count, prof->tb_count + 1);
+    qatomic_set(&prof->interm_time,
+                prof->interm_time + profile_getclock() - ti);
     ti = profile_getclock();
 #endif
 
@@ -1807,10 +1809,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->tc.size = gen_code_size;
 
 #ifdef CONFIG_PROFILER
-    atomic_set(&prof->code_time, prof->code_time + profile_getclock() - ti);
-    atomic_set(&prof->code_in_len, prof->code_in_len + tb->size);
-    atomic_set(&prof->code_out_len, prof->code_out_len + gen_code_size);
-    atomic_set(&prof->search_out_len, prof->search_out_len + search_size);
+    qatomic_set(&prof->code_time, prof->code_time + profile_getclock() - ti);
+    qatomic_set(&prof->code_in_len, prof->code_in_len + tb->size);
+    qatomic_set(&prof->code_out_len, prof->code_out_len + gen_code_size);
+    qatomic_set(&prof->search_out_len, prof->search_out_len + search_size);
 #endif
 
 #ifdef DEBUG_DISAS
@@ -1818,10 +1820,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         qemu_log_in_addr_range(tb->pc)) {
         FILE *logfile = qemu_log_lock();
         int code_size, data_size = 0;
-        g_autoptr(GString) note = g_string_new("[tb header & initial instruction]");
-        size_t chunk_start = 0;
+        size_t chunk_start;
         int insn = 0;
-        qemu_log("OUT: [size=%d]\n", gen_code_size);
+
         if (tcg_ctx->data_gen_ptr) {
             code_size = tcg_ctx->data_gen_ptr - tb->tc.ptr;
             data_size = gen_code_size - code_size;
@@ -1830,24 +1831,31 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         }
 
         /* Dump header and the first instruction */
+        qemu_log("OUT: [size=%d]\n", gen_code_size);
+        qemu_log("  -- guest addr 0x" TARGET_FMT_lx " + tb prologue\n",
+                 tcg_ctx->gen_insn_data[insn][0]);
         chunk_start = tcg_ctx->gen_insn_end_off[insn];
-        log_disas(tb->tc.ptr, chunk_start, note->str);
+        log_disas(tb->tc.ptr, chunk_start);
 
         /*
          * Dump each instruction chunk, wrapping up empty chunks into
          * the next instruction. The whole array is offset so the
          * first entry is the beginning of the 2nd instruction.
          */
-        while (insn <= tb->icount && chunk_start < code_size) {
+        while (insn < tb->icount) {
             size_t chunk_end = tcg_ctx->gen_insn_end_off[insn];
             if (chunk_end > chunk_start) {
-                g_string_printf(note, "[guest addr: " TARGET_FMT_lx "]",
-                                tcg_ctx->gen_insn_data[insn][0]);
-                log_disas(tb->tc.ptr + chunk_start, chunk_end - chunk_start,
-                          note->str);
+                qemu_log("  -- guest addr 0x" TARGET_FMT_lx "\n",
+                         tcg_ctx->gen_insn_data[insn][0]);
+                log_disas(tb->tc.ptr + chunk_start, chunk_end - chunk_start);
                 chunk_start = chunk_end;
             }
             insn++;
+        }
+
+        if (chunk_start < code_size) {
+            qemu_log("  -- tb slow paths + alignment\n");
+            log_disas(tb->tc.ptr + chunk_start, code_size - chunk_start);
         }
 
         /* Finally dump any data we may have after the block */
@@ -1872,7 +1880,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 #endif
 
-    atomic_set(&tcg_ctx->code_gen_ptr, (void *)
+    qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
         ROUND_UP((uintptr_t)gen_code_buf + gen_code_size + search_size,
                  CODE_GEN_ALIGN));
 
@@ -1916,7 +1924,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         uintptr_t orig_aligned = (uintptr_t)gen_code_buf;
 
         orig_aligned -= ROUND_UP(sizeof(*tb), qemu_icache_linesize);
-        atomic_set(&tcg_ctx->code_gen_ptr, (void *)orig_aligned);
+        qatomic_set(&tcg_ctx->code_gen_ptr, (void *)orig_aligned);
         tb_destroy(tb);
         return existing_tb;
     }
@@ -2270,6 +2278,10 @@ void cpu_io_recompile(CPUState *cpu, uintptr_t retaddr)
         tb_destroy(tb);
     }
 
+    qemu_log_mask_and_addr(CPU_LOG_EXEC, tb->pc,
+                           "cpu_io_recompile: rewound execution of TB to "
+                           TARGET_FMT_lx "\n", tb->pc);
+
     /* TODO: If env->pc != tb->pc (i.e. the faulting instruction was not
      * the first in the TB) then we end up generating a whole new TB and
      *  repeating the fault, which is horribly inefficient.
@@ -2284,7 +2296,7 @@ static void tb_jmp_cache_clear_page(CPUState *cpu, target_ulong page_addr)
     unsigned int i, i0 = tb_jmp_cache_hash_page(page_addr);
 
     for (i = 0; i < TB_JMP_PAGE_SIZE; i++) {
-        atomic_set(&cpu->tb_jmp_cache[i0 + i], NULL);
+        qatomic_set(&cpu->tb_jmp_cache[i0 + i], NULL);
     }
 }
 
@@ -2404,7 +2416,7 @@ void dump_exec_info(void)
 
     qemu_printf("\nStatistics:\n");
     qemu_printf("TB flush count      %u\n",
-                atomic_read(&tb_ctx.tb_flush_count));
+                qatomic_read(&tb_ctx.tb_flush_count));
     qemu_printf("TB invalidate count %zu\n",
                 tcg_tb_phys_invalidate_count());
 
@@ -2426,7 +2438,7 @@ void cpu_interrupt(CPUState *cpu, int mask)
 {
     g_assert(qemu_mutex_iothread_locked());
     cpu->interrupt_request |= mask;
-    atomic_set(&cpu_neg(cpu)->icount_decr.u16.high, -1);
+    qatomic_set(&cpu_neg(cpu)->icount_decr.u16.high, -1);
 }
 
 /*

@@ -274,6 +274,8 @@ extern intptr_t qemu_host_page_mask;
 /* FIXME: Code that sets/uses this is broken and needs to go away.  */
 #define PAGE_RESERVED  0x0020
 #endif
+/* Target-specific bits that will be used via page_get_flags().  */
+#define PAGE_TARGET_1  0x0080
 
 #if defined(CONFIG_USER_ONLY)
 void page_dump(FILE *f);
@@ -407,8 +409,12 @@ static inline bool tlb_hit(target_ulong tlb_addr, target_ulong addr)
     return tlb_hit_page(tlb_addr, addr & TARGET_PAGE_MASK);
 }
 
+#ifdef CONFIG_TCG
+void dump_drift_info(void);
 void dump_exec_info(void);
 void dump_opcount_info(void);
+#endif /* CONFIG_TCG */
+
 #endif /* !CONFIG_USER_ONLY */
 
 /* Returns: 0 on success, -1 on error */

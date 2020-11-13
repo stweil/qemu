@@ -3,6 +3,7 @@ ENV PACKAGES flex bison \
     ccache \
     clang-10\
     gcc \
+    genisoimage \
     gettext \
     git \
     glusterfs-common \
@@ -46,6 +47,8 @@ ENV PACKAGES flex bison \
     libxen-dev \
     libzstd-dev \
     make \
+    netcat-openbsd \
+    ninja-build \
     python3-numpy \
     python3-opencv \
     python3-pil \
@@ -57,7 +60,6 @@ ENV PACKAGES flex bison \
     sparse \
     tesseract-ocr \
     tesseract-ocr-eng \
-    texinfo \
     xfslibs-dev\
     vim
 RUN apt-get update && \

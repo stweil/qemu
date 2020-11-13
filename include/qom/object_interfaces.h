@@ -6,12 +6,9 @@
 
 #define TYPE_USER_CREATABLE "user-creatable"
 
-#define USER_CREATABLE_CLASS(klass) \
-     OBJECT_CLASS_CHECK(UserCreatableClass, (klass), \
-                        TYPE_USER_CREATABLE)
-#define USER_CREATABLE_GET_CLASS(obj) \
-     OBJECT_GET_CLASS(UserCreatableClass, (obj), \
-                      TYPE_USER_CREATABLE)
+typedef struct UserCreatableClass UserCreatableClass;
+DECLARE_CLASS_CHECKERS(UserCreatableClass, USER_CREATABLE,
+                       TYPE_USER_CREATABLE)
 #define USER_CREATABLE(obj) \
      INTERFACE_CHECK(UserCreatable, (obj), \
                      TYPE_USER_CREATABLE)
@@ -40,14 +37,14 @@ typedef struct UserCreatable UserCreatable;
  * object's type implements USER_CREATABLE interface and needs
  * complete() callback to be called.
  */
-typedef struct UserCreatableClass {
+struct UserCreatableClass {
     /* <private> */
     InterfaceClass parent_class;
 
     /* <public> */
     void (*complete)(UserCreatable *uc, Error **errp);
     bool (*can_be_deleted)(UserCreatable *uc);
-} UserCreatableClass;
+};
 
 /**
  * user_creatable_complete:
@@ -157,12 +154,27 @@ int user_creatable_add_opts_foreach(void *opaque,
  * @type: the QOM type to be added
  * @opts: options to create
  *
- * Prints help if requested in @opts.
+ * Prints help if requested in @type or @opts. Note that if @type is neither
+ * "help"/"?" nor a valid user creatable type, no help will be printed
+ * regardless of @opts.
  *
- * Returns: true if @opts contained a help option and help was printed, false
- * if no help option was found.
+ * Returns: true if a help option was found and help was printed, false
+ * otherwise.
  */
 bool user_creatable_print_help(const char *type, QemuOpts *opts);
+
+/**
+ * user_creatable_print_help_from_qdict:
+ * @args: options to create
+ *
+ * Prints help considering the other options given in @args (if "qom-type" is
+ * given and valid, print properties for the type, otherwise print valid types)
+ *
+ * In contrast to user_creatable_print_help(), this function can't return that
+ * no help was requested. It should only be called if we know that help is
+ * requested and it will always print some help.
+ */
+void user_creatable_print_help_from_qdict(QDict *args);
 
 /**
  * user_creatable_del:

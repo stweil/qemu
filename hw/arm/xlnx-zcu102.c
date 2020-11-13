@@ -24,8 +24,9 @@
 #include "qemu/log.h"
 #include "sysemu/qtest.h"
 #include "sysemu/device_tree.h"
+#include "qom/object.h"
 
-typedef struct XlnxZCU102 {
+struct XlnxZCU102 {
     MachineState parent_obj;
 
     XlnxZynqMPState soc;
@@ -34,11 +35,10 @@ typedef struct XlnxZCU102 {
     bool virt;
 
     struct arm_boot_info binfo;
-} XlnxZCU102;
+};
 
 #define TYPE_ZCU102_MACHINE   MACHINE_TYPE_NAME("xlnx-zcu102")
-#define ZCU102_MACHINE(obj) \
-    OBJECT_CHECK(XlnxZCU102, (obj), TYPE_ZCU102_MACHINE)
+OBJECT_DECLARE_SIMPLE_TYPE(XlnxZCU102, ZCU102_MACHINE)
 
 
 static bool zcu102_get_secure(Object *obj, Error **errp)
@@ -206,20 +206,8 @@ static void xlnx_zcu102_machine_instance_init(Object *obj)
 
     /* Default to secure mode being disabled */
     s->secure = false;
-    object_property_add_bool(obj, "secure", zcu102_get_secure,
-                             zcu102_set_secure);
-    object_property_set_description(obj, "secure",
-                                    "Set on/off to enable/disable the ARM "
-                                    "Security Extensions (TrustZone)");
-
     /* Default to virt (EL2) being disabled */
     s->virt = false;
-    object_property_add_bool(obj, "virtualization", zcu102_get_virt,
-                             zcu102_set_virt);
-    object_property_set_description(obj, "virtualization",
-                                    "Set on/off to enable/disable emulating a "
-                                    "guest CPU which implements the ARM "
-                                    "Virtualization Extensions");
 }
 
 static void xlnx_zcu102_machine_class_init(ObjectClass *oc, void *data)
@@ -235,6 +223,19 @@ static void xlnx_zcu102_machine_class_init(ObjectClass *oc, void *data)
     mc->max_cpus = XLNX_ZYNQMP_NUM_APU_CPUS + XLNX_ZYNQMP_NUM_RPU_CPUS;
     mc->default_cpus = XLNX_ZYNQMP_NUM_APU_CPUS;
     mc->default_ram_id = "ddr-ram";
+
+    object_class_property_add_bool(oc, "secure", zcu102_get_secure,
+                                   zcu102_set_secure);
+    object_class_property_set_description(oc, "secure",
+                                          "Set on/off to enable/disable the ARM "
+                                          "Security Extensions (TrustZone)");
+
+    object_class_property_add_bool(oc, "virtualization", zcu102_get_virt,
+                                   zcu102_set_virt);
+    object_class_property_set_description(oc, "virtualization",
+                                          "Set on/off to enable/disable emulating a "
+                                          "guest CPU which implements the ARM "
+                                          "Virtualization Extensions");
 }
 
 static const TypeInfo xlnx_zcu102_machine_init_typeinfo = {

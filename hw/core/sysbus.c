@@ -64,7 +64,7 @@ void foreach_dynamic_sysbus_device(FindSysbusDeviceFunc *func, void *opaque)
         .opaque = opaque,
     };
 
-    /* Loop through all sysbus devices that were spawened outside the machine */
+    /* Loop through all sysbus devices that were spawned outside the machine */
     container = container_get(qdev_get_machine(), "/peripheral");
     find_sysbus_device(container, &find);
     container = container_get(qdev_get_machine(), "/peripheral-anon");
@@ -93,7 +93,7 @@ bool sysbus_has_irq(SysBusDevice *dev, int n)
     char *prop = g_strdup_printf("%s[%d]", SYSBUS_DEVICE_GPIO_IRQ, n);
     ObjectProperty *r;
 
-    r = object_property_find(OBJECT(dev), prop, NULL);
+    r = object_property_find(OBJECT(dev), prop);
     g_free(prop);
 
     return (r != NULL);
@@ -199,6 +199,7 @@ void sysbus_init_mmio(SysBusDevice *dev, MemoryRegion *memory)
 
 MemoryRegion *sysbus_mmio_get_region(SysBusDevice *dev, int n)
 {
+    assert(n >= 0 && n < QDEV_MAX_MMIO);
     return dev->mmio[n].memory;
 }
 

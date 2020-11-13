@@ -30,6 +30,7 @@
 #include "qemu/queue.h"
 #include "qemu/thread.h"
 #include "qemu/plugin.h"
+#include "qom/object.h"
 
 typedef int (*WriteCoreDumpFunction)(const void *buf, size_t size,
                                      void *opaque);
@@ -61,8 +62,9 @@ typedef uint64_t vaddr;
  */
 #define CPU(obj) ((CPUState *)(obj))
 
-#define CPU_CLASS(class) OBJECT_CLASS_CHECK(CPUClass, (class), TYPE_CPU)
-#define CPU_GET_CLASS(obj) OBJECT_GET_CLASS(CPUClass, (obj), TYPE_CPU)
+typedef struct CPUClass CPUClass;
+DECLARE_CLASS_CHECKERS(CPUClass, CPU,
+                       TYPE_CPU)
 
 typedef enum MMUAccessType {
     MMU_DATA_LOAD  = 0,
@@ -153,10 +155,12 @@ struct TranslationBlock;
  * @disas_set_info: Setup architecture specific components of disassembly info
  * @adjust_watchpoint_address: Perform a target-specific adjustment to an
  * address before attempting to match it against watchpoints.
+ * @deprecation_note: If this CPUClass is deprecated, this field provides
+ *                    related information.
  *
  * Represents a CPU family or model.
  */
-typedef struct CPUClass {
+struct CPUClass {
     /*< private >*/
     DeviceClass parent_class;
     /*< public >*/
@@ -219,10 +223,11 @@ typedef struct CPUClass {
     vaddr (*adjust_watchpoint_address)(CPUState *cpu, vaddr addr, int len);
     void (*tcg_initialize)(void);
 
+    const char *deprecation_note;
     /* Keep non-pointer data at the end to minimize holes.  */
     int gdb_num_core_regs;
     bool gdb_stop_before_watchpoint;
-} CPUClass;
+};
 
 /*
  * Low 16 bits: number of cycles left, used only in icount mode.
@@ -376,6 +381,10 @@ struct CPUState {
     bool stopped;
     /* Endianness, false = little endian, true = big endian. */
     bool bigendian;
+
+    /* Should CPU start in powered-off state? */
+    bool start_powered_off;
+
     bool unplug;
     bool crash_occurred;
     bool exit_request;
@@ -478,7 +487,7 @@ static inline void cpu_tb_jmp_cache_clear(CPUState *cpu)
     unsigned int i;
 
     for (i = 0; i < TB_JMP_CACHE_SIZE; i++) {
-        atomic_set(&cpu->tb_jmp_cache[i], NULL);
+        qatomic_set(&cpu->tb_jmp_cache[i], NULL);
     }
 }
 
@@ -840,12 +849,6 @@ bool cpu_exists(int64_t id);
  */
 CPUState *cpu_by_arch_id(int64_t id);
 
-#ifndef CONFIG_USER_ONLY
-
-typedef void (*CPUInterruptHandler)(CPUState *, int);
-
-extern CPUInterruptHandler cpu_interrupt_handler;
-
 /**
  * cpu_interrupt:
  * @cpu: The CPU to set an interrupt on.
@@ -853,16 +856,8 @@ extern CPUInterruptHandler cpu_interrupt_handler;
  *
  * Invokes the interrupt handler.
  */
-static inline void cpu_interrupt(CPUState *cpu, int mask)
-{
-    cpu_interrupt_handler(cpu, mask);
-}
-
-#else /* USER_ONLY */
 
 void cpu_interrupt(CPUState *cpu, int mask);
-
-#endif /* USER_ONLY */
 
 #ifdef NEED_CPU_H
 
@@ -934,14 +929,6 @@ void cpu_exit(CPUState *cpu);
 void cpu_resume(CPUState *cpu);
 
 /**
- * cpu_remove:
- * @cpu: The CPU to remove.
- *
- * Requests the CPU to be removed.
- */
-void cpu_remove(CPUState *cpu);
-
- /**
  * cpu_remove_sync:
  * @cpu: The CPU to remove.
  *

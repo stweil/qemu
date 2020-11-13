@@ -24,6 +24,7 @@
 #include "hw/registerfields.h"
 #include "cpu-qom.h"
 #include "exec/cpu-defs.h"
+#include "qapi/qapi-types-common.h"
 
 /* ARM processors have a weak memory model */
 #define TCG_GUEST_DEFAULT_MO      (0)
@@ -548,6 +549,7 @@ typedef struct CPUARMState {
         uint32_t fpdscr[M_REG_NUM_BANKS];
         uint32_t cpacr[M_REG_NUM_BANKS];
         uint32_t nsacr;
+        int ltpsize;
     } v7m;
 
     /* Information associated with an exception about to be taken:
@@ -817,9 +819,6 @@ struct ARMCPU {
      */
     uint32_t psci_version;
 
-    /* Should CPU start in PSCI powered-off state? */
-    bool start_powered_off;
-
     /* Current power state, access guarded by BQL */
     ARMPSCIState power_state;
 
@@ -866,6 +865,9 @@ struct ARMCPU {
     bool kvm_vtime_dirty;
     uint64_t kvm_vtime;
 
+    /* KVM steal time */
+    OnOffAuto kvm_steal_time;
+
     /* Uniprocessor system with MP extensions */
     bool mp_is_up;
 
@@ -909,6 +911,8 @@ struct ARMCPU {
         uint32_t id_mmfr2;
         uint32_t id_mmfr3;
         uint32_t id_mmfr4;
+        uint32_t id_pfr0;
+        uint32_t id_pfr1;
         uint32_t mvfr0;
         uint32_t mvfr1;
         uint32_t mvfr2;
@@ -929,8 +933,6 @@ struct ARMCPU {
     uint32_t reset_fpsid;
     uint32_t ctr;
     uint32_t reset_sctlr;
-    uint32_t id_pfr0;
-    uint32_t id_pfr1;
     uint64_t pmceid0;
     uint64_t pmceid1;
     uint32_t id_afr0;
@@ -1775,6 +1777,15 @@ FIELD(ID_ISAR6, FHM, 8, 4)
 FIELD(ID_ISAR6, SB, 12, 4)
 FIELD(ID_ISAR6, SPECRES, 16, 4)
 
+FIELD(ID_MMFR0, VMSA, 0, 4)
+FIELD(ID_MMFR0, PMSA, 4, 4)
+FIELD(ID_MMFR0, OUTERSHR, 8, 4)
+FIELD(ID_MMFR0, SHARELVL, 12, 4)
+FIELD(ID_MMFR0, TCM, 16, 4)
+FIELD(ID_MMFR0, AUXREG, 20, 4)
+FIELD(ID_MMFR0, FCSE, 24, 4)
+FIELD(ID_MMFR0, INNERSHR, 28, 4)
+
 FIELD(ID_MMFR3, CMAINTVA, 0, 4)
 FIELD(ID_MMFR3, CMAINTSW, 4, 4)
 FIELD(ID_MMFR3, BPMAINT, 8, 4)
@@ -1792,6 +1803,15 @@ FIELD(ID_MMFR4, HPDS, 16, 4)
 FIELD(ID_MMFR4, LSM, 20, 4)
 FIELD(ID_MMFR4, CCIDX, 24, 4)
 FIELD(ID_MMFR4, EVT, 28, 4)
+
+FIELD(ID_PFR1, PROGMOD, 0, 4)
+FIELD(ID_PFR1, SECURITY, 4, 4)
+FIELD(ID_PFR1, MPROGMOD, 8, 4)
+FIELD(ID_PFR1, VIRTUALIZATION, 12, 4)
+FIELD(ID_PFR1, GENTIMER, 16, 4)
+FIELD(ID_PFR1, SEC_FRAC, 20, 4)
+FIELD(ID_PFR1, VIRT_FRAC, 24, 4)
+FIELD(ID_PFR1, GIC, 28, 4)
 
 FIELD(ID_AA64ISAR0, AES, 4, 4)
 FIELD(ID_AA64ISAR0, SHA1, 8, 4)
@@ -1910,10 +1930,12 @@ FIELD(MVFR0, FPROUND, 28, 4)
 
 FIELD(MVFR1, FPFTZ, 0, 4)
 FIELD(MVFR1, FPDNAN, 4, 4)
-FIELD(MVFR1, SIMDLS, 8, 4)
-FIELD(MVFR1, SIMDINT, 12, 4)
-FIELD(MVFR1, SIMDSP, 16, 4)
-FIELD(MVFR1, SIMDHP, 20, 4)
+FIELD(MVFR1, SIMDLS, 8, 4) /* A-profile only */
+FIELD(MVFR1, SIMDINT, 12, 4) /* A-profile only */
+FIELD(MVFR1, SIMDSP, 16, 4) /* A-profile only */
+FIELD(MVFR1, SIMDHP, 20, 4) /* A-profile only */
+FIELD(MVFR1, MVE, 8, 4) /* M-profile only */
+FIELD(MVFR1, FP16, 20, 4) /* M-profile only */
 FIELD(MVFR1, FPHP, 24, 4)
 FIELD(MVFR1, SIMDFMAC, 28, 4)
 
@@ -1958,7 +1980,6 @@ enum arm_features {
     ARM_FEATURE_CACHE_DIRTY_REG, /* 1136/1176 cache dirty status register */
     ARM_FEATURE_CACHE_BLOCK_OPS, /* v6 optional cache block operations */
     ARM_FEATURE_MPIDR, /* has cp15 MPIDR */
-    ARM_FEATURE_PXN, /* has Privileged Execute Never bit */
     ARM_FEATURE_LPAE, /* has Large Physical Address Extension */
     ARM_FEATURE_V8,
     ARM_FEATURE_AARCH64, /* supports 64 bit mode */
@@ -1971,6 +1992,7 @@ enum arm_features {
     ARM_FEATURE_VBAR, /* has cp15 VBAR */
     ARM_FEATURE_M_SECURITY, /* M profile Security Extension */
     ARM_FEATURE_M_MAIN, /* M profile Main Extension */
+    ARM_FEATURE_V8_1M, /* M profile extras only in v8.1M and later */
 };
 
 static inline int arm_feature(CPUARMState *env, int feature)
@@ -3446,6 +3468,11 @@ static inline MemTxAttrs *typecheck_memtxattrs(MemTxAttrs *x)
 #define arm_tlb_mte_tagged(x) (typecheck_memtxattrs(x)->target_tlb_bit1)
 
 /*
+ * AArch64 usage of the PAGE_TARGET_* bits for linux-user.
+ */
+#define PAGE_BTI  PAGE_TARGET_1
+
+/*
  * Naming convention for isar_feature functions:
  * Functions which test 32-bit ID registers should have _aa32_ in
  * their name. Functions which test 64-bit ID registers should have
@@ -3472,6 +3499,12 @@ static inline bool isar_feature_aa32_thumb_div(const ARMISARegisters *id)
 static inline bool isar_feature_aa32_arm_div(const ARMISARegisters *id)
 {
     return FIELD_EX32(id->id_isar0, ID_ISAR0, DIVIDE) > 1;
+}
+
+static inline bool isar_feature_aa32_lob(const ARMISARegisters *id)
+{
+    /* (M-profile) low-overhead loops and branch future */
+    return FIELD_EX32(id->id_isar0, ID_ISAR0, CMPBRANCH) >= 3;
 }
 
 static inline bool isar_feature_aa32_jazelle(const ARMISARegisters *id)
@@ -3539,14 +3572,19 @@ static inline bool isar_feature_aa32_predinv(const ARMISARegisters *id)
     return FIELD_EX32(id->id_isar6, ID_ISAR6, SPECRES) != 0;
 }
 
+static inline bool isar_feature_aa32_mprofile(const ARMISARegisters *id)
+{
+    return FIELD_EX32(id->id_pfr1, ID_PFR1, MPROGMOD) != 0;
+}
+
 static inline bool isar_feature_aa32_fp16_arith(const ARMISARegisters *id)
 {
-    /*
-     * This is a placeholder for use by VCMA until the rest of
-     * the ARMv8.2-FP16 extension is implemented for aa32 mode.
-     * At which point we can properly set and check MVFR1.FPHP.
-     */
-    return FIELD_EX64(id->id_aa64pfr0, ID_AA64PFR0, FP) == 1;
+    /* Sadly this is encoded differently for A-profile and M-profile */
+    if (isar_feature_aa32_mprofile(id)) {
+        return FIELD_EX32(id->mvfr1, MVFR1, FP16) > 0;
+    } else {
+        return FIELD_EX32(id->mvfr1, MVFR1, FPHP) >= 3;
+    }
 }
 
 static inline bool isar_feature_aa32_vfp_simd(const ARMISARegisters *id)
@@ -3643,6 +3681,11 @@ static inline bool isar_feature_aa32_vrint(const ARMISARegisters *id)
 static inline bool isar_feature_aa32_vminmaxnm(const ARMISARegisters *id)
 {
     return FIELD_EX32(id->mvfr2, MVFR2, FPMISC) >= 4;
+}
+
+static inline bool isar_feature_aa32_pxn(const ARMISARegisters *id)
+{
+    return FIELD_EX32(id->id_mmfr0, ID_MMFR0, VMSA) >= 4;
 }
 
 static inline bool isar_feature_aa32_pan(const ARMISARegisters *id)

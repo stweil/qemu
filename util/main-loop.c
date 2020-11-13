@@ -27,7 +27,7 @@
 #include "qemu/cutils.h"
 #include "qemu/timer.h"
 #include "sysemu/qtest.h"
-#include "sysemu/cpus.h"
+#include "sysemu/cpu-timers.h"
 #include "sysemu/replay.h"
 #include "qemu/main-loop.h"
 #include "block/aio.h"
@@ -178,6 +178,10 @@ static int max_priority;
 #ifndef _WIN32
 static int glib_pollfds_idx;
 static int glib_n_poll_fds;
+
+void qemu_fd_register(int fd)
+{
+}
 
 static void glib_pollfds_fill(int64_t *cur_timeout)
 {
@@ -517,9 +521,13 @@ void main_loop_wait(int nonblocking)
     mlpoll.state = ret < 0 ? MAIN_LOOP_POLL_ERR : MAIN_LOOP_POLL_OK;
     notifier_list_notify(&main_loop_poll_notifiers, &mlpoll);
 
-    /* CPU thread can infinitely wait for event after
-       missing the warp */
-    qemu_start_warp_timer();
+    if (icount_enabled()) {
+        /*
+         * CPU thread can infinitely wait for event after
+         * missing the warp
+         */
+        icount_start_warp_timer();
+    }
     qemu_clock_run_all_timers();
 }
 

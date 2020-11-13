@@ -46,6 +46,7 @@
 #include "trace.h"
 
 #include <libfdt.h>
+#include "qom/object.h"
 
 /*
  * Virtual SCSI device
@@ -90,14 +91,13 @@ typedef struct vscsi_req {
 } vscsi_req;
 
 #define TYPE_VIO_SPAPR_VSCSI_DEVICE "spapr-vscsi"
-#define VIO_SPAPR_VSCSI_DEVICE(obj) \
-     OBJECT_CHECK(VSCSIState, (obj), TYPE_VIO_SPAPR_VSCSI_DEVICE)
+OBJECT_DECLARE_SIMPLE_TYPE(VSCSIState, VIO_SPAPR_VSCSI_DEVICE)
 
-typedef struct {
+struct VSCSIState {
     SpaprVioDevice vdev;
     SCSIBus bus;
     vscsi_req reqs[VSCSI_REQ_LIMIT];
-} VSCSIState;
+};
 
 static union viosrp_iu *req_iu(vscsi_req *req)
 {
@@ -1219,6 +1219,9 @@ static void spapr_vscsi_realize(SpaprVioDevice *dev, Error **errp)
 
     scsi_bus_new(&s->bus, sizeof(s->bus), DEVICE(dev),
                  &vscsi_scsi_info, NULL);
+
+    /* ibmvscsi SCSI bus does not allow hotplug. */
+    qbus_set_hotplug_handler(BUS(&s->bus), NULL);
 }
 
 void spapr_vscsi_create(SpaprVioBus *bus)

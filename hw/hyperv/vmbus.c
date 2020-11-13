@@ -380,7 +380,8 @@ static ssize_t gpadl_iter_io(GpadlIter *iter, void *buf, uint32_t len)
             }
         }
 
-        p = (void *)(((uintptr_t)iter->map & TARGET_PAGE_MASK) | off_in_page);
+        p = (void *)(uintptr_t)(((uintptr_t)iter->map & TARGET_PAGE_MASK) |
+                off_in_page);
         if (iter->dir == DMA_DIRECTION_FROM_DEVICE) {
             memcpy(p, buf, cplen);
         } else {
@@ -746,7 +747,7 @@ static int vmbus_channel_notify_guest(VMBusChannel *chan)
 
     idx = BIT_WORD(chan->id);
     mask = BIT_MASK(chan->id);
-    if ((atomic_fetch_or(&int_map[idx], mask) & mask) != mask) {
+    if ((qatomic_fetch_or(&int_map[idx], mask) & mask) != mask) {
         res = hyperv_sint_route_set_sint(chan->notify_route);
         dirty = len;
     }

@@ -41,6 +41,7 @@
 #include "qemu/log.h"
 #include "qemu/main-loop.h"
 #include "qemu/module.h"
+#include "qemu/sockets.h"
 #include "qemu/units.h"
 #include "qom/object_interfaces.h"
 #include "sysemu/block-backend.h"
@@ -49,6 +50,8 @@
 #include "block/qapi.h"
 #include "crypto/init.h"
 #include "trace/control.h"
+#include "qemu/throttle.h"
+#include "block/throttle-groups.h"
 
 #define QEMU_IMG_VERSION "qemu-img version " QEMU_FULL_VERSION \
                           "\n" QEMU_COPYRIGHT "\n"
@@ -979,6 +982,7 @@ static int img_commit(int argc, char **argv)
     CommonBlockJobCBInfo cbi;
     bool image_opts = false;
     AioContext *aio_context;
+    int64_t rate_limit = 0;
 
     fmt = NULL;
     cache = BDRV_DEFAULT_CACHE;
@@ -990,7 +994,7 @@ static int img_commit(int argc, char **argv)
             {"image-opts", no_argument, 0, OPTION_IMAGE_OPTS},
             {0, 0, 0, 0}
         };
-        c = getopt_long(argc, argv, ":f:ht:b:dpq",
+        c = getopt_long(argc, argv, ":f:ht:b:dpqr:",
                         long_options, NULL);
         if (c == -1) {
             break;
@@ -1024,6 +1028,12 @@ static int img_commit(int argc, char **argv)
             break;
         case 'q':
             quiet = true;
+            break;
+        case 'r':
+            rate_limit = cvtnum("rate limit", optarg);
+            if (rate_limit < 0) {
+                return 1;
+            }
             break;
         case OPTION_OBJECT: {
             QemuOpts *opts;
@@ -1084,7 +1094,7 @@ static int img_commit(int argc, char **argv)
         /* This is different from QMP, which by default uses the deepest file in
          * the backing chain (i.e., the very base); however, the traditional
          * behavior of qemu-img commit is using the immediate backing file. */
-        base_bs = backing_bs(bs);
+        base_bs = bdrv_backing_chain_next(bs);
         if (!base_bs) {
             error_setg(&local_err, "Image does not have a backing file");
             goto done;
@@ -1098,7 +1108,7 @@ static int img_commit(int argc, char **argv)
 
     aio_context = bdrv_get_aio_context(bs);
     aio_context_acquire(aio_context);
-    commit_active_start("commit", bs, base_bs, JOB_DEFAULT, 0,
+    commit_active_start("commit", bs, base_bs, JOB_DEFAULT, rate_limit,
                         BLOCKDEV_ON_ERROR_REPORT, NULL, common_block_job_cb,
                         &cbi, false, &local_err);
     aio_context_release(aio_context);
@@ -1187,7 +1197,7 @@ static int64_t find_nonzero(const uint8_t *buf, int64_t n)
  * 'pnum' is set to the number of sectors (including and immediately following
  * the first one) that are known to be in the same allocated/unallocated state.
  * The function will try to align the end offset to alignment boundaries so
- * that the request will at least end aligned and consequtive requests will
+ * that the request will at least end aligned and consecutive requests will
  * also start at an aligned offset.
  */
 static int is_allocated_sectors(const uint8_t *buf, int n, int *pnum,
@@ -1200,10 +1210,10 @@ static int is_allocated_sectors(const uint8_t *buf, int n, int *pnum,
         *pnum = 0;
         return 0;
     }
-    is_zero = buffer_is_zero(buf, 512);
+    is_zero = buffer_is_zero(buf, BDRV_SECTOR_SIZE);
     for(i = 1; i < n; i++) {
-        buf += 512;
-        if (is_zero != buffer_is_zero(buf, 512)) {
+        buf += BDRV_SECTOR_SIZE;
+        if (is_zero != buffer_is_zero(buf, BDRV_SECTOR_SIZE)) {
             break;
         }
     }
@@ -1661,10 +1671,12 @@ enum ImgConvertBlockStatus {
 };
 
 #define MAX_COROUTINES 16
+#define CONVERT_THROTTLE_GROUP "img_convert"
 
 typedef struct ImgConvertState {
     BlockBackend **src;
     int64_t *src_sectors;
+    int *src_alignment;
     int src_num;
     int64_t total_sectors;
     int64_t allocated_sectors;
@@ -1731,18 +1743,21 @@ static int convert_iteration_sectors(ImgConvertState *s, int64_t sector_num)
     if (s->sector_next_status <= sector_num) {
         uint64_t offset = (sector_num - src_cur_offset) * BDRV_SECTOR_SIZE;
         int64_t count;
+        int tail;
+        BlockDriverState *src_bs = blk_bs(s->src[src_cur]);
+        BlockDriverState *base;
+
+        if (s->target_has_backing) {
+            base = bdrv_cow_bs(bdrv_skip_filters(src_bs));
+        } else {
+            base = NULL;
+        }
 
         do {
             count = n * BDRV_SECTOR_SIZE;
 
-            if (s->target_has_backing) {
-                ret = bdrv_block_status(blk_bs(s->src[src_cur]), offset,
-                                        count, &count, NULL, NULL);
-            } else {
-                ret = bdrv_block_status_above(blk_bs(s->src[src_cur]), NULL,
-                                              offset, count, &count, NULL,
-                                              NULL);
-            }
+            ret = bdrv_block_status_above(src_bs, base, offset, count, &count,
+                                          NULL, NULL);
 
             if (ret < 0) {
                 if (s->salvage) {
@@ -1768,6 +1783,16 @@ static int convert_iteration_sectors(ImgConvertState *s, int64_t sector_num)
         } while (ret < 0);
 
         n = DIV_ROUND_UP(count, BDRV_SECTOR_SIZE);
+
+        /*
+         * Avoid that s->sector_next_status becomes unaligned to the source
+         * request alignment and/or cluster size to avoid unnecessary read
+         * cycles.
+         */
+        tail = (sector_num - src_cur_offset + n) % s->src_alignment[src_cur];
+        if (n > tail) {
+            n -= tail;
+        }
 
         if (ret & BDRV_BLOCK_ZERO) {
             s->status = post_backing_zero ? BLK_BACKING_FILE : BLK_ZERO;
@@ -2162,6 +2187,17 @@ static int convert_copy_bitmaps(BlockDriverState *src, BlockDriverState *dst)
 
 #define MAX_BUF_SECTORS 32768
 
+static void set_rate_limit(BlockBackend *blk, int64_t rate_limit)
+{
+    ThrottleConfig cfg;
+
+    throttle_config_init(&cfg);
+    cfg.buckets[THROTTLE_BPS_WRITE].avg = rate_limit;
+
+    blk_io_limits_enable(blk, CONVERT_THROTTLE_GROUP);
+    blk_set_io_limits(blk, &cfg);
+}
+
 static int img_convert(int argc, char **argv)
 {
     int c, bs_i, flags, src_flags = 0;
@@ -2182,6 +2218,7 @@ static int img_convert(int argc, char **argv)
     bool force_share = false;
     bool explict_min_sparse = false;
     bool bitmaps = false;
+    int64_t rate_limit = 0;
 
     ImgConvertState s = (ImgConvertState) {
         /* Need at least 4k of zeros for sparse detection */
@@ -2204,7 +2241,7 @@ static int img_convert(int argc, char **argv)
             {"bitmaps", no_argument, 0, OPTION_BITMAPS},
             {0, 0, 0, 0}
         };
-        c = getopt_long(argc, argv, ":hf:O:B:Cco:l:S:pt:T:qnm:WU",
+        c = getopt_long(argc, argv, ":hf:O:B:Cco:l:S:pt:T:qnm:WUr:",
                         long_options, NULL);
         if (c == -1) {
             break;
@@ -2300,6 +2337,12 @@ static int img_convert(int argc, char **argv)
             break;
         case 'U':
             force_share = true;
+            break;
+        case 'r':
+            rate_limit = cvtnum("rate limit", optarg);
+            if (rate_limit < 0) {
+                goto fail_getopt;
+            }
             break;
         case OPTION_OBJECT: {
             QemuOpts *object_opts;
@@ -2407,8 +2450,10 @@ static int img_convert(int argc, char **argv)
 
     s.src = g_new0(BlockBackend *, s.src_num);
     s.src_sectors = g_new(int64_t, s.src_num);
+    s.src_alignment = g_new(int, s.src_num);
 
     for (bs_i = 0; bs_i < s.src_num; bs_i++) {
+        BlockDriverState *src_bs;
         s.src[bs_i] = img_open(image_opts, argv[optind + bs_i],
                                fmt, src_flags, src_writethrough, s.quiet,
                                force_share);
@@ -2422,6 +2467,13 @@ static int img_convert(int argc, char **argv)
                          argv[optind + bs_i], strerror(-s.src_sectors[bs_i]));
             ret = -1;
             goto out;
+        }
+        src_bs = blk_bs(s.src[bs_i]);
+        s.src_alignment[bs_i] = DIV_ROUND_UP(src_bs->bl.request_alignment,
+                                             BDRV_SECTOR_SIZE);
+        if (!bdrv_get_info(src_bs, &bdi)) {
+            s.src_alignment[bs_i] = MAX(s.src_alignment[bs_i],
+                                        bdi.cluster_size / BDRV_SECTOR_SIZE);
         }
         s.total_sectors += s.src_sectors[bs_i];
     }
@@ -2489,8 +2541,8 @@ static int img_convert(int argc, char **argv)
             }
         }
 
-        qemu_opt_set_number(opts, BLOCK_OPT_SIZE, s.total_sectors * 512,
-                            &error_abort);
+        qemu_opt_set_number(opts, BLOCK_OPT_SIZE,
+                            s.total_sectors * BDRV_SECTOR_SIZE, &error_abort);
         ret = add_old_style_options(out_fmt, opts, out_baseimg, NULL);
         if (ret < 0) {
             goto out;
@@ -2664,7 +2716,8 @@ static int img_convert(int argc, char **argv)
          * s.target_backing_sectors has to be negative, which it will
          * be automatically).  The backing file length is used only
          * for optimizations, so such a case is not fatal. */
-        s.target_backing_sectors = bdrv_nb_sectors(out_bs->backing->bs);
+        s.target_backing_sectors =
+            bdrv_nb_sectors(bdrv_backing_chain_next(out_bs));
     } else {
         s.target_backing_sectors = -1;
     }
@@ -2678,6 +2731,10 @@ static int img_convert(int argc, char **argv)
     } else {
         s.compressed = s.compressed || bdi.needs_compressed_writes;
         s.cluster_sectors = bdi.cluster_size / BDRV_SECTOR_SIZE;
+    }
+
+    if (rate_limit) {
+        set_rate_limit(s.target, rate_limit);
     }
 
     ret = convert_do_copy(&s);
@@ -2694,7 +2751,6 @@ out:
     qemu_progress_end();
     qemu_opts_del(opts);
     qemu_opts_free(create_opts);
-    qemu_opts_del(sn_opts);
     qobject_unref(open_opts);
     blk_unref(s.target);
     if (s.src) {
@@ -2704,7 +2760,9 @@ out:
         g_free(s.src);
     }
     g_free(s.src_sectors);
+    g_free(s.src_alignment);
 fail_getopt:
+    qemu_opts_del(sn_opts);
     g_free(options);
 
     return !!ret;
@@ -3034,6 +3092,7 @@ static int get_block_status(BlockDriverState *bs, int64_t offset,
 
     depth = 0;
     for (;;) {
+        bs = bdrv_skip_filters(bs);
         ret = bdrv_block_status(bs, offset, bytes, &bytes, &map, &file);
         if (ret < 0) {
             return ret;
@@ -3042,7 +3101,7 @@ static int get_block_status(BlockDriverState *bs, int64_t offset,
         if (ret & (BDRV_BLOCK_ZERO|BDRV_BLOCK_DATA)) {
             break;
         }
-        bs = backing_bs(bs);
+        bs = bdrv_cow_bs(bs);
         if (bs == NULL) {
             ret = 0;
             break;
@@ -3424,6 +3483,7 @@ static int img_rebase(int argc, char **argv)
     uint8_t *buf_old = NULL;
     uint8_t *buf_new = NULL;
     BlockDriverState *bs = NULL, *prefix_chain_bs = NULL;
+    BlockDriverState *unfiltered_bs;
     char *filename;
     const char *fmt, *cache, *src_cache, *out_basefmt, *out_baseimg;
     int c, flags, src_flags, ret;
@@ -3558,6 +3618,8 @@ static int img_rebase(int argc, char **argv)
     }
     bs = blk_bs(blk);
 
+    unfiltered_bs = bdrv_skip_filters(bs);
+
     if (out_basefmt != NULL) {
         if (bdrv_find_format(out_basefmt) == NULL) {
             error_report("Invalid format name: '%s'", out_basefmt);
@@ -3569,7 +3631,7 @@ static int img_rebase(int argc, char **argv)
     /* For safe rebasing we need to compare old and new backing file */
     if (!unsafe) {
         QDict *options = NULL;
-        BlockDriverState *base_bs = backing_bs(bs);
+        BlockDriverState *base_bs = bdrv_cow_bs(unfiltered_bs);
 
         if (base_bs) {
             blk_old_backing = blk_new(qemu_get_aio_context(),
@@ -3710,7 +3772,7 @@ static int img_rebase(int argc, char **argv)
             n = MIN(IO_BUF_SIZE, size - offset);
 
             /* If the cluster is allocated, we don't need to take action */
-            ret = bdrv_is_allocated(bs, offset, n, &n);
+            ret = bdrv_is_allocated(unfiltered_bs, offset, n, &n);
             if (ret < 0) {
                 error_report("error while reading image metadata: %s",
                              strerror(-ret));
@@ -3725,8 +3787,9 @@ static int img_rebase(int argc, char **argv)
                  * If cluster wasn't changed since prefix_chain, we don't need
                  * to take action
                  */
-                ret = bdrv_is_allocated_above(backing_bs(bs), prefix_chain_bs,
-                                              false, offset, n, &n);
+                ret = bdrv_is_allocated_above(bdrv_cow_bs(unfiltered_bs),
+                                              prefix_chain_bs, false,
+                                              offset, n, &n);
                 if (ret < 0) {
                     error_report("error while reading image metadata: %s",
                                  strerror(-ret));
@@ -3804,9 +3867,10 @@ static int img_rebase(int argc, char **argv)
      * doesn't change when we switch the backing file.
      */
     if (out_baseimg && *out_baseimg) {
-        ret = bdrv_change_backing_file(bs, out_baseimg, out_basefmt, true);
+        ret = bdrv_change_backing_file(unfiltered_bs, out_baseimg, out_basefmt,
+                                       true);
     } else {
-        ret = bdrv_change_backing_file(bs, NULL, NULL, false);
+        ret = bdrv_change_backing_file(unfiltered_bs, NULL, NULL, false);
     }
 
     if (ret == -ENOSPC) {
@@ -4747,14 +4811,19 @@ static int img_bitmap(int argc, char **argv)
     filename = argv[optind];
     bitmap = argv[optind + 1];
 
-    blk = img_open(image_opts, filename, fmt, BDRV_O_RDWR, false, false,
-                   false);
+    /*
+     * No need to open backing chains; we will be manipulating bitmaps
+     * directly in this image without reference to image contents.
+     */
+    blk = img_open(image_opts, filename, fmt, BDRV_O_RDWR | BDRV_O_NO_BACKING,
+                   false, false, false);
     if (!blk) {
         goto out;
     }
     bs = blk_bs(blk);
     if (src_filename) {
-        src = img_open(false, src_filename, src_fmt, 0, false, false, false);
+        src = img_open(false, src_filename, src_fmt, BDRV_O_NO_BACKING,
+                       false, false, false);
         if (!src) {
             goto out;
         }
@@ -5410,6 +5479,7 @@ int main(int argc, char **argv)
     signal(SIGPIPE, SIG_IGN);
 #endif
 
+    socket_init();
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_exec_dir(argv[0]);

@@ -32,14 +32,23 @@ config USB_EHCI_SYSBUS
 
 config USB_XHCI
     bool
+    select USB
+
+config USB_XHCI_PCI
+    bool
     default y if PCI_DEVICES
     depends on PCI
-    select USB
+    select USB_XHCI
 
 config USB_XHCI_NEC
     bool
     default y if PCI_DEVICES
     depends on PCI
+    select USB_XHCI
+
+config USB_XHCI_SYSBUS
+    bool
+    default y
     select USB_XHCI
 
 config USB_MUSB
@@ -92,6 +101,11 @@ config USB_SMARTCARD
     depends on USB
 
 config USB_STORAGE_MTP
+    bool
+    default y
+    depends on USB
+
+config USB_U2F
     bool
     default y
     depends on USB

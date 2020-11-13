@@ -58,7 +58,7 @@ trace_events_all = custom_target('trace-events-all',
                                  command: [ 'cat', '@INPUT@' ],
                                  capture: true,
                                  install: true,
-                                 install_dir: config_host['qemu_datadir'])
+                                 install_dir: qemu_datadir)
 
 foreach d : [
   ['generated-tcg-tracers.h', 'tcg-h'],
@@ -70,7 +70,6 @@ foreach d : [
                 output: d[0],
                 input: meson.source_root() / 'trace-events',
                 command: [ tracetool, '--group=root', '--format=@0@'.format(d[1]), '@INPUT@' ],
-                build_by_default: true, # to be removed when added to a target
                 capture: true)
   specific_ss.add(gen)
 endforeach

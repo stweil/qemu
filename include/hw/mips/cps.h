@@ -21,16 +21,18 @@
 #define MIPS_CPS_H
 
 #include "hw/sysbus.h"
+#include "hw/clock.h"
 #include "hw/misc/mips_cmgcr.h"
 #include "hw/intc/mips_gic.h"
 #include "hw/misc/mips_cpc.h"
 #include "hw/misc/mips_itu.h"
 #include "target/mips/cpu.h"
+#include "qom/object.h"
 
 #define TYPE_MIPS_CPS "mips-cps"
-#define MIPS_CPS(obj) OBJECT_CHECK(MIPSCPSState, (obj), TYPE_MIPS_CPS)
+OBJECT_DECLARE_SIMPLE_TYPE(MIPSCPSState, MIPS_CPS)
 
-typedef struct MIPSCPSState {
+struct MIPSCPSState {
     SysBusDevice parent_obj;
 
     uint32_t num_vp;
@@ -42,7 +44,8 @@ typedef struct MIPSCPSState {
     MIPSGICState gic;
     MIPSCPCState cpc;
     MIPSITUState itu;
-} MIPSCPSState;
+    Clock *clock;
+};
 
 qemu_irq get_cps_irq(MIPSCPSState *cps, int pin_number);
 

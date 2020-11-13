@@ -36,6 +36,7 @@
 #include "hw/cpu/a9mpcore.h"
 #include "hw/cpu/a15mpcore.h"
 #include "qemu/log.h"
+#include "qom/object.h"
 
 #define SMP_BOOT_ADDR           0x100
 #define SMP_BOOT_REG            0x40
@@ -91,12 +92,12 @@ static void hb_reset_secondary(ARMCPU *cpu, const struct arm_boot_info *info)
         address_space_stl_notdirty(&address_space_memory,
                                    SMP_BOOT_REG + 0x30, 0,
                                    MEMTXATTRS_UNSPECIFIED, NULL);
-        /* fall through? */
+        /* fallthrough */
     case 3:
         address_space_stl_notdirty(&address_space_memory,
                                    SMP_BOOT_REG + 0x20, 0,
                                    MEMTXATTRS_UNSPECIFIED, NULL);
-        /* fall through? */
+        /* fallthrough */
     case 2:
         address_space_stl_notdirty(&address_space_memory,
                                    SMP_BOOT_REG + 0x10, 0,
@@ -157,17 +158,16 @@ static const MemoryRegionOps hb_mem_ops = {
 };
 
 #define TYPE_HIGHBANK_REGISTERS "highbank-regs"
-#define HIGHBANK_REGISTERS(obj) \
-    OBJECT_CHECK(HighbankRegsState, (obj), TYPE_HIGHBANK_REGISTERS)
+OBJECT_DECLARE_SIMPLE_TYPE(HighbankRegsState, HIGHBANK_REGISTERS)
 
-typedef struct {
+struct HighbankRegsState {
     /*< private >*/
     SysBusDevice parent_obj;
     /*< public >*/
 
     MemoryRegion iomem;
     uint32_t regs[NUM_REGS];
-} HighbankRegsState;
+};
 
 static VMStateDescription vmstate_highbank_regs = {
     .name = "highbank-regs",
@@ -278,7 +278,7 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
                                      &error_abort);
         }
 
-        if (object_property_find(cpuobj, "reset-cbar", NULL)) {
+        if (object_property_find(cpuobj, "reset-cbar")) {
             object_property_set_int(cpuobj, "reset-cbar", MPCORE_PERIPHBASE,
                                     &error_abort);
         }
