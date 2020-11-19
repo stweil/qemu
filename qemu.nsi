@@ -129,7 +129,6 @@ Section "${PRODUCT}" QEMU_System_File_Section_Description
     ; Set output path to the installation directory.
     SetOutPath "$INSTDIR"
 
-    File "${SRCDIR}\Changelog"
     File "${SRCDIR}\COPYING"
     File "${SRCDIR}\COPYING.LIB"
     File "${SRCDIR}\README.rst"
@@ -148,9 +147,6 @@ Section "${PRODUCT}" QEMU_System_File_Section_Description
     File "${BINDIR}\icons\hicolor\scalable\apps\qemu.svg"
 
     File /r "${BINDIR}\keymaps"
-!ifdef CONFIG_GTK
-    File /r "${BINDIR}\share"
-!endif
 
     SetOutPath "$INSTDIR\lib\gdk-pixbuf-2.0\2.10.0"
     FileOpen $0 "loaders.cache" w
@@ -249,7 +245,6 @@ Section "Uninstall" Uninstall_Section_Description
     RMDir "$SMPROGRAMS\${PRODUCT}"
 
     ; Remove files and directories used
-    Delete "$INSTDIR\Changelog"
     Delete "$INSTDIR\COPYING"
     Delete "$INSTDIR\COPYING.LIB"
     Delete "$INSTDIR\README.rst"
