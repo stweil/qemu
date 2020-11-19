@@ -72,7 +72,6 @@ uint32_t cpu_mips_get_count(CPUMIPSState *env)
 
         return env->CP0_Count + (uint32_t)(now_ns / env->cp0_count_ns);
     }
-    return value;
 }
 
 void cpu_mips_store_count(CPUMIPSState *env, uint32_t count)
