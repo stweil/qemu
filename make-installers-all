@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Needs bash because of ${x/exe/sha} expression.
+
+date=$(date +%Y%m%d)
+
+WEBDIR=/var/www/html
+
+targets="i686-w64-mingw32 x86_64-w64-mingw32"
+
+for target in $targets; do
+  echo Building $target...
+  mingw=/usr/$target/sys-root/mingw
+  mkdir -p /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
+  cd /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target && rm -rf *
+  ../../../configure --cross-prefix=$target- --disable-guest-agent-msi --disable-werror --extra-cflags="-I$mingw/include" --extra-ldflags="-L$mingw/lib"
+  make -O -j4
+done
+
+echo Building installers...
+make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32 installer SIGNCODE=signcode
+mv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32/qemu-setup-*.exe $WEBDIR/w32/qemu-w32-setup-$date.exe
+make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32 installer SIGNCODE=signcode
+mv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32/qemu-setup-*.exe $WEBDIR/w64/qemu-w64-setup-$date.exe
+
+echo Calculate SHA-512 checksums...
+for exe in $WEBDIR/w*/qemu-w*-setup-$date.exe; do
+    (cd $(dirname $exe); x=$(basename $exe); sha512sum $x >${x/exe/sha512})
+done
+
+echo Update documentation...
+echo skipping make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32 install-doc prefix=$WEBDIR/doc/latest
+
+echo Done.
