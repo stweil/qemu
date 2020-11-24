@@ -1563,22 +1563,19 @@ libexecdir="${libexecdir:-$prefix/libexec}"
 includedir="${includedir:-$prefix/include}"
 
 if test "$mingw32" = "yes" ; then
-    mandir="$prefix"
-    datadir="$prefix"
-    docdir="$prefix"
     bindir="$prefix"
     sysconfdir="$prefix"
     local_statedir="$prefix"
 else
-    mandir="${mandir:-$prefix/share/man}"
-    datadir="${datadir:-$prefix/share}"
-    docdir="${docdir:-$prefix/share/doc}"
     bindir="${bindir:-$prefix/bin}"
     sysconfdir="${sysconfdir:-$prefix/etc}"
     local_statedir="${local_statedir:-$prefix/var}"
 fi
+datadir="${datadir:-$prefix/share}"
+docdir="${docdir:-$prefix/share/doc}"
 firmwarepath="${firmwarepath:-$datadir/qemu-firmware}"
 localedir="${localedir:-$datadir/locale}"
+mandir="${mandir:-$prefix/share/man}"
 
 case "$cpu" in
     ppc)
