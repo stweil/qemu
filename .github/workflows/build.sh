@@ -36,7 +36,7 @@ echo deb https://qemu.weilnetz.de/debian/ testing contrib | \
 # Install packages.
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
-  mingw-w64-tools nsis \
+  mingw-w64-tools ninja-build nsis \
   gcc libc6-dev \
   g++-mingw-w64-${ARCH/_/-} gcc-mingw-w64-${ARCH/_/-} \
   bison flex gettext python3-sphinx texinfo \
@@ -48,6 +48,7 @@ sudo apt-get install --no-install-recommends \
 sudo ln -sf $PWD/.github/workflows/pkg-config-crosswrapper /usr/bin/$HOST-pkg-config
 
 # Get header files for WHPX API from Mingw-w64 git master.
+if test "$ARCH" != "i686"; then
 (
 sudo mkdir -p /usr/$HOST/sys-include
 cd /usr/$HOST/sys-include
@@ -58,6 +59,7 @@ sudo ln -s winhvemulation.h WinHvEmulation.h
 sudo ln -s winhvplatform.h WinHvPlatform.h
 sudo ln -s winhvplatformdefs.h WinHvPlatformDefs.h
 )
+fi
 
 DLL_PATH=$PWD/dll/$HOST
 
@@ -107,9 +109,9 @@ mkdir -p $BUILDDIR && cd $BUILDDIR
 
 # Run configure.
 ../../../configure --cross-prefix=$HOST- --disable-guest-agent-msi \
-    --disable-werror --enable-whpx \
-    --extra-cflags="-I $mingw/include" \
-    --extra-ldflags="-L $mingw/lib"
+    --disable-werror \
+    --extra-cflags="-I$mingw/include" \
+    --extra-ldflags="-L$mingw/lib"
 
 cp config.log $DISTDIR/
 
@@ -119,7 +121,8 @@ echo Building installers...
 date=$(date +%Y%m%d)
 INSTALLER=$DISTDIR/qemu-$ARCH-setup-$date.exe
 #make installer DLL_PATH=$DLL_PATH SIGNCODE=signcode INSTALLER=$INSTALLER
-make installer DLL_PATH=$DLL_PATH SIGNCODE=true INSTALLER=$INSTALLER
+make installer DLL_PATH=$DLL_PATH SIGNCODE=true
+mv -v qemu-setup-*.exe $INSTALLER
 
 echo Calculate SHA-512 checksum...
 (cd $DISTDIR; exe=$(basename $INSTALLER); sha512sum $exe >${exe/exe/sha512})
