@@ -490,10 +490,15 @@ if have_system and not get_option('curses').disabled()
       return 0;
     }'''
 
-  curses = dependency((targetos == 'windows' ? 'ncurses' : 'ncursesw'),
-                      required: false,
-                      method: 'pkg-config',
-                      static: enable_static)
+  curses_dep_list = targetos == 'windows' ? ['ncurses', 'ncursesw'] : ['ncursesw']
+  foreach curses_dep : curses_dep_list
+    if not curses.found()
+      curses = dependency(curses_dep,
+                          required: false,
+                          method: 'pkg-config',
+                          static: enable_static)
+    endif
+  endforeach
   msg = get_option('curses').enabled() ? 'curses library not found' : ''
   if curses.found()
     if cc.links(curses_test, dependencies: [curses])
@@ -650,7 +655,7 @@ if get_option('vnc').enabled()
   png = dependency('libpng', required: get_option('vnc_png'),
                    method: 'pkg-config', static: enable_static)
   jpeg = dependency('libjpeg', required: get_option('vnc_jpeg'),
-                   method: 'pkg-config', static: enable_static)
+                    method: 'pkg-config', static: enable_static)
   sasl = cc.find_library('sasl2', has_headers: ['sasl/sasl.h'],
                          required: get_option('vnc_sasl'),
                          static: enable_static)
