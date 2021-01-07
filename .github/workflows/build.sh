@@ -29,7 +29,7 @@ file /usr/bin/$HOST-pkg-config
 /usr/bin/$HOST-pkg-config
 
 # Install cygwin key and add cygwin sources.
-curl -s https://qemu.weilnetz.de/debian/gpg.key | sudo apt-key add -
+sudo curl -o /etc/apt/trusted.gpg.d/weilnetz.gpg https://qemu.weilnetz.de/debian/weilnetz.gpg
 echo deb https://qemu.weilnetz.de/debian/ testing contrib | \
   sudo tee /etc/apt/sources.list.d/cygwin.list
 
