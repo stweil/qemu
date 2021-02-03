@@ -28,6 +28,12 @@
 !ifndef BINDIR
 !define BINDIR nsis.tmp
 !endif
+!ifndef DATADIR
+!define DATADIR "${BINDIR}\share"
+!endif
+!ifndef DOCDIR
+!define DOCDIR "${DATADIR}\doc"
+!endif
 !ifndef SRCDIR
 !define SRCDIR .
 !endif
@@ -134,19 +140,19 @@ Section "${PRODUCT}" QEMU_System_File_Section_Description
     File "${SRCDIR}\README.rst"
     File "${SRCDIR}\VERSION"
 
-    File "${BINDIR}\*.bin"
-    File "${BINDIR}\*.dtb"
-    File "${BINDIR}\*.fd"
-    File "${BINDIR}\*.img"
-    File "${BINDIR}\*.lid"
-    File "${BINDIR}\*.ndrv"
-    File "${BINDIR}\*.rom"
-    File "${BINDIR}\openbios-*"
-    File "${BINDIR}\palcode-clipper"
-    File "${BINDIR}\u-boot.e500"
-    File "${BINDIR}\icons\hicolor\scalable\apps\qemu.svg"
+    File "${DATADIR}\*.bin"
+    File "${DATADIR}\*.dtb"
+    File "${DATADIR}\*.fd"
+    File "${DATADIR}\*.img"
+    File "${DATADIR}\*.lid"
+    File "${DATADIR}\*.ndrv"
+    File "${DATADIR}\*.rom"
+    File "${DATADIR}\openbios-*"
+    File "${DATADIR}\palcode-clipper"
+    File "${DATADIR}\u-boot.e500"
+    File "${DATADIR}\icons\hicolor\scalable\apps\qemu.svg"
 
-    File /r "${BINDIR}\keymaps"
+    File /r "${DATADIR}\keymaps"
 
     SetOutPath "$INSTDIR\lib\gdk-pixbuf-2.0\2.10.0"
     FileOpen $0 "loaders.cache" w
@@ -203,17 +209,17 @@ SectionEnd
 !ifdef CONFIG_DOCUMENTATION
 Section "$(Documentation_Section_Name)" Documentation_Section_Description
     SetOutPath "$INSTDIR"
-    File "${BINDIR}\index.html"
+    File "${DOCDIR}\index.html"
     SetOutPath "$INSTDIR\interop"
-    FILE /r "${BINDIR}\interop\*.*"
+    FILE /r "${DOCDIR}\interop\*.*"
     SetOutPath "$INSTDIR\specs"
-    FILE /r "${BINDIR}\specs\*.*"
+    FILE /r "${DOCDIR}\specs\*.*"
     SetOutPath "$INSTDIR\system"
-    FILE /r "${BINDIR}\system\*.*"
+    FILE /r "${DOCDIR}\system\*.*"
     SetOutPath "$INSTDIR\tools"
-    FILE /r "${BINDIR}\tools\*.*"
+    FILE /r "${DOCDIR}\tools\*.*"
     SetOutPath "$INSTDIR\user"
-    FILE /r "${BINDIR}\user\*.*"
+    FILE /r "${DOCDIR}\user\*.*"
     SetOutPath "$INSTDIR"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
     CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Link_Description_User_Documentation).lnk" "$INSTDIR\index.html" "" "$INSTDIR\index.html" 0
