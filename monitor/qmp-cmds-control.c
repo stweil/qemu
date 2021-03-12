@@ -104,17 +104,16 @@ VersionInfo *qmp_query_version(Error **errp)
 
 static void query_commands_cb(const QmpCommand *cmd, void *opaque)
 {
-    CommandInfoList *info, **list = opaque;
+    CommandInfo *info;
+    CommandInfoList **list = opaque;
 
     if (!cmd->enabled) {
         return;
     }
 
     info = g_malloc0(sizeof(*info));
-    info->value = g_malloc0(sizeof(*info->value));
-    info->value->name = g_strdup(cmd->name);
-    info->next = *list;
-    *list = info;
+    info->name = g_strdup(cmd->name);
+    QAPI_LIST_PREPEND(*list, info);
 }
 
 CommandInfoList *qmp_query_commands(Error **errp)
@@ -138,18 +137,18 @@ EventInfoList *qmp_query_events(Error **errp)
      * QAPIEvent_str() and QAPIEvent_lookup[].  When the command goes,
      * they should go, too.
      */
-    EventInfoList *info, *ev_list = NULL;
+    EventInfoList *ev_list = NULL;
     QAPIEvent e;
 
     for (e = 0 ; e < QAPI_EVENT__MAX ; e++) {
         const char *event_name = QAPIEvent_str(e);
+        EventInfo *info;
+
         assert(event_name != NULL);
         info = g_malloc0(sizeof(*info));
-        info->value = g_malloc0(sizeof(*info->value));
-        info->value->name = g_strdup(event_name);
+        info->name = g_strdup(event_name);
 
-        info->next = ev_list;
-        ev_list = info;
+        QAPI_LIST_PREPEND(ev_list, info);
     }
 
     return ev_list;

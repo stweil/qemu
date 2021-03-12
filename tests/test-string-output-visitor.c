@@ -88,15 +88,13 @@ static void test_visitor_out_intList(TestOutputVisitorData *data,
 {
     int64_t value[] = {0, 1, 9, 10, 16, 15, 14,
         3, 4, 5, 6, 11, 12, 13, 21, 22, INT64_MAX - 1, INT64_MAX};
-    intList *list = NULL, **tmp = &list;
+    intList *list = NULL, **tail = &list;
     int i;
     Error *err = NULL;
     char *str;
 
     for (i = 0; i < ARRAY_SIZE(value); i++) {
-        *tmp = g_malloc0(sizeof(**tmp));
-        (*tmp)->value = value[i];
-        tmp = &(*tmp)->next;
+        QAPI_LIST_APPEND(tail, value[i]);
     }
 
     visit_type_intList(data->ov, NULL, &list, &err);
@@ -130,13 +128,13 @@ static void test_visitor_out_bool(TestOutputVisitorData *data,
 static void test_visitor_out_number(TestOutputVisitorData *data,
                                     const void *unused)
 {
-    double value = 3.14;
+    double value = 3.1415926535897932;
     char *str;
 
     visit_type_number(data->ov, NULL, &value, &error_abort);
 
     str = visitor_get(data);
-    g_assert_cmpstr(str, ==, "3.140000");
+    g_assert_cmpstr(str, ==, "3.1415926535897931");
 }
 
 static void test_visitor_out_string(TestOutputVisitorData *data,

@@ -25,7 +25,7 @@ typedef enum {
 } report_type;
 
 /* Prepend timestamp to messages */
-bool error_with_timestamp;
+bool message_with_timestamp;
 bool error_with_guestname;
 const char *error_guest_name;
 
@@ -209,7 +209,7 @@ vreport(report_type type, const char *fmt, va_list ap)
     GTimeVal tv;
     gchar *timestr;
 
-    if (error_with_timestamp && !monitor_cur()) {
+    if (message_with_timestamp && !monitor_cur()) {
         g_get_current_time(&tv);
         timestr = g_time_val_to_iso8601(&tv);
         error_printf("%s ", timestr);

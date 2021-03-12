@@ -30,6 +30,7 @@
 #include "hw/irq.h"
 #include "hw/qdev-clock.h"
 #include "hw/qdev-properties.h"
+#include "hw/qdev-properties-system.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
@@ -395,7 +396,7 @@ static void ibex_uart_write(void *opaque, hwaddr addr,
     }
 }
 
-static void ibex_uart_clk_update(void *opaque)
+static void ibex_uart_clk_update(void *opaque, ClockEvent event)
 {
     IbexUartState *s = opaque;
 
@@ -465,7 +466,7 @@ static void ibex_uart_init(Object *obj)
     IbexUartState *s = IBEX_UART(obj);
 
     s->f_clk = qdev_init_clock_in(DEVICE(obj), "f_clock",
-                                  ibex_uart_clk_update, s);
+                                  ibex_uart_clk_update, s, ClockUpdate);
     clock_set_hz(s->f_clk, IBEX_UART_CLOCK);
 
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->tx_watermark);

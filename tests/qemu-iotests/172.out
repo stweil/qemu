@@ -14,7 +14,6 @@ Testing:
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -44,7 +43,6 @@ Testing: -fda TEST_DIR/t.qcow2
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -63,12 +61,12 @@ Testing: -fda TEST_DIR/t.qcow2
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -84,7 +82,6 @@ Testing: -fdb TEST_DIR/t.qcow2
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -114,16 +111,16 @@ Testing: -fdb TEST_DIR/t.qcow2
                 share-rw = false
                 drive-type = "288"
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 floppy0: [not inserted]
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -139,7 +136,6 @@ Testing: -fda TEST_DIR/t.qcow2 -fdb TEST_DIR/t.qcow2.2
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -169,17 +165,17 @@ Testing: -fda TEST_DIR/t.qcow2 -fdb TEST_DIR/t.qcow2.2
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -195,7 +191,6 @@ Testing: -fdb
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -236,7 +231,6 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -255,12 +249,12 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -276,7 +270,6 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2,index=1
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -306,16 +299,16 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2,index=1
                 share-rw = false
                 drive-type = "288"
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 floppy0: [not inserted]
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -331,7 +324,6 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2 -drive if=floppy,file=TEST_DIR/t
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -361,17 +353,17 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2 -drive if=floppy,file=TEST_DIR/t
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -392,7 +384,6 @@ Use -device floppy,unit=0,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -411,12 +402,12 @@ Use -device floppy,unit=0,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -434,7 +425,6 @@ Use -device floppy,unit=1,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -453,12 +443,12 @@ Use -device floppy,unit=1,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -478,7 +468,6 @@ Use -device floppy,unit=1,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -508,17 +497,17 @@ Use -device floppy,unit=1,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -537,7 +526,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -556,12 +544,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -577,7 +565,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,unit=1
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -596,12 +583,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,unit=1
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -617,7 +604,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qco
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -647,17 +633,17 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qco
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[1]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -678,7 +664,6 @@ Use -device floppy,unit=1,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -708,17 +693,17 @@ Use -device floppy,unit=1,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -736,7 +721,6 @@ Use -device floppy,unit=0,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -766,17 +750,17 @@ Use -device floppy,unit=0,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[16]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[23]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -808,7 +792,6 @@ Testing: -fda TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -838,17 +821,17 @@ Testing: -fda TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -864,7 +847,6 @@ Testing: -fda TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -894,17 +876,17 @@ Testing: -fda TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -920,7 +902,6 @@ Testing: -fdb TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -950,17 +931,17 @@ Testing: -fdb TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
                 share-rw = false
                 drive-type = "144"
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -976,7 +957,6 @@ Testing: -fdb TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1006,17 +986,17 @@ Testing: -fdb TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.qcow2.2 -device fl
                 share-rw = false
                 drive-type = "144"
 floppy1 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1041,7 +1021,6 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.q
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1071,17 +1050,17 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.q
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1097,7 +1076,6 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.q
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1127,17 +1105,17 @@ Testing: -drive if=floppy,file=TEST_DIR/t.qcow2 -drive if=none,file=TEST_DIR/t.q
                 share-rw = false
                 drive-type = "144"
 floppy0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none0 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1161,7 +1139,6 @@ Use -device floppy,unit=0,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1191,17 +1168,17 @@ Use -device floppy,unit=0,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1219,7 +1196,6 @@ Use -device floppy,unit=0,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1249,17 +1225,17 @@ Use -device floppy,unit=0,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1277,7 +1253,6 @@ Use -device floppy,unit=1,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1307,17 +1282,17 @@ Use -device floppy,unit=1,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1335,7 +1310,6 @@ Use -device floppy,unit=1,drive=... instead.
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1365,17 +1339,17 @@ Use -device floppy,unit=1,drive=... instead.
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/unattached/device[15]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 none1 (NODE_NAME): TEST_DIR/t.qcow2.2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[22]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1391,7 +1365,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -global floppy.drive=none0 -device
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1410,12 +1383,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -global floppy.drive=none0 -device
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1473,7 +1446,6 @@ Testing: -device floppy
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1500,7 +1472,6 @@ Testing: -device floppy,drive-type=120
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1527,7 +1498,6 @@ Testing: -device floppy,drive-type=144
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1554,7 +1524,6 @@ Testing: -device floppy,drive-type=288
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1584,7 +1553,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,drive-t
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1603,12 +1571,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,drive-t
                 share-rw = false
                 drive-type = "120"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1624,7 +1592,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,drive-t
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1643,12 +1610,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,drive-t
                 share-rw = false
                 drive-type = "288"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1667,7 +1634,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,logical
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1686,12 +1652,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,logical
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]
@@ -1707,7 +1673,6 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,physica
             dma = 2 (0x2)
             driveA = ""
             driveB = ""
-            check_media_rate = true
             fdtypeA = "auto"
             fdtypeB = "auto"
             fallback = "288"
@@ -1726,12 +1691,12 @@ Testing: -drive if=none,file=TEST_DIR/t.qcow2 -device floppy,drive=none0,physica
                 share-rw = false
                 drive-type = "144"
 none0 (NODE_NAME): TEST_DIR/t.qcow2 (qcow2)
-    Attached to:      /machine/peripheral-anon/device[0]
+    Attached to:      /machine/peripheral-anon/device[N]
     Removable device: not locked, tray closed
     Cache mode:       writeback
 
 ide1-cd0: [not inserted]
-    Attached to:      /machine/unattached/device[21]
+    Attached to:      /machine/unattached/device[N]
     Removable device: not locked, tray closed
 
 sd0: [not inserted]

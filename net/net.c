@@ -50,7 +50,6 @@
 #include "qapi/error.h"
 #include "qapi/opts-visitor.h"
 #include "sysemu/sysemu.h"
-#include "sysemu/qtest.h"
 #include "sysemu/runstate.h"
 #include "sysemu/sysemu.h"
 #include "net/filter.h"
@@ -983,6 +982,7 @@ static int (* const net_client_init_fun[NET_CLIENT_DRIVER__MAX])(
 static int net_client_init1(const Netdev *netdev, bool is_netdev, Error **errp)
 {
     NetClientState *peer = NULL;
+    NetClientState *nc;
 
     if (is_netdev) {
         if (netdev->type == NET_CLIENT_DRIVER_NIC ||
@@ -1010,18 +1010,22 @@ static int net_client_init1(const Netdev *netdev, bool is_netdev, Error **errp)
         }
     }
 
+    nc = qemu_find_netdev(netdev->id);
+    if (nc) {
+        error_setg(errp, "Duplicate ID '%s'", netdev->id);
+        return -1;
+    }
+
     if (net_client_init_fun[netdev->type](netdev, netdev->id, peer, errp) < 0) {
         /* FIXME drop when all init functions store an Error */
         if (errp && !*errp) {
-            error_setg(errp, QERR_DEVICE_INIT_FAILED,
+            error_setg(errp, "Device '%s' could not be initialized",
                        NetClientDriver_str(netdev->type));
         }
         return -1;
     }
 
     if (is_netdev) {
-        NetClientState *nc;
-
         nc = qemu_find_netdev(netdev->id);
         assert(nc);
         nc->is_netdev = true;
@@ -1135,6 +1139,7 @@ void qmp_netdev_add(Netdev *netdev, Error **errp)
 void qmp_netdev_del(const char *id, Error **errp)
 {
     NetClientState *nc;
+    QemuOpts *opts;
 
     nc = qemu_find_netdev(id);
     if (!nc) {
@@ -1149,6 +1154,16 @@ void qmp_netdev_del(const char *id, Error **errp)
     }
 
     qemu_del_net_client(nc);
+
+    /*
+     * Wart: we need to delete the QemuOpts associated with netdevs
+     * created via CLI or HMP, to avoid bogus "Duplicate ID" errors in
+     * HMP netdev_add.
+     */
+    opts = qemu_opts_find(qemu_find_opts("netdev"), id);
+    if (opts) {
+        qemu_opts_del(opts);
+    }
 }
 
 static void netfilter_print_info(Monitor *mon, NetFilterState *nf)
@@ -1197,10 +1212,9 @@ RxFilterInfoList *qmp_query_rx_filter(bool has_name, const char *name,
                                       Error **errp)
 {
     NetClientState *nc;
-    RxFilterInfoList *filter_list = NULL, *last_entry = NULL;
+    RxFilterInfoList *filter_list = NULL, **tail = &filter_list;
 
     QTAILQ_FOREACH(nc, &net_clients, next) {
-        RxFilterInfoList *entry;
         RxFilterInfo *info;
 
         if (has_name && strcmp(nc->name, name) != 0) {
@@ -1211,6 +1225,7 @@ RxFilterInfoList *qmp_query_rx_filter(bool has_name, const char *name,
         if (nc->info->type != NET_CLIENT_DRIVER_NIC) {
             if (has_name) {
                 error_setg(errp, "net client(%s) isn't a NIC", name);
+                assert(!filter_list);
                 return NULL;
             }
             continue;
@@ -1224,18 +1239,11 @@ RxFilterInfoList *qmp_query_rx_filter(bool has_name, const char *name,
 
         if (nc->info->query_rx_filter) {
             info = nc->info->query_rx_filter(nc);
-            entry = g_malloc0(sizeof(*entry));
-            entry->value = info;
-
-            if (!filter_list) {
-                filter_list = entry;
-            } else {
-                last_entry->next = entry;
-            }
-            last_entry = entry;
+            QAPI_LIST_APPEND(tail, info);
         } else if (has_name) {
             error_setg(errp, "net client(%s) doesn't support"
                        " rx-filter querying", name);
+            assert(!filter_list);
             return NULL;
         }
 

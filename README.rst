@@ -60,13 +60,15 @@ The QEMU source code is maintained under the GIT version control system.
 
 .. code-block:: shell
 
-   git clone https://git.qemu.org/git/qemu.git
+   git clone https://gitlab.com/qemu-project/qemu.git
 
 When submitting patches, one common approach is to use 'git
 format-patch' and/or 'git send-email' to format & send the mail to the
 qemu-devel@nongnu.org mailing list. All patches submitted must contain
 a 'Signed-off-by' line from the author. Patches should follow the
-guidelines set out in the CODING_STYLE.rst file.
+guidelines set out in the `style section
+<https://www.qemu.org/docs/master/devel/style.html>` of
+the Developers Guide.
 
 Additional information on submitting patches can be found online via
 the QEMU website
@@ -78,7 +80,7 @@ The QEMU website is also maintained under source control.
 
 .. code-block:: shell
 
-  git clone https://git.qemu.org/git/qemu-web.git
+  git clone https://gitlab.com/qemu-project/qemu-web.git
 
 * `<https://www.qemu.org/2017/02/04/the-new-qemu-website-is-up/>`_
 

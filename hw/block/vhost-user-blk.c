@@ -22,6 +22,7 @@
 #include "qemu/cutils.h"
 #include "hw/qdev-core.h"
 #include "hw/qdev-properties.h"
+#include "hw/qdev-properties-system.h"
 #include "hw/virtio/vhost.h"
 #include "hw/virtio/vhost-user-blk.h"
 #include "hw/virtio/virtio.h"
@@ -52,6 +53,9 @@ static const int user_feature_bits[] = {
 static void vhost_user_blk_update_config(VirtIODevice *vdev, uint8_t *config)
 {
     VHostUserBlk *s = VHOST_USER_BLK(vdev);
+
+    /* Our num_queues overrides the device backend */
+    virtio_stw_p(vdev, &s->blkcfg.num_queues, s->num_queues);
 
     memcpy(config, &s->blkcfg, sizeof(struct virtio_blk_config));
 }
@@ -488,10 +492,6 @@ reconnect:
     if (ret < 0) {
         error_report("vhost-user-blk: get block config failed");
         goto reconnect;
-    }
-
-    if (s->blkcfg.num_queues != s->num_queues) {
-        s->blkcfg.num_queues = s->num_queues;
     }
 
     return;

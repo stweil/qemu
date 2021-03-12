@@ -26,6 +26,9 @@ config ECC
 config ONENAND
     bool
 
+config TC58128
+    bool
+
 config NVME_PCI
     bool
     default y if PCI_DEVICES

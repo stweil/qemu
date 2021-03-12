@@ -12,21 +12,25 @@ Contents:
 
 .. toctree::
    :maxdepth: 2
+   :includehidden:
 
    build-system
+   style
    kconfig
+   testing
+   fuzzing
+   control-flow-integrity
    loads-stores
    memory
    migration
    atomics
    stable-process
-   testing
    qtest
-   fuzzing
    decodetree
    secure-coding-practices
    tcg
    tcg-icount
+   tracing
    multi-thread-tcg
    tcg-plugins
    bitops
@@ -35,3 +39,4 @@ Contents:
    clocks
    qom
    block-coroutine-wrapper
+   multi-process

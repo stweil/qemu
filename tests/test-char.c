@@ -413,7 +413,7 @@ static void char_websock_test(void)
     CharBackend client_be;
     Chardev *chr_client;
     Chardev *chr = qemu_chr_new("server",
-                                "websocket:127.0.0.1:0,server,nowait", NULL);
+                                "websocket:127.0.0.1:0,server=on,wait=off", NULL);
     const char handshake[] = "GET / HTTP/1.1\r\n"
                              "Upgrade: websocket\r\n"
                              "Connection: Upgrade\r\n"
@@ -696,7 +696,7 @@ char_socket_addr_to_opt_str(SocketAddress *addr, bool fd_pass,
         fd = ioc->fd;
         ioc->fd = -1;
         optstr = g_strdup_printf("socket,id=cdev0,fd=%d%s",
-                                 fd, is_listen ? ",server,nowait" : "");
+                                 fd, is_listen ? ",server=on,wait=off" : "");
         object_unref(OBJECT(ioc));
         return optstr;
     } else {
@@ -706,13 +706,13 @@ char_socket_addr_to_opt_str(SocketAddress *addr, bool fd_pass,
                                    addr->u.inet.host,
                                    addr->u.inet.port,
                                    reconnect ? reconnect : "",
-                                   is_listen ? ",server,nowait" : "");
+                                   is_listen ? ",server=on,wait=off" : "");
 
         case SOCKET_ADDRESS_TYPE_UNIX:
             return g_strdup_printf("socket,id=cdev0,path=%s%s%s",
                                    addr->u.q_unix.path,
                                    reconnect ? reconnect : "",
-                                   is_listen ? ",server,nowait" : "");
+                                   is_listen ? ",server=on,wait=off" : "");
 
         default:
             g_assert_not_reached();
@@ -780,7 +780,7 @@ static void char_socket_server_test(gconstpointer opaque)
 
     g_setenv("QTEST_SILENT_ERRORS", "1", 1);
     /*
-     * We rely on config->addr containing "nowait", otherwise
+     * We rely on config->addr containing "wait=off", otherwise
      * qemu_chr_new() will block until a client connects. We
      * can't spawn our client thread though, because until
      * qemu_chr_new() returns we don't know what TCP port was
@@ -937,6 +937,7 @@ static void char_socket_client_dupid_test(gconstpointer opaque)
     g_assert_nonnull(opts);
     chr1 = qemu_chr_new_from_opts(opts, NULL, &error_abort);
     g_assert_nonnull(chr1);
+    qemu_chr_wait_connected(chr1, &error_abort);
 
     chr2 = qemu_chr_new_from_opts(opts, NULL, &local_err);
     g_assert_null(chr2);
@@ -1113,7 +1114,7 @@ static void char_socket_server_two_clients_test(gconstpointer opaque)
 
     g_setenv("QTEST_SILENT_ERRORS", "1", 1);
     /*
-     * We rely on addr containing "nowait", otherwise
+     * We rely on addr containing "wait=off", otherwise
      * qemu_chr_new() will block until a client connects. We
      * can't spawn our client thread though, because until
      * qemu_chr_new() returns we don't know what TCP port was
@@ -1298,7 +1299,7 @@ static void char_file_test_internal(Chardev *ext_chr, const char *filepath)
     g_assert(strncmp(contents, "hello!", 6) == 0);
 
     if (!ext_chr) {
-        object_unref(OBJECT(chr));
+        object_unparent(OBJECT(chr));
         g_unlink(out);
     }
     g_free(contents);

@@ -5,10 +5,10 @@
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qerror.h"
 #include "qapi/qmp/qjson.h"
-#include "qapi/qmp/qstring.h"
 #include "qapi/qobject-input-visitor.h"
 #include "qom/object_interfaces.h"
 #include "qemu/help_option.h"
+#include "qemu/id.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
 #include "qapi/opts-visitor.h"
@@ -42,10 +42,18 @@ Object *user_creatable_add_type(const char *type, const char *id,
                                 const QDict *qdict,
                                 Visitor *v, Error **errp)
 {
+    ERRP_GUARD();
     Object *obj;
     ObjectClass *klass;
     const QDictEntry *e;
     Error *local_err = NULL;
+
+    if (id != NULL && !id_wellformed(id)) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "id", "an identifier");
+        error_append_hint(errp, "Identifiers consist of letters, digits, "
+                          "'-', '.', '_', starting with a letter.\n");
+        return NULL;
+    }
 
     klass = object_class_by_name(type);
     if (!klass) {
@@ -207,7 +215,8 @@ char *object_property_help(const char *name, const char *type,
         g_string_append(str, description);
     }
     if (defval) {
-        g_autofree char *def_json = qstring_free(qobject_to_json(defval), TRUE);
+        g_autofree char *def_json = g_string_free(qobject_to_json(defval),
+                                                  true);
         g_string_append_printf(str, " (default: %s)", def_json);
     }
 

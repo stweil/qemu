@@ -4,6 +4,19 @@ if not config_host.has_key('CONFIG_POSIX')
   subdir_done()
 endif
 
+slow_qtests = {
+  'ahci-test' : 60,
+  'bios-tables-test' : 120,
+  'boot-serial-test' : 60,
+  'migration-test' : 150,
+  'npcm7xx_pwm-test': 150,
+  'prom-env-test' : 60,
+  'pxe-test' : 60,
+  'qos-test' : 60,
+  'qom-test' : 300,
+  'test-hmp' : 120,
+}
+
 qtests_generic = [
   'cdrom-test',
   'device-introspect-test',
@@ -33,7 +46,8 @@ qtests_i386 = \
   (config_host.has_key('CONFIG_LINUX') and                                                  \
    config_all_devices.has_key('CONFIG_ISA_IPMI_BT') ? ['ipmi-bt-test'] : []) +              \
   (config_all_devices.has_key('CONFIG_WDT_IB700') ? ['wdt_ib700-test'] : []) +              \
-  (config_all_devices.has_key('CONFIG_PVPANIC') ? ['pvpanic-test'] : []) +                  \
+  (config_all_devices.has_key('CONFIG_PVPANIC_ISA') ? ['pvpanic-test'] : []) +              \
+  (config_all_devices.has_key('CONFIG_PVPANIC_PCI') ? ['pvpanic-pci-test'] : []) +          \
   (config_all_devices.has_key('CONFIG_HDA') ? ['intel-hda-test'] : []) +                    \
   (config_all_devices.has_key('CONFIG_I82801B11') ? ['i82801b11-test'] : []) +             \
   (config_all_devices.has_key('CONFIG_IOH3420') ? ['ioh3420-test'] : []) +                  \
@@ -134,11 +148,19 @@ qtests_sparc64 = \
   ['prom-env-test', 'boot-serial-test']
 
 qtests_npcm7xx = \
-  ['npcm7xx_gpio-test',
+  ['npcm7xx_adc-test',
+   'npcm7xx_gpio-test',
+   'npcm7xx_pwm-test',
    'npcm7xx_rng-test',
+   'npcm7xx_smbus-test',
    'npcm7xx_timer-test',
-   'npcm7xx_watchdog_timer-test']
+   'npcm7xx_watchdog_timer-test'] + \
+   (slirp.found() ? ['npcm7xx_emc-test'] : [])
 qtests_arm = \
+  (config_all_devices.has_key('CONFIG_MPS2') ? ['sse-timer-test'] : []) + \
+  (config_all_devices.has_key('CONFIG_CMSDK_APB_DUALTIMER') ? ['cmsdk-apb-dualtimer-test'] : []) + \
+  (config_all_devices.has_key('CONFIG_CMSDK_APB_TIMER') ? ['cmsdk-apb-timer-test'] : []) + \
+  (config_all_devices.has_key('CONFIG_CMSDK_APB_WATCHDOG') ? ['cmsdk-apb-watchdog-test'] : []) + \
   (config_all_devices.has_key('CONFIG_PFLASH_CFI02') ? ['pflash-cfi02-test'] : []) +         \
   (config_all_devices.has_key('CONFIG_NPCM7XX') ? qtests_npcm7xx : []) + \
   ['arm-cpu-features',
@@ -156,6 +178,7 @@ qtests_aarch64 = \
   ['arm-cpu-features',
    'numa-test',
    'boot-serial-test',
+   'xlnx-can-test',
    'migration-test']
 
 qtests_s390x = \
@@ -188,6 +211,7 @@ qos_test_ss.add(
   'sdhci-test.c',
   'spapr-phb-test.c',
   'tmp105-test.c',
+  'emc141x-test.c',
   'usb-hcd-ohci-test.c',
   'virtio-test.c',
   'virtio-blk-test.c',
@@ -197,7 +221,9 @@ qos_test_ss.add(
   'virtio-serial-test.c',
   'vmxnet3-test.c',
 )
-qos_test_ss.add(when: 'CONFIG_VIRTFS', if_true: files('virtio-9p-test.c'))
+if have_virtfs
+  qos_test_ss.add(files('virtio-9p-test.c'))
+endif
 qos_test_ss.add(when: 'CONFIG_VHOST_USER', if_true: files('vhost-user-test.c'))
 
 tpmemu_files = ['tpm-emu.c', 'tpm-util.c', 'tpm-tests.c']
@@ -262,6 +288,8 @@ foreach dir : target_dirs
          env: qtest_env,
          args: ['--tap', '-k'],
          protocol: 'tap',
+         timeout: slow_qtests.get(test, 30),
+         priority: slow_qtests.get(test, 30),
          suite: ['qtest', 'qtest-' + target_base])
   endforeach
 endforeach

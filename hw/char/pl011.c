@@ -23,6 +23,7 @@
 #include "hw/irq.h"
 #include "hw/sysbus.h"
 #include "hw/qdev-clock.h"
+#include "hw/qdev-properties-system.h"
 #include "migration/vmstate.h"
 #include "chardev/char-fe.h"
 #include "qemu/log.h"
@@ -308,7 +309,7 @@ static void pl011_event(void *opaque, QEMUChrEvent event)
         pl011_put_fifo(opaque, 0x400);
 }
 
-static void pl011_clock_update(void *opaque)
+static void pl011_clock_update(void *opaque, ClockEvent event)
 {
     PL011State *s = PL011(opaque);
 
@@ -377,7 +378,8 @@ static void pl011_init(Object *obj)
         sysbus_init_irq(sbd, &s->irq[i]);
     }
 
-    s->clk = qdev_init_clock_in(DEVICE(obj), "clk", pl011_clock_update, s);
+    s->clk = qdev_init_clock_in(DEVICE(obj), "clk", pl011_clock_update, s,
+                                ClockUpdate);
 
     s->read_trigger = 1;
     s->ifl = 0x12;

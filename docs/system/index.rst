@@ -25,6 +25,8 @@ Contents:
    usb
    ivshmem
    linuxboot
+   generic-loader
+   guest-loader
    vnc-security
    tls
    gdb
@@ -34,6 +36,8 @@ Contents:
    pr-manager
    targets
    security
+   multi-process
    deprecated
+   removed-features
    build-platforms
    license

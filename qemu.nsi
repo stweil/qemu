@@ -41,11 +41,6 @@
 !define OUTFILE "qemu-setup.exe"
 !endif
 
-; Optionally install documentation.
-!ifndef CONFIG_DOCUMENTATION
-!define CONFIG_DOCUMENTATION
-!endif
-
 ; Use maximum compression.
 SetCompressor /SOLID lzma
 
@@ -140,19 +135,8 @@ Section "${PRODUCT}" QEMU_System_File_Section_Description
     File "${SRCDIR}\README.rst"
     File "${SRCDIR}\VERSION"
 
-    File "${DATADIR}\*.bin"
-    File "${DATADIR}\*.dtb"
-    File "${DATADIR}\*.fd"
-    File "${DATADIR}\*.img"
-    File "${DATADIR}\*.lid"
-    File "${DATADIR}\*.ndrv"
-    File "${DATADIR}\*.rom"
-    File "${DATADIR}\openbios-*"
-    File "${DATADIR}\palcode-clipper"
-    File "${DATADIR}\u-boot.e500"
-    File "${DATADIR}\icons\hicolor\scalable\apps\qemu.svg"
-
-    File /r "${DATADIR}\keymaps"
+    File /r "${BINDIR}\keymaps"
+    File /r "${BINDIR}\share"
 
     SetOutPath "$INSTDIR\lib\gdk-pixbuf-2.0\2.10.0"
     FileOpen $0 "loaders.cache" w
@@ -208,18 +192,8 @@ SectionEnd
 
 !ifdef CONFIG_DOCUMENTATION
 Section "$(Documentation_Section_Name)" Documentation_Section_Description
-    SetOutPath "$INSTDIR"
-    File "${DOCDIR}\index.html"
-    SetOutPath "$INSTDIR\interop"
-    FILE /r "${DOCDIR}\interop\*.*"
-    SetOutPath "$INSTDIR\specs"
-    FILE /r "${DOCDIR}\specs\*.*"
-    SetOutPath "$INSTDIR\system"
-    FILE /r "${DOCDIR}\system\*.*"
-    SetOutPath "$INSTDIR\tools"
-    FILE /r "${DOCDIR}\tools\*.*"
-    SetOutPath "$INSTDIR\user"
-    FILE /r "${DOCDIR}\user\*.*"
+    SetOutPath "$INSTDIR\doc"
+    File /r "${BINDIR}\doc"
     SetOutPath "$INSTDIR"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
     CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Link_Description_User_Documentation).lnk" "$INSTDIR\index.html" "" "$INSTDIR\index.html" 0
@@ -273,14 +247,7 @@ Section "Uninstall" Uninstall_Section_Description
     Delete "$INSTDIR\qemu-edid.exe"
     Delete "$INSTDIR\qemu.exe"
     Delete "$INSTDIR\qemu-system-*.exe"
-    Delete "$INSTDIR\index.html"
-    RMDir /r "$INSTDIR\interop"
-    RMDir /r "$INSTDIR\specs"
-    RMDir /r "$INSTDIR\system"
-    RMDir /r "$INSTDIR\tools"
-    RMDir /r "$INSTDIR\user"
-    RMDir /r "$INSTDIR\keymaps"
-    RMDir /r "$INSTDIR\lib"
+    RMDir /r "$INSTDIR\doc"
     RMDir /r "$INSTDIR\share"
     ; Remove generated files
     Delete "$INSTDIR\stderr.txt"

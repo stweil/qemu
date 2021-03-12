@@ -86,7 +86,6 @@ tests = {
   'test-qobject-input-visitor': [testqapi],
   'test-string-input-visitor': [testqapi],
   'test-string-output-visitor': [testqapi],
-  'test-qmp-event': [testqapi],
   'test-opts-visitor': [testqapi],
   'test-visitor-serialization': [testqapi],
   'test-bitmap': [],
@@ -116,6 +115,12 @@ tests = {
   'ptimer-test': ['ptimer-test-stubs.c', meson.source_root() / 'hw/core/ptimer.c'],
   'test-qapi-util': [],
 }
+
+if have_system or have_tools
+  tests += {
+    'test-qmp-event': [testqapi],
+  }
+endif
 
 test_deps = {
   'test-qht-par': qht_bench,
@@ -159,11 +164,11 @@ if have_block
      'CONFIG_POSIX' in config_host
     tests += {
       'test-crypto-tlscredsx509': ['crypto-tls-x509-helpers.c', 'pkix_asn1_tab.c',
-                                   tasn1, crypto],
+                                   tasn1, crypto, gnutls],
       'test-crypto-tlssession': ['crypto-tls-x509-helpers.c', 'pkix_asn1_tab.c', 'crypto-tls-psk-helpers.c',
-                                 tasn1, crypto],
+                                 tasn1, crypto, gnutls],
       'test-io-channel-tls': ['io-channel-helpers.c', 'crypto-tls-x509-helpers.c', 'pkix_asn1_tab.c',
-                              tasn1, io, crypto]}
+                              tasn1, io, crypto, gnutls]}
   endif
   if 'CONFIG_AUTH_PAM' in config_host
     tests += {'test-authz-pam': [authz]}
@@ -232,6 +237,11 @@ test_env = environment()
 test_env.set('G_TEST_SRCDIR', meson.current_source_dir())
 test_env.set('G_TEST_BUILDDIR', meson.current_build_dir())
 
+slow_tests = {
+  'test-crypto-tlscredsx509': 45,
+  'test-crypto-tlssession': 45
+}
+
 foreach test_name, extra: tests
   src = [test_name + '.c']
   deps = [qemuutil]
@@ -249,6 +259,8 @@ foreach test_name, extra: tests
        env: test_env,
        args: ['--tap', '-k'],
        protocol: 'tap',
+       timeout: slow_tests.get(test_name, 30),
+       priority: slow_tests.get(test_name, 30),
        suite: ['unit'])
 endforeach
 
@@ -258,14 +270,14 @@ foreach bench_name, deps: benchs
   benchmark(bench_name, exe,
             args: ['--tap', '-k'],
             protocol: 'tap',
+            timeout: 0,
             suite: ['speed'])
 endforeach
 
 if have_tools and 'CONFIG_VHOST_USER' in config_host and 'CONFIG_LINUX' in config_host
   executable('vhost-user-bridge',
              sources: files('vhost-user-bridge.c'),
-             link_with: [libvhost_user],
-             dependencies: [qemuutil])
+             dependencies: [qemuutil, vhost_user])
 endif
 
 if have_system and 'CONFIG_POSIX' in config_host
@@ -277,7 +289,9 @@ test('decodetree', sh,
      workdir: meson.current_source_dir() / 'decode',
      suite: 'decodetree')
 
-subdir('fp')
+if 'CONFIG_TCG' in config_all
+  subdir('fp')
+endif
 
 if not get_option('tcg').disabled()
   if 'CONFIG_PLUGIN' in config_host

@@ -36,6 +36,7 @@
 #include "hw/block/block.h"
 #include "hw/block/flash.h"
 #include "hw/qdev-properties.h"
+#include "hw/qdev-properties-system.h"
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/bitmap.h"
@@ -801,7 +802,7 @@ static void pflash_cfi02_realize(DeviceState *dev, Error **errp)
 
     if (pfl->blk) {
         uint64_t perm;
-        pfl->ro = blk_is_read_only(pfl->blk);
+        pfl->ro = !blk_supports_write_perm(pfl->blk);
         perm = BLK_PERM_CONSISTENT_READ | (pfl->ro ? 0 : BLK_PERM_WRITE);
         ret = blk_set_perm(pfl->blk, perm, BLK_PERM_ALL, errp);
         if (ret < 0) {

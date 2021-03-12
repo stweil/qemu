@@ -76,7 +76,6 @@ static void timer_cancel(SpiceTimer *timer)
 
 static void timer_remove(SpiceTimer *timer)
 {
-    timer_del(timer->timer);
     timer_free(timer->timer);
     g_free(timer);
 }
@@ -355,11 +354,11 @@ static const char *wan_compression_names[] = {
 
 static SpiceChannelList *qmp_query_spice_channels(void)
 {
-    SpiceChannelList *cur_item = NULL, *head = NULL;
+    SpiceChannelList *head = NULL, **tail = &head;
     ChannelList *item;
 
     QTAILQ_FOREACH(item, &channel_list, link) {
-        SpiceChannelList *chan;
+        SpiceChannel *chan;
         char host[NI_MAXHOST], port[NI_MAXSERV];
         struct sockaddr *paddr;
         socklen_t plen;
@@ -367,29 +366,22 @@ static SpiceChannelList *qmp_query_spice_channels(void)
         assert(item->info->flags & SPICE_CHANNEL_EVENT_FLAG_ADDR_EXT);
 
         chan = g_malloc0(sizeof(*chan));
-        chan->value = g_malloc0(sizeof(*chan->value));
 
         paddr = (struct sockaddr *)&item->info->paddr_ext;
         plen = item->info->plen_ext;
         getnameinfo(paddr, plen,
                     host, sizeof(host), port, sizeof(port),
                     NI_NUMERICHOST | NI_NUMERICSERV);
-        chan->value->host = g_strdup(host);
-        chan->value->port = g_strdup(port);
-        chan->value->family = inet_netfamily(paddr->sa_family);
+        chan->host = g_strdup(host);
+        chan->port = g_strdup(port);
+        chan->family = inet_netfamily(paddr->sa_family);
 
-        chan->value->connection_id = item->info->connection_id;
-        chan->value->channel_type = item->info->type;
-        chan->value->channel_id = item->info->id;
-        chan->value->tls = item->info->flags & SPICE_CHANNEL_EVENT_FLAG_TLS;
+        chan->connection_id = item->info->connection_id;
+        chan->channel_type = item->info->type;
+        chan->channel_id = item->info->id;
+        chan->tls = item->info->flags & SPICE_CHANNEL_EVENT_FLAG_TLS;
 
-       /* XXX: waiting for the qapi to support GSList */
-        if (!cur_item) {
-            head = cur_item = chan;
-        } else {
-            cur_item->next = chan;
-            cur_item = chan;
-        }
+        QAPI_LIST_APPEND(tail, chan);
     }
 
     return head;
@@ -633,6 +625,14 @@ static void vm_change_state_handler(void *opaque, int running,
     }
 }
 
+void qemu_spice_display_init_done(void)
+{
+    if (runstate_is_running()) {
+        qemu_spice_display_start();
+    }
+    qemu_add_vm_change_state_handler(vm_change_state_handler, NULL);
+}
+
 static void qemu_spice_init(void)
 {
     QemuOpts *opts = QTAILQ_FIRST(&qemu_spice_opts.head);
@@ -804,7 +804,6 @@ static void qemu_spice_init(void)
 
     qemu_spice_input_init();
 
-    qemu_add_vm_change_state_handler(vm_change_state_handler, NULL);
     qemu_spice_display_stop();
 
     g_free(x509_key_file);

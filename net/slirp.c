@@ -184,7 +184,6 @@ static void *net_slirp_timer_new(SlirpTimerCb cb,
 
 static void net_slirp_timer_free(void *timer, void *opaque)
 {
-    timer_del(timer);
     timer_free(timer);
 }
 
@@ -474,7 +473,7 @@ static int net_slirp_init(NetClientState *peer, const char *model,
         return -1;
     }
     if (dhcp.s_addr == host.s_addr || dhcp.s_addr == dns.s_addr) {
-        error_setg(errp, "DNS must be different from host and DNS");
+        error_setg(errp, "DHCP must be different from host and DNS");
         return -1;
     }
 
