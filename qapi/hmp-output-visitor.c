@@ -25,6 +25,7 @@ static HMPOutputVisitor *to_hov(Visitor *v)
     return container_of(v, HMPOutputVisitor, visitor);
 }
 
+GCC_FMT_ATTR(2, 3)
 static void hmp_output_append_formatted(Visitor *v, const char *fmt, ...)
 {
     HMPOutputVisitor *ov = to_hov(v);
