@@ -239,19 +239,10 @@ DriveInfo *drive_get(BlockInterfaceType type, int bus, int unit)
     return NULL;
 }
 
-void drive_mark_claimed_by_board(void)
-{
-    BlockBackend *blk;
-    DriveInfo *dinfo;
-
-    for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
-        dinfo = blk_legacy_dinfo(blk);
-        if (dinfo && blk_get_attached_dev(blk)) {
-            dinfo->claimed_by_board = true;
-        }
-    }
-}
-
+/*
+ * Check board claimed all -drive that are meant to be claimed.
+ * Fatal error if any remain unclaimed.
+ */
 void drive_check_orphaned(void)
 {
     BlockBackend *blk;
@@ -261,7 +252,17 @@ void drive_check_orphaned(void)
 
     for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
         dinfo = blk_legacy_dinfo(blk);
-        if (dinfo->is_default || dinfo->type == IF_NONE) {
+        /*
+         * Ignore default drives, because we create certain default
+         * drives unconditionally, then leave them unclaimed.  Not the
+         * users fault.
+         * Ignore IF_VIRTIO, because it gets desugared into -device,
+         * so we can leave failing to -device.
+         * Ignore IF_NONE, because leaving unclaimed IF_NONE remains
+         * available for device_add is a feature.
+         */
+        if (dinfo->is_default || dinfo->type == IF_VIRTIO
+            || dinfo->type == IF_NONE) {
             continue;
         }
         if (!blk_get_attached_dev(blk)) {
@@ -272,14 +273,6 @@ void drive_check_orphaned(void)
                          if_name[dinfo->type], dinfo->bus, dinfo->unit);
             loc_pop(&loc);
             orphans = true;
-            continue;
-        }
-        if (!dinfo->claimed_by_board && dinfo->type != IF_VIRTIO) {
-            loc_push_none(&loc);
-            qemu_opts_loc_restore(dinfo->opts);
-            warn_report("bogus if=%s is deprecated, use if=none",
-                        if_name[dinfo->type]);
-            loc_pop(&loc);
         }
     }
 
@@ -969,11 +962,7 @@ DriveInfo *drive_new(QemuOpts *all_opts, BlockInterfaceType block_default_type,
         QemuOpts *devopts;
         devopts = qemu_opts_create(qemu_find_opts("device"), NULL, 0,
                                    &error_abort);
-        if (arch_type == QEMU_ARCH_S390X) {
-            qemu_opt_set(devopts, "driver", "virtio-blk-ccw", &error_abort);
-        } else {
-            qemu_opt_set(devopts, "driver", "virtio-blk-pci", &error_abort);
-        }
+        qemu_opt_set(devopts, "driver", "virtio-blk", &error_abort);
         qemu_opt_set(devopts, "drive", qdict_get_str(bs_opts, "id"),
                      &error_abort);
     }
@@ -2412,14 +2401,6 @@ exit:
         qapi_free_TransactionProperties(props);
     }
     job_txn_unref(block_job_txn);
-}
-
-void qmp_block_passwd(bool has_device, const char *device,
-                      bool has_node_name, const char *node_name,
-                      const char *password, Error **errp)
-{
-    error_setg(errp,
-               "Setting block passwords directly is no longer supported");
 }
 
 BlockDirtyBitmapSha256 *qmp_x_debug_block_dirty_bitmap_sha256(const char *node,

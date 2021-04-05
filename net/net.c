@@ -23,6 +23,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu-common.h"
 
 #include "net/net.h"
 #include "clients.h"
@@ -35,7 +36,6 @@
 #include "monitor/monitor.h"
 #include "qemu/help_option.h"
 #include "qapi/qapi-commands-net.h"
-#include "qapi/qapi-visit-net.h"
 #include "qapi/qmp/qdict.h"
 #include "qapi/qmp/qerror.h"
 #include "qemu/error-report.h"
@@ -43,6 +43,7 @@
 #include "qemu/cutils.h"
 #include "qemu/config-file.h"
 #include "qemu/ctype.h"
+#include "qemu/id.h"
 #include "qemu/iov.h"
 #include "qemu/qemu-print.h"
 #include "qemu/main-loop.h"
@@ -54,6 +55,7 @@
 #include "sysemu/sysemu.h"
 #include "net/filter.h"
 #include "qapi/string-output-visitor.h"
+#include "qapi/hmp-output-visitor.h"
 
 /* Net bridge is currently not supported for W32. */
 #if !defined(_WIN32)
@@ -128,11 +130,12 @@ char *qemu_mac_strdup_printf(const uint8_t *macaddr)
 
 void qemu_format_nic_info_str(NetClientState *nc, uint8_t macaddr[6])
 {
-    snprintf(nc->info_str, sizeof(nc->info_str),
-             "model=%s,macaddr=%02x:%02x:%02x:%02x:%02x:%02x",
-             nc->model,
-             macaddr[0], macaddr[1], macaddr[2],
-             macaddr[3], macaddr[4], macaddr[5]);
+    g_free(nc->info_str);
+    nc->info_str = g_strdup_printf(
+        "model=%s,macaddr=%02x:%02x:%02x:%02x:%02x:%02x",
+        nc->model,
+        macaddr[0], macaddr[1], macaddr[2],
+        macaddr[3], macaddr[4], macaddr[5]);
 }
 
 static int mac_table[256] = {0};
@@ -351,6 +354,8 @@ static void qemu_free_net_client(NetClientState *nc)
     }
     g_free(nc->name);
     g_free(nc->model);
+    g_free(nc->info_str);
+    qapi_free_NetdevInfo(nc->stored_config);
     if (nc->destructor) {
         nc->destructor(nc);
     }
@@ -527,6 +532,17 @@ int qemu_set_vnet_be(NetClientState *nc, bool is_be)
 #endif
 }
 
+int qemu_can_receive_packet(NetClientState *nc)
+{
+    if (nc->receive_disabled) {
+        return 0;
+    } else if (nc->info->can_receive &&
+               !nc->info->can_receive(nc)) {
+        return 0;
+    }
+    return 1;
+}
+
 int qemu_can_send_packet(NetClientState *sender)
 {
     int vm_running = runstate_is_running();
@@ -539,13 +555,7 @@ int qemu_can_send_packet(NetClientState *sender)
         return 1;
     }
 
-    if (sender->peer->receive_disabled) {
-        return 0;
-    } else if (sender->peer->info->can_receive &&
-               !sender->peer->info->can_receive(sender->peer)) {
-        return 0;
-    }
-    return 1;
+    return qemu_can_receive_packet(sender->peer);
 }
 
 static ssize_t filter_receive_iov(NetClientState *nc,
@@ -676,6 +686,25 @@ ssize_t qemu_send_packet_async(NetClientState *sender,
 ssize_t qemu_send_packet(NetClientState *nc, const uint8_t *buf, int size)
 {
     return qemu_send_packet_async(nc, buf, size, NULL);
+}
+
+ssize_t qemu_receive_packet(NetClientState *nc, const uint8_t *buf, int size)
+{
+    if (!qemu_can_receive_packet(nc)) {
+        return 0;
+    }
+
+    return qemu_net_queue_receive(nc->incoming_queue, buf, size);
+}
+
+ssize_t qemu_receive_packet_iov(NetClientState *nc, const struct iovec *iov,
+                                int iovcnt)
+{
+    if (!qemu_can_receive_packet(nc)) {
+        return 0;
+    }
+
+    return qemu_net_queue_receive_iov(nc->incoming_queue, iov, iovcnt);
 }
 
 ssize_t qemu_send_packet_raw(NetClientState *nc, const uint8_t *buf, int size)
@@ -1110,8 +1139,7 @@ static int net_client_init(QemuOpts *opts, bool is_netdev, Error **errp)
 
     /* Create an ID for -net if the user did not specify one */
     if (!is_netdev && !qemu_opts_id(opts)) {
-        static int idx;
-        qemu_opts_set_id(opts, g_strdup_printf("__org.qemu.net%i", idx++));
+        qemu_opts_set_id(opts, id_generate(ID_NET));
     }
 
     if (visit_type_Netdev(v, NULL, &object, errp)) {
@@ -1133,6 +1161,11 @@ void netdev_add(QemuOpts *opts, Error **errp)
 
 void qmp_netdev_add(Netdev *netdev, Error **errp)
 {
+    if (!id_wellformed(netdev->id)) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "id", "an identifier");
+        return;
+    }
+
     net_client_init1(netdev, true, errp);
 }
 
@@ -1189,14 +1222,42 @@ static void netfilter_print_info(Monitor *mon, NetFilterState *nf)
     monitor_printf(mon, "\n");
 }
 
+static char *generate_info_str(NetClientState *nc)
+{
+    NetdevInfo *ni = nc->stored_config;
+    char *ret_out = NULL;
+    Visitor *v;
+
+    /* Use legacy field info_str for NIC and hubports */
+    if ((nc->info->type == NET_CLIENT_DRIVER_NIC) ||
+        (nc->info->type == NET_CLIENT_DRIVER_HUBPORT)) {
+        return g_strdup(nc->info_str ? nc->info_str : "");
+    }
+
+    if (!ni) {
+        return g_malloc0(1);
+    }
+
+    v = hmp_output_visitor_new(&ret_out);
+    if (visit_type_NetdevInfo(v, "", &ni, NULL)) {
+        visit_complete(v, &ret_out);
+    }
+    visit_free(v);
+
+    return ret_out;
+}
+
 void print_net_client(Monitor *mon, NetClientState *nc)
 {
     NetFilterState *nf;
+    char *info_str = generate_info_str(nc);
 
     monitor_printf(mon, "%s: index=%d,type=%s,%s\n", nc->name,
                    nc->queue_index,
                    NetClientDriver_str(nc->info->type),
-                   nc->info_str);
+                   info_str);
+    g_free(info_str);
+
     if (!QTAILQ_EMPTY(&nc->filters)) {
         monitor_printf(mon, "filters:\n");
     }
@@ -1257,6 +1318,34 @@ RxFilterInfoList *qmp_query_rx_filter(bool has_name, const char *name,
     }
 
     return filter_list;
+}
+
+NetdevInfoList *qmp_query_netdev(Error **errp)
+{
+    NetdevInfoList *list = NULL;
+    NetClientState *nc;
+
+    QTAILQ_FOREACH(nc, &net_clients, next) {
+        /*
+         * Only look at netdevs (backend network devices), not for each queue
+         * or NIC / hubport
+         */
+        if (nc->stored_config) {
+            NetdevInfo *element = QAPI_CLONE(NetdevInfo, nc->stored_config);
+
+            g_free(element->id); /* Need to dealloc empty id after clone */
+            element->id = g_strdup(nc->name);
+
+            element->has_peer_id = nc->peer != NULL;
+            if (element->has_peer_id) {
+                element->peer_id = g_strdup(nc->peer->name);
+            }
+
+            QAPI_LIST_PREPEND(list, element);
+        }
+    }
+
+    return list;
 }
 
 void hmp_info_network(Monitor *mon, const QDict *qdict)
@@ -1349,7 +1438,7 @@ void qmp_set_link(const char *name, bool up, Error **errp)
     }
 }
 
-static void net_vm_change_state_handler(void *opaque, int running,
+static void net_vm_change_state_handler(void *opaque, bool running,
                                         RunState state)
 {
     NetClientState *nc;
@@ -1466,7 +1555,7 @@ static int net_param_nic(void *dummy, QemuOpts *opts, Error **errp)
     /* Create an ID if the user did not specify one */
     nd_id = g_strdup(qemu_opts_id(opts));
     if (!nd_id) {
-        nd_id = g_strdup_printf("__org.qemu.nic%i", idx);
+        nd_id = id_generate(ID_NET);
         qemu_opts_set_id(opts, nd_id);
     }
 

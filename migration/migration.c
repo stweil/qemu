@@ -323,7 +323,7 @@ static int migrate_send_rp_message(MigrationIncomingState *mis,
     int ret = 0;
 
     trace_migrate_send_rp_message((int)message_type, len);
-    qemu_mutex_lock(&mis->rp_mutex);
+    QEMU_LOCK_GUARD(&mis->rp_mutex);
 
     /*
      * It's possible that the file handle got lost due to network
@@ -331,7 +331,7 @@ static int migrate_send_rp_message(MigrationIncomingState *mis,
      */
     if (!mis->to_src_file) {
         ret = -EIO;
-        goto error;
+        return ret;
     }
 
     qemu_put_be16(mis->to_src_file, (unsigned int)message_type);
@@ -342,8 +342,6 @@ static int migrate_send_rp_message(MigrationIncomingState *mis,
     /* It's possible that qemu file got error during sending */
     ret = qemu_file_get_error(mis->to_src_file);
 
-error:
-    qemu_mutex_unlock(&mis->rp_mutex);
     return ret;
 }
 
@@ -2316,51 +2314,6 @@ void qmp_migrate_continue(MigrationStatus state, Error **errp)
         return;
     }
     qemu_sem_post(&s->pause_sem);
-}
-
-void qmp_migrate_set_cache_size(int64_t value, Error **errp)
-{
-    MigrateSetParameters p = {
-        .has_xbzrle_cache_size = true,
-        .xbzrle_cache_size = value,
-    };
-
-    qmp_migrate_set_parameters(&p, errp);
-}
-
-uint64_t qmp_query_migrate_cache_size(Error **errp)
-{
-    return migrate_xbzrle_cache_size();
-}
-
-void qmp_migrate_set_speed(int64_t value, Error **errp)
-{
-    MigrateSetParameters p = {
-        .has_max_bandwidth = true,
-        .max_bandwidth = value,
-    };
-
-    qmp_migrate_set_parameters(&p, errp);
-}
-
-void qmp_migrate_set_downtime(double value, Error **errp)
-{
-    if (value < 0 || value > MAX_MIGRATE_DOWNTIME_SECONDS) {
-        error_setg(errp, QERR_INVALID_PARAMETER_VALUE,
-                   "downtime_limit",
-                   "an integer in the range of 0 to "
-                    stringify(MAX_MIGRATE_DOWNTIME_SECONDS)" seconds");
-        return;
-    }
-
-    value *= 1000; /* Convert to milliseconds */
-
-    MigrateSetParameters p = {
-        .has_downtime_limit = true,
-        .downtime_limit = (int64_t)value,
-    };
-
-    qmp_migrate_set_parameters(&p, errp);
 }
 
 bool migrate_release_ram(void)

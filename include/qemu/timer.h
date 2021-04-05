@@ -629,8 +629,10 @@ void timer_del(QEMUTimer *ts);
  */
 static inline void timer_free(QEMUTimer *ts)
 {
-    timer_del(ts);
-    g_free(ts);
+    if (ts) {
+        timer_del(ts);
+        g_free(ts);
+    }
 }
 
 /**
@@ -794,6 +796,14 @@ static inline int64_t get_max_clock_jump(void)
      */
     return 60 * NANOSECONDS_PER_SECOND;
 }
+
+/**
+ * timer_deadline_ms:
+ *
+ * Returns the remaining miliseconds for @timer to expire, or zero
+ * if the timer is no longer pending.
+ */
+int64_t timer_deadline_ms(QEMUTimer *timer);
 
 /*
  * Low level clock functions

@@ -8,6 +8,7 @@ util_ss.add(files(
   'qobject-output-visitor.c',
   'string-input-visitor.c',
   'string-output-visitor.c',
+  'hmp-output-visitor.c',
 ))
 if have_system or have_tools
   util_ss.add(files(
@@ -24,6 +25,7 @@ qapi_all_modules = [
   'block-export',
   'char',
   'common',
+  'compat',
   'control',
   'crypto',
   'dump',

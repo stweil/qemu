@@ -107,8 +107,9 @@ static void tcg_out_ld(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg1,
 static bool tcg_out_mov(TCGContext *s, TCGType type, TCGReg ret, TCGReg arg);
 static void tcg_out_movi(TCGContext *s, TCGType type,
                          TCGReg ret, tcg_target_long arg);
-static void tcg_out_op(TCGContext *s, TCGOpcode opc, const TCGArg *args,
-                       const int *const_args);
+static void tcg_out_op(TCGContext *s, TCGOpcode opc,
+                       const TCGArg args[TCG_MAX_OP_ARGS],
+                       const int const_args[TCG_MAX_OP_ARGS]);
 #if TCG_TARGET_MAYBE_vec
 static bool tcg_out_dup_vec(TCGContext *s, TCGType type, unsigned vece,
                             TCGReg dst, TCGReg src);
@@ -116,9 +117,10 @@ static bool tcg_out_dupm_vec(TCGContext *s, TCGType type, unsigned vece,
                              TCGReg dst, TCGReg base, intptr_t offset);
 static void tcg_out_dupi_vec(TCGContext *s, TCGType type, unsigned vece,
                              TCGReg dst, int64_t arg);
-static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc, unsigned vecl,
-                           unsigned vece, const TCGArg *args,
-                           const int *const_args);
+static void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+                           unsigned vecl, unsigned vece,
+                           const TCGArg args[TCG_MAX_OP_ARGS],
+                           const int const_args[TCG_MAX_OP_ARGS]);
 #else
 static inline bool tcg_out_dup_vec(TCGContext *s, TCGType type, unsigned vece,
                                    TCGReg dst, TCGReg src)
@@ -135,9 +137,10 @@ static inline void tcg_out_dupi_vec(TCGContext *s, TCGType type, unsigned vece,
 {
     g_assert_not_reached();
 }
-static inline void tcg_out_vec_op(TCGContext *s, TCGOpcode opc, unsigned vecl,
-                                  unsigned vece, const TCGArg *args,
-                                  const int *const_args)
+static inline void tcg_out_vec_op(TCGContext *s, TCGOpcode opc,
+                                  unsigned vecl, unsigned vece,
+                                  const TCGArg args[TCG_MAX_OP_ARGS],
+                                  const int const_args[TCG_MAX_OP_ARGS])
 {
     g_assert_not_reached();
 }
@@ -825,7 +828,6 @@ void tcg_region_init(void)
     size_t region_size;
     size_t n_regions;
     size_t i;
-    uintptr_t splitwx_diff;
 
     n_regions = tcg_n_regions();
 
@@ -855,19 +857,22 @@ void tcg_region_init(void)
     /* account for that last guard page */
     region.end -= page_size;
 
-    /* set guard pages */
-    splitwx_diff = tcg_splitwx_diff;
+    /*
+     * Set guard pages in the rw buffer, as that's the one into which
+     * buffer overruns could occur.  Do not set guard pages in the rx
+     * buffer -- let that one use hugepages throughout.
+     */
     for (i = 0; i < region.n; i++) {
         void *start, *end;
-        int rc;
 
         tcg_region_bounds(i, &start, &end);
-        rc = qemu_mprotect_none(end, page_size);
-        g_assert(!rc);
-        if (splitwx_diff) {
-            rc = qemu_mprotect_none(end + splitwx_diff, page_size);
-            g_assert(!rc);
-        }
+
+        /*
+         * macOS 11.2 has a bug (Apple Feedback FB8994773) in which mprotect
+         * rejects a permission change from RWX -> NONE.  Guard pages are
+         * nice for bug detection but are not essential; ignore any failure.
+         */
+        (void)qemu_mprotect_none(end, page_size);
     }
 
     tcg_region_trees_init();

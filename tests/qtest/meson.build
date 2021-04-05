@@ -17,7 +17,10 @@ slow_qtests = {
   'test-hmp' : 120,
 }
 
-qtests_generic = [
+qtests_generic = \
+  (config_all_devices.has_key('CONFIG_MEGASAS_SCSI_PCI') ? ['fuzz-megasas-test'] : []) + \
+  (config_all_devices.has_key('CONFIG_VIRTIO_SCSI') ? ['fuzz-virtio-scsi-test'] : []) + \
+  [
   'cdrom-test',
   'device-introspect-test',
   'machine-none-test',
@@ -29,6 +32,9 @@ qtests_generic = [
 ]
 if config_host.has_key('CONFIG_MODULES')
   qtests_generic += [ 'modules-test' ]
+endif
+if slirp.found()
+  qtests_generic += [ 'test-query-netdev' ]
 endif
 
 qtests_pci = \
@@ -51,6 +57,7 @@ qtests_i386 = \
   (config_all_devices.has_key('CONFIG_HDA') ? ['intel-hda-test'] : []) +                    \
   (config_all_devices.has_key('CONFIG_I82801B11') ? ['i82801b11-test'] : []) +             \
   (config_all_devices.has_key('CONFIG_IOH3420') ? ['ioh3420-test'] : []) +                  \
+  (config_all_devices.has_key('CONFIG_LPC_ICH9') ? ['lpc-ich9-test'] : []) +              \
   (config_all_devices.has_key('CONFIG_USB_UHCI') ? ['usb-hcd-uhci-test'] : []) +            \
   (config_all_devices.has_key('CONFIG_USB_UHCI') and                                        \
    config_all_devices.has_key('CONFIG_USB_EHCI') ? ['usb-hcd-ehci-test'] : []) +            \
@@ -60,6 +67,7 @@ qtests_i386 = \
   (config_all_devices.has_key('CONFIG_TPM_TIS_ISA') ? ['tpm-tis-test'] : []) +              \
   (config_all_devices.has_key('CONFIG_TPM_TIS_ISA') ? ['tpm-tis-swtpm-test'] : []) +        \
   (config_all_devices.has_key('CONFIG_RTL8139_PCI') ? ['rtl8139-test'] : []) +              \
+  (config_all_devices.has_key('CONFIG_E1000E_PCI_EXPRESS') ? ['fuzz-e1000e-test'] : []) +   \
   qtests_pci +                                                                              \
   ['fdc-test',
    'ide-test',
@@ -68,7 +76,6 @@ qtests_i386 = \
    'bios-tables-test',
    'rtc-test',
    'i440fx-test',
-   'fuzz-test',
    'fw_cfg-test',
    'device-plug-test',
    'drive_del-test',

@@ -121,7 +121,7 @@ static void XBZRLE_cache_unlock(void)
 /**
  * xbzrle_cache_resize: resize the xbzrle cache
  *
- * This function is called from qmp_migrate_set_cache_size in main
+ * This function is called from migrate_params_apply in main
  * thread, possibly while a migration is in progress.  A running
  * migration may be using the cache and might finish during this call,
  * hence changes to the cache are protected by XBZRLE.lock().
@@ -819,7 +819,7 @@ static inline bool migration_bitmap_clear_dirty(RAMState *rs,
 {
     bool ret;
 
-    qemu_mutex_lock(&rs->bitmap_mutex);
+    QEMU_LOCK_GUARD(&rs->bitmap_mutex);
 
     /*
      * Clear dirty bitmap if needed.  This _must_ be called before we
@@ -852,7 +852,6 @@ static inline bool migration_bitmap_clear_dirty(RAMState *rs,
     if (ret) {
         rs->migration_dirty_pages--;
     }
-    qemu_mutex_unlock(&rs->bitmap_mutex);
 
     return ret;
 }
@@ -3275,7 +3274,7 @@ static void decompress_data_with_multi_threads(QEMUFile *f,
     int idx, thread_count;
 
     thread_count = migrate_decompress_threads();
-    qemu_mutex_lock(&decomp_done_lock);
+    QEMU_LOCK_GUARD(&decomp_done_lock);
     while (true) {
         for (idx = 0; idx < thread_count; idx++) {
             if (decomp_param[idx].done) {
@@ -3295,7 +3294,6 @@ static void decompress_data_with_multi_threads(QEMUFile *f,
             qemu_cond_wait(&decomp_done_cond, &decomp_done_lock);
         }
     }
-    qemu_mutex_unlock(&decomp_done_lock);
 }
 
  /*

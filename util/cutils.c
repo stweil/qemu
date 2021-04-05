@@ -278,10 +278,9 @@ static int do_strtosz(const char *nptr, const char **end,
     int retval;
     const char *endptr, *f;
     unsigned char c;
-    bool mul_required = false, hex = false;
-    uint64_t val;
+    bool hex = false;
+    uint64_t val, valf = 0;
     int64_t mul;
-    double fraction = 0.0;
 
     /* Parse integral portion as decimal. */
     retval = qemu_strtou64(nptr, &endptr, 10, &val);
@@ -311,17 +310,19 @@ static int do_strtosz(const char *nptr, const char **end,
          * without fractional digits.  If we see an exponent, treat
          * the entire input as invalid instead.
          */
+        double fraction;
+
         f = endptr;
         retval = qemu_strtod_finite(f, &endptr, &fraction);
         if (retval) {
-            fraction = 0.0;
             endptr++;
         } else if (memchr(f, 'e', endptr - f) || memchr(f, 'E', endptr - f)) {
             endptr = nptr;
             retval = -EINVAL;
             goto out;
-        } else if (fraction != 0) {
-            mul_required = true;
+        } else {
+            /* Extract into a 64-bit fixed-point fraction. */
+            valf = (uint64_t)(fraction * 0x1p64);
         }
     }
     c = *endptr;
@@ -336,16 +337,34 @@ static int do_strtosz(const char *nptr, const char **end,
         mul = suffix_mul(default_suffix, unit);
         assert(mul > 0);
     }
-    if (mul == 1 && mul_required) {
-        endptr = nptr;
-        retval = -EINVAL;
-        goto out;
+    if (mul == 1) {
+        /* When a fraction is present, a scale is required. */
+        if (valf != 0) {
+            endptr = nptr;
+            retval = -EINVAL;
+            goto out;
+        }
+    } else {
+        uint64_t valh, tmp;
+
+        /* Compute exact result: 64.64 x 64.0 -> 128.64 fixed point */
+        mulu64(&val, &valh, val, mul);
+        mulu64(&valf, &tmp, valf, mul);
+        val += tmp;
+        valh += val < tmp;
+
+        /* Round 0.5 upward. */
+        tmp = valf >> 63;
+        val += tmp;
+        valh += val < tmp;
+
+        /* Report overflow. */
+        if (valh != 0) {
+            retval = -ERANGE;
+            goto out;
+        }
     }
-    if (val > (UINT64_MAX - ((uint64_t) (fraction * mul))) / mul) {
-        retval = -ERANGE;
-        goto out;
-    }
-    *result = val * mul + (uint64_t) (fraction * mul);
+
     retval = 0;
 
 out:
@@ -353,6 +372,9 @@ out:
         *end = endptr;
     } else if (*endptr) {
         retval = -EINVAL;
+    }
+    if (retval == 0) {
+        *result = val;
     }
 
     return retval;
@@ -377,9 +399,22 @@ int qemu_strtosz_metric(const char *nptr, const char **end, uint64_t *result)
  * Helper function for error checking after strtol() and the like
  */
 static int check_strtox_error(const char *nptr, char *ep,
-                              const char **endptr, int libc_errno)
+                              const char **endptr, bool check_zero,
+                              int libc_errno)
 {
     assert(ep >= nptr);
+
+    /* Windows has a bug in that it fails to parse 0 from "0x" in base 16 */
+    if (check_zero && ep == nptr && libc_errno == 0) {
+        char *tmp;
+
+        errno = 0;
+        if (strtol(nptr, &tmp, 10) == 0 && errno == 0 &&
+            (*tmp == 'x' || *tmp == 'X')) {
+            ep = tmp;
+        }
+    }
+
     if (endptr) {
         *endptr = ep;
     }
@@ -446,7 +481,7 @@ int qemu_strtoi(const char *nptr, const char **endptr, int base,
     } else {
         *result = lresult;
     }
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, lresult == 0, errno);
 }
 
 /**
@@ -505,7 +540,7 @@ int qemu_strtoui(const char *nptr, const char **endptr, int base,
             *result = lresult;
         }
     }
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, lresult == 0, errno);
 }
 
 /**
@@ -547,7 +582,7 @@ int qemu_strtol(const char *nptr, const char **endptr, int base,
 
     errno = 0;
     *result = strtol(nptr, &ep, base);
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, *result == 0, errno);
 }
 
 /**
@@ -594,7 +629,7 @@ int qemu_strtoul(const char *nptr, const char **endptr, int base,
     if (errno == ERANGE) {
         *result = -1;
     }
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, *result == 0, errno);
 }
 
 /**
@@ -620,7 +655,7 @@ int qemu_strtoi64(const char *nptr, const char **endptr, int base,
     QEMU_BUILD_BUG_ON(sizeof(int64_t) != sizeof(long long));
     errno = 0;
     *result = strtoll(nptr, &ep, base);
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, *result == 0, errno);
 }
 
 /**
@@ -649,7 +684,7 @@ int qemu_strtou64(const char *nptr, const char **endptr, int base,
     if (errno == ERANGE) {
         *result = -1;
     }
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, *result == 0, errno);
 }
 
 /**
@@ -689,7 +724,7 @@ int qemu_strtod(const char *nptr, const char **endptr, double *result)
 
     errno = 0;
     *result = strtod(nptr, &ep);
-    return check_strtox_error(nptr, ep, endptr, errno);
+    return check_strtox_error(nptr, ep, endptr, false, errno);
 }
 
 /**

@@ -29,8 +29,10 @@
 #include "exec/cpu-common.h"
 #include "hw/boards.h"
 #include "hw/qdev-properties.h"
+#include "qapi/compat-policy.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qjson.h"
 #include "qemu-version.h"
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
@@ -113,10 +115,12 @@
 #include "sysemu/replay.h"
 #include "qapi/qapi-events-run-state.h"
 #include "qapi/qapi-visit-block-core.h"
+#include "qapi/qapi-visit-compat.h"
 #include "qapi/qapi-visit-ui.h"
 #include "qapi/qapi-commands-block-core.h"
 #include "qapi/qapi-commands-migration.h"
 #include "qapi/qapi-commands-misc.h"
+#include "qapi/qapi-visit-qom.h"
 #include "qapi/qapi-commands-ui.h"
 #include "qapi/qmp/qerror.h"
 #include "sysemu/iothread.h"
@@ -132,10 +136,16 @@ typedef struct BlockdevOptionsQueueEntry {
 
 typedef QSIMPLEQ_HEAD(, BlockdevOptionsQueueEntry) BlockdevOptionsQueue;
 
+typedef struct ObjectOption {
+    ObjectOptions *opts;
+    QTAILQ_ENTRY(ObjectOption) next;
+} ObjectOption;
+
 static const char *cpu_option;
 static const char *mem_path;
 static const char *incoming;
 static const char *loadvm;
+static QTAILQ_HEAD(, ObjectOption) object_opts = QTAILQ_HEAD_INITIALIZER(object_opts);
 static ram_addr_t maxram_size;
 static uint64_t ram_slots;
 static int display_remote;
@@ -180,7 +190,6 @@ static struct {
     { .driver = "floppy",               .flag = &default_floppy    },
     { .driver = "ide-cd",               .flag = &default_cdrom     },
     { .driver = "ide-hd",               .flag = &default_cdrom     },
-    { .driver = "ide-drive",            .flag = &default_cdrom     },
     { .driver = "scsi-cd",              .flag = &default_cdrom     },
     { .driver = "scsi-hd",              .flag = &default_cdrom     },
     { .driver = "VGA",                  .flag = &default_vga       },
@@ -921,7 +930,7 @@ static const VGAInterfaceInfo vga_interfaces[VGA_TYPE_MAX] = {
     [VGA_TCX] = {
         .opt_name = "tcx",
         .name = "TCX framebuffer",
-        .class_names = { "SUNW,tcx" },
+        .class_names = { "sun-tcx" },
     },
     [VGA_CG3] = {
         .opt_name = "cg3",
@@ -1687,6 +1696,58 @@ static int machine_set_property(void *opaque,
     return object_parse_property_opt(opaque, name, value, "type", errp);
 }
 
+static void object_option_foreach_add(bool (*type_opt_predicate)(const char *))
+{
+    ObjectOption *opt, *next;
+
+    QTAILQ_FOREACH_SAFE(opt, &object_opts, next, next) {
+        const char *type = ObjectType_str(opt->opts->qom_type);
+        if (type_opt_predicate(type)) {
+            user_creatable_add_qapi(opt->opts, &error_fatal);
+            qapi_free_ObjectOptions(opt->opts);
+            QTAILQ_REMOVE(&object_opts, opt, next);
+            g_free(opt);
+        }
+    }
+}
+
+static void object_option_parse(const char *optarg)
+{
+    ObjectOption *opt;
+    QemuOpts *opts;
+    const char *type;
+    Visitor *v;
+
+    if (optarg[0] == '{') {
+        QObject *obj = qobject_from_json(optarg, &error_fatal);
+
+        v = qobject_input_visitor_new(obj);
+        qobject_unref(obj);
+    } else {
+        opts = qemu_opts_parse_noisily(qemu_find_opts("object"),
+                                       optarg, true);
+        if (!opts) {
+            exit(1);
+        }
+
+        type = qemu_opt_get(opts, "qom-type");
+        if (!type) {
+            error_setg(&error_fatal, QERR_MISSING_PARAMETER, "qom-type");
+        }
+        if (user_creatable_print_help(type, opts)) {
+            exit(0);
+        }
+
+        v = opts_visitor_new(opts);
+    }
+
+    opt = g_new0(ObjectOption, 1);
+    visit_type_ObjectOptions(v, NULL, &opt->opts, &error_fatal);
+    visit_free(v);
+
+    QTAILQ_INSERT_TAIL(&object_opts, opt, next);
+}
+
 /*
  * Initial object creation happens before all other
  * QEMU data types are created. The majority of objects
@@ -1694,12 +1755,8 @@ static int machine_set_property(void *opaque,
  * cannot be created here, as it depends on the chardev
  * already existing.
  */
-static bool object_create_early(const char *type, QemuOpts *opts)
+static bool object_create_early(const char *type)
 {
-    if (user_creatable_print_help(type, opts)) {
-        exit(0);
-    }
-
     /*
      * Objects should not be made "delayed" without a reason.  If you
      * add one, state the reason in a comment!
@@ -1818,9 +1875,7 @@ static void qemu_create_early_backends(void)
         exit(1);
     }
 
-    qemu_opts_foreach(qemu_find_opts("object"),
-                      user_creatable_add_opts_foreach,
-                      object_create_early, &error_fatal);
+    object_option_foreach_add(object_create_early);
 
     /* spice needs the timers to be initialized by this point */
     /* spice must initialize before audio as it changes the default auiodev */
@@ -1849,9 +1904,9 @@ static void qemu_create_early_backends(void)
  * The remainder of object creation happens after the
  * creation of chardev, fsdev, net clients and device data types.
  */
-static bool object_create_late(const char *type, QemuOpts *opts)
+static bool object_create_late(const char *type)
 {
-    return !object_create_early(type, opts);
+    return !object_create_early(type);
 }
 
 static void qemu_create_late_backends(void)
@@ -1862,9 +1917,7 @@ static void qemu_create_late_backends(void)
 
     net_init_clients(&error_fatal);
 
-    qemu_opts_foreach(qemu_find_opts("object"),
-                      user_creatable_add_opts_foreach,
-                      object_create_late, &error_fatal);
+    object_option_foreach_add(object_create_late);
 
     if (tpm_init() < 0) {
         exit(1);
@@ -2463,13 +2516,7 @@ static void qemu_init_board(void)
     /* From here on we enter MACHINE_PHASE_INITIALIZED.  */
     machine_run_board_init(current_machine);
 
-    /*
-     * TODO To drop support for deprecated bogus if=..., move
-     * drive_check_orphaned() here, replacing this call.  Also drop
-     * its deprecation warning, along with DriveInfo member
-     * @claimed_by_board.
-     */
-    drive_mark_claimed_by_board();
+    drive_check_orphaned();
 
     realtime_init();
 
@@ -3183,8 +3230,6 @@ void qemu_init(int argc, char **argv, char **envp)
                 qemu_opts_parse_noisily(olist, "usb=on", false);
                 break;
             case QEMU_OPTION_usbdevice:
-                error_report("'-usbdevice' is deprecated, please use "
-                             "'-device usb-...' instead");
                 olist = qemu_find_opts("machine");
                 qemu_opts_parse_noisily(olist, "usb=on", false);
                 add_device_config(DEV_USB, optarg);
@@ -3404,11 +3449,7 @@ void qemu_init(int argc, char **argv, char **envp)
 #endif
                 break;
             case QEMU_OPTION_object:
-                opts = qemu_opts_parse_noisily(qemu_find_opts("object"),
-                                               optarg, true);
-                if (!opts) {
-                    exit(1);
-                }
+                object_option_parse(optarg);
                 break;
             case QEMU_OPTION_overcommit:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("overcommit"),
@@ -3419,6 +3460,21 @@ void qemu_init(int argc, char **argv, char **envp)
                 enable_mlock = qemu_opt_get_bool(opts, "mem-lock", false);
                 enable_cpu_pm = qemu_opt_get_bool(opts, "cpu-pm", false);
                 break;
+            case QEMU_OPTION_compat:
+                {
+                    CompatPolicy *opts;
+                    Visitor *v;
+
+                    v = qobject_input_visitor_new_str(optarg, NULL,
+                                                      &error_fatal);
+
+                    visit_type_CompatPolicy(v, NULL, &opts, &error_fatal);
+                    QAPI_CLONE_MEMBERS(CompatPolicy, &compat_policy, opts);
+
+                    qapi_free_CompatPolicy(opts);
+                    visit_free(v);
+                    break;
+                }
             case QEMU_OPTION_msg:
                 opts = qemu_opts_parse_noisily(qemu_find_opts("msg"), optarg,
                                                false);
