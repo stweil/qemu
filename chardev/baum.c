@@ -91,7 +91,7 @@ struct BaumChardev {
     Chardev parent;
 
     brlapi_handle_t *brlapi;
-    int brlapi_fd;
+    brlapi_fileDescriptor brlapi_fd;
     unsigned int x, y;
     bool deferred_init;
 
