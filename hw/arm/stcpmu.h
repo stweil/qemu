@@ -9,7 +9,7 @@
 #define PMUREGS_H
 
 /* Versions of the Simtec Power management interface. */
-/* Version 1.0 interfcae */
+/* Version 1.0 interface */
 #define STCPMU_V1_02		 2
 
 /* Version 1.2 interface never existed */

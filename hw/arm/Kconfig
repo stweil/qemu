@@ -115,7 +115,7 @@ config NETDUINOPLUS2
 config NSERIES
     bool
     select OMAP
-    select TMP105   # tempature sensor
+    select TMP105   # temperature sensor
     select BLIZZARD # LCD/TV controller
     select ONENAND
     select TSC210X  # touchscreen/sensors/audio
