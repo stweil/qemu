@@ -28,7 +28,7 @@ def main():
     parser.add_argument("nsisargs", nargs="*")
     args = parser.parse_args()
 
-    destdir = tempfile.mkdtemp()
+    destdir = os.getcwd()
     try:
         subprocess.run(["make", "install", "DESTDIR=" + destdir + os.path.sep])
         with open(
@@ -71,8 +71,7 @@ def main():
         subprocess.run(makensis)
         signcode(args.outfile)
     finally:
-        shutil.rmtree(destdir)
-
+        print("Done.")
 
 if __name__ == "__main__":
     main()
