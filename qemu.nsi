@@ -237,6 +237,7 @@ Section "Uninstall" Uninstall_Section_Description
     Delete "$INSTDIR\qemu.exe"
     Delete "$INSTDIR\qemu-system-*.exe"
     RMDir /r "$INSTDIR\doc"
+    RMDir /r "$INSTDIR\lib"
     RMDir /r "$INSTDIR\share"
     ; Remove generated files
     Delete "$INSTDIR\stderr.txt"
