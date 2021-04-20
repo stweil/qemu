@@ -162,6 +162,7 @@ Section "$(Tools_Section_Name)" Tools_Section_Description
     File "${BINDIR}\qemu-ga.exe"
     File "${BINDIR}\qemu-img.exe"
     File "${BINDIR}\qemu-io.exe"
+    File "${BINDIR}\qemu-nbd.exe"
 SectionEnd
 
 SectionGroup "$(System_Emulation_Section_Name)" System_Emulation_Section_Description
@@ -226,12 +227,11 @@ Section "Uninstall" Uninstall_Section_Description
     Delete "$INSTDIR\README.rst"
     Delete "$INSTDIR\VERSION"
     Delete "$INSTDIR\*.dll"
-    Delete "$INSTDIR\qemu.svg"
+    Delete "$INSTDIR\qemu-nbd.exe"
     Delete "$INSTDIR\qemu-io.exe"
     Delete "$INSTDIR\qemu-img.exe"
     Delete "$INSTDIR\qemu-ga.exe"
     Delete "$INSTDIR\qemu-edid.exe"
-    Delete "$INSTDIR\qemu.exe"
     Delete "$INSTDIR\qemu-system-*.exe"
     RMDir /r "$INSTDIR\share"
     ; Remove generated files
