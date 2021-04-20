@@ -2,7 +2,7 @@
 
 ; This NSIS script creates an installer for QEMU on Windows.
 
-; Copyright (C) 2006-2020 Stefan Weil
+; Copyright (C) 2006-2021 Stefan Weil
 ;
 ; This program is free software: you can redistribute it and/or modify
 ; it under the terms of the GNU General Public License as published by
@@ -30,9 +30,6 @@
 !endif
 !ifndef DATADIR
 !define DATADIR "${BINDIR}\share"
-!endif
-!ifndef DOCDIR
-!define DOCDIR "${DATADIR}\doc"
 !endif
 !ifndef SRCDIR
 !define SRCDIR .
@@ -191,11 +188,11 @@ SectionEnd
 
 !ifdef CONFIG_DOCUMENTATION
 Section "$(Documentation_Section_Name)" Documentation_Section_Description
-    SetOutPath "$INSTDIR\doc"
-    File /r "${BINDIR}\doc"
+    ; SetOutPath "$INSTDIR\share\doc"
+    ; File /r "${BINDIR}\share\doc"
     SetOutPath "$INSTDIR"
     CreateDirectory "$SMPROGRAMS\${PRODUCT}"
-    CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Link_Description_User_Documentation).lnk" "$INSTDIR\index.html" "" "$INSTDIR\index.html" 0
+    CreateShortCut "$SMPROGRAMS\${PRODUCT}\$(Link_Description_User_Documentation).lnk" "$INSTDIR\share\doc\index.html" "" "$INSTDIR\share\doc\index.html" 0
 SectionEnd
 !endif
 
@@ -236,8 +233,6 @@ Section "Uninstall" Uninstall_Section_Description
     Delete "$INSTDIR\qemu-edid.exe"
     Delete "$INSTDIR\qemu.exe"
     Delete "$INSTDIR\qemu-system-*.exe"
-    RMDir /r "$INSTDIR\doc"
-    RMDir /r "$INSTDIR\lib"
     RMDir /r "$INSTDIR\share"
     ; Remove generated files
     Delete "$INSTDIR\stderr.txt"
