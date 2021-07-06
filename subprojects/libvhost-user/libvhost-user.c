@@ -151,7 +151,7 @@ vu_request_to_string(unsigned int req)
     }
 }
 
-static void GCC_FMT_ATTR(2, 3)
+static void __attribute__((format(gnu_printf, 2, 3)))
 vu_panic(VuDev *dev, const char *msg, ...)
 {
     char *buf = NULL;

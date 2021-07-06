@@ -16,6 +16,11 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>
  */
 
+/*
+ * Not so fast! You might want to read the 9p developer docs first:
+ * https://wiki.qemu.org/Documentation/9p
+ */
+
 #include "qemu/osdep.h"
 #include "libqtest.h"
 #include "qemu/module.h"
@@ -213,8 +218,9 @@ static void *virtio_9p_pci_create(void *pci_bus, QGuestAllocator *t_alloc,
  *                      variable arguments of this function to this
  *                      replacement string
  */
-static void regex_replace(GString *haystack, const char *pattern,
-                          const char *replace_fmt, ...)
+static void GCC_FMT_ATTR(3, 4)
+regex_replace(GString *haystack, const char *pattern,
+              const char *replace_fmt, ...)
 {
     GRegex *regex;
     char *replace, *s;
