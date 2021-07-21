@@ -28,7 +28,6 @@
 #include "exec/cpu_ldst.h"
 #include "exec/helper-proto.h"
 #include "exec/helper-gen.h"
-#include "trace-tcg.h"
 #include "exec/translator.h"
 #include "exec/log.h"
 
@@ -67,8 +66,6 @@ struct DisasContext {
     /* Temporaries for $31 and $f31 as source and destination.  */
     TCGv zero;
     TCGv sink;
-    /* Temporary for immediate constants.  */
-    TCGv lit;
 };
 
 /* Target-specific return values from translate_one, indicating the
@@ -158,7 +155,7 @@ void alpha_translate_init(void)
 static TCGv load_zero(DisasContext *ctx)
 {
     if (!ctx->zero) {
-        ctx->zero = tcg_const_i64(0);
+        ctx->zero = tcg_constant_i64(0);
     }
     return ctx->zero;
 }
@@ -178,14 +175,6 @@ static void free_context_temps(DisasContext *ctx)
         tcg_temp_free(ctx->sink);
         ctx->sink = NULL;
     }
-    if (ctx->zero) {
-        tcg_temp_free(ctx->zero);
-        ctx->zero = NULL;
-    }
-    if (ctx->lit) {
-        tcg_temp_free(ctx->lit);
-        ctx->lit = NULL;
-    }
 }
 
 static TCGv load_gpr(DisasContext *ctx, unsigned reg)
@@ -201,8 +190,7 @@ static TCGv load_gpr_lit(DisasContext *ctx, unsigned reg,
                          uint8_t lit, bool islit)
 {
     if (islit) {
-        ctx->lit = tcg_const_i64(lit);
-        return ctx->lit;
+        return tcg_constant_i64(lit);
     } else if (likely(reg < 31)) {
         return ctx->ir[reg];
     } else {
@@ -262,11 +250,9 @@ static void gen_excp_1(int exception, int error_code)
 {
     TCGv_i32 tmp1, tmp2;
 
-    tmp1 = tcg_const_i32(exception);
-    tmp2 = tcg_const_i32(error_code);
+    tmp1 = tcg_constant_i32(exception);
+    tmp2 = tcg_constant_i32(error_code);
     gen_helper_excp(cpu_env, tmp1, tmp2);
-    tcg_temp_free_i32(tmp2);
-    tcg_temp_free_i32(tmp1);
 }
 
 static DisasJumpType gen_excp(DisasContext *ctx, int exception, int error_code)
@@ -439,40 +425,9 @@ static DisasJumpType gen_store_conditional(DisasContext *ctx, int ra, int rb,
     return DISAS_NEXT;
 }
 
-static bool in_superpage(DisasContext *ctx, int64_t addr)
-{
-#ifndef CONFIG_USER_ONLY
-    return ((ctx->tbflags & ENV_FLAG_PS_USER) == 0
-            && addr >> TARGET_VIRT_ADDR_SPACE_BITS == -1
-            && ((addr >> 41) & 3) == 2);
-#else
-    return false;
-#endif
-}
-
-static bool use_exit_tb(DisasContext *ctx)
-{
-    return ((tb_cflags(ctx->base.tb) & CF_LAST_IO)
-            || ctx->base.singlestep_enabled
-            || singlestep);
-}
-
 static bool use_goto_tb(DisasContext *ctx, uint64_t dest)
 {
-    /* Suppress goto_tb in the case of single-steping and IO.  */
-    if (unlikely(use_exit_tb(ctx))) {
-        return false;
-    }
-#ifndef CONFIG_USER_ONLY
-    /* If the destination is in the superpage, the page perms can't change.  */
-    if (in_superpage(ctx, dest)) {
-        return true;
-    }
-    /* Check for the dest on the same page as the start of the TB.  */
-    return ((ctx->base.tb->pc ^ dest) & TARGET_PAGE_MASK) == 0;
-#else
-    return true;
-#endif
+    return translator_use_goto_tb(&ctx->base, dest);
 }
 
 static DisasJumpType gen_bdirect(DisasContext *ctx, int ra, int32_t disp)
@@ -517,15 +472,11 @@ static DisasJumpType gen_bcond_internal(DisasContext *ctx, TCGCond cond,
 
         return DISAS_NORETURN;
     } else {
-        TCGv_i64 z = tcg_const_i64(0);
-        TCGv_i64 d = tcg_const_i64(dest);
-        TCGv_i64 p = tcg_const_i64(ctx->base.pc_next);
+        TCGv_i64 z = load_zero(ctx);
+        TCGv_i64 d = tcg_constant_i64(dest);
+        TCGv_i64 p = tcg_constant_i64(ctx->base.pc_next);
 
         tcg_gen_movcond_i64(cond, cpu_pc, cmp, z, d, p);
-
-        tcg_temp_free_i64(z);
-        tcg_temp_free_i64(d);
-        tcg_temp_free_i64(p);
         return DISAS_PC_UPDATED;
     }
 }
@@ -727,22 +678,19 @@ static void gen_fp_exc_raise(int rc, int fn11)
     if (!(fn11 & QUAL_I)) {
         ignore |= FPCR_INE;
     }
-    ign = tcg_const_i32(ignore);
+    ign = tcg_constant_i32(ignore);
 
     /* ??? Pass in the regno of the destination so that the helper can
        set EXC_MASK, which contains a bitmask of destination registers
        that have caused arithmetic traps.  A simple userspace emulation
        does not require this.  We do need it for a guest kernel's entArith,
        or if we were to do something clever with imprecise exceptions.  */
-    reg = tcg_const_i32(rc + 32);
+    reg = tcg_constant_i32(rc + 32);
     if (fn11 & QUAL_S) {
         gen_helper_fp_exc_raise_s(cpu_env, ign, reg);
     } else {
         gen_helper_fp_exc_raise(cpu_env, ign, reg);
     }
-
-    tcg_temp_free_i32(reg);
-    tcg_temp_free_i32(ign);
 }
 
 static void gen_cvtlq(TCGv vc, TCGv vb)
@@ -835,7 +783,7 @@ IEEE_INTCVT(cvtqt)
 
 static void gen_cpy_mask(TCGv vc, TCGv va, TCGv vb, bool inv_a, uint64_t mask)
 {
-    TCGv vmask = tcg_const_i64(mask);
+    TCGv vmask = tcg_constant_i64(mask);
     TCGv tmp = tcg_temp_new_i64();
 
     if (inv_a) {
@@ -847,7 +795,6 @@ static void gen_cpy_mask(TCGv vc, TCGv va, TCGv vb, bool inv_a, uint64_t mask)
     tcg_gen_andc_i64(vc, vb, vmask);
     tcg_gen_or_i64(vc, vc, tmp);
 
-    tcg_temp_free(vmask);
     tcg_temp_free(tmp);
 }
 
@@ -1116,15 +1063,11 @@ static void gen_msk_l(DisasContext *ctx, TCGv vc, TCGv va, int rb, bool islit,
 
 static void gen_rx(DisasContext *ctx, int ra, int set)
 {
-    TCGv tmp;
-
     if (ra != 31) {
         ld_flag_byte(ctx->ir[ra], ENV_FLAG_RX_SHIFT);
     }
 
-    tmp = tcg_const_i64(set);
-    st_flag_byte(ctx->ir[ra], ENV_FLAG_RX_SHIFT);
-    tcg_temp_free(tmp);
+    st_flag_byte(tcg_constant_i64(set), ENV_FLAG_RX_SHIFT);
 }
 
 static DisasJumpType gen_call_pal(DisasContext *ctx, int palcode)
@@ -1225,12 +1168,9 @@ static DisasJumpType gen_call_pal(DisasContext *ctx, int palcode)
 
         case 0x3E:
             /* WTINT */
-            {
-                TCGv_i32 tmp = tcg_const_i32(1);
-                tcg_gen_st_i32(tmp, cpu_env, -offsetof(AlphaCPU, env) +
-                                             offsetof(CPUState, halted));
-                tcg_temp_free_i32(tmp);
-            }
+            tcg_gen_st_i32(tcg_constant_i32(1), cpu_env,
+                           -offsetof(AlphaCPU, env) +
+                           offsetof(CPUState, halted));
             tcg_gen_movi_i64(ctx->ir[IR_V0], 0);
             return gen_excp(ctx, EXCP_HALTED, 0);
 
@@ -1271,7 +1211,7 @@ static DisasJumpType gen_call_pal(DisasContext *ctx, int palcode)
            need the page permissions check.  We'll see the existence of
            the page when we create the TB, and we'll flush all TBs if
            we change the PAL base register.  */
-        if (!use_exit_tb(ctx)) {
+        if (!ctx->base.singlestep_enabled) {
             tcg_gen_goto_tb(0);
             tcg_gen_movi_i64(cpu_pc, entry);
             tcg_gen_exit_tb(ctx->base.tb, 0);
@@ -1381,12 +1321,8 @@ static DisasJumpType gen_mtpr(DisasContext *ctx, TCGv vb, int regno)
 
     case 253:
         /* WAIT */
-        {
-            TCGv_i32 tmp = tcg_const_i32(1);
-            tcg_gen_st_i32(tmp, cpu_env, -offsetof(AlphaCPU, env) +
-                                         offsetof(CPUState, halted));
-            tcg_temp_free_i32(tmp);
-        }
+        tcg_gen_st_i32(tcg_constant_i32(1), cpu_env,
+                       -offsetof(AlphaCPU, env) + offsetof(CPUState, halted));
         return gen_excp(ctx, EXCP_HALTED, 0);
 
     case 252:
@@ -2753,15 +2689,14 @@ static DisasJumpType translate_one(DisasContext *ctx, uint32_t insn)
             /* Pre-EV6 CPUs interpreted this as HW_REI, loading the return
                address from EXC_ADDR.  This turns out to be useful for our
                emulation PALcode, so continue to accept it.  */
-            ctx->lit = vb = tcg_temp_new();
+            vb = dest_sink(ctx);
             tcg_gen_ld_i64(vb, cpu_env, offsetof(CPUAlphaState, exc_addr));
         } else {
             vb = load_gpr(ctx, rb);
         }
         tcg_gen_movi_i64(cpu_lock_addr, -1);
+        st_flag_byte(load_zero(ctx), ENV_FLAG_RX_SHIFT);
         tmp = tcg_temp_new();
-        tcg_gen_movi_i64(tmp, 0);
-        st_flag_byte(tmp, ENV_FLAG_RX_SHIFT);
         tcg_gen_andi_i64(tmp, vb, 1);
         st_flag_byte(tmp, ENV_FLAG_PAL_SHIFT);
         tcg_temp_free(tmp);
@@ -3002,7 +2937,7 @@ static void alpha_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
 {
     DisasContext *ctx = container_of(dcbase, DisasContext, base);
     CPUAlphaState *env = cpu->env_ptr;
-    int64_t bound, mask;
+    int64_t bound;
 
     ctx->tbflags = ctx->base.tb->flags;
     ctx->mem_idx = cpu_mmu_index(env, false);
@@ -3028,15 +2963,9 @@ static void alpha_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
 
     ctx->zero = NULL;
     ctx->sink = NULL;
-    ctx->lit = NULL;
 
     /* Bound the number of insns to execute to those left on the page.  */
-    if (in_superpage(ctx, ctx->base.pc_first)) {
-        mask = -1ULL << 41;
-    } else {
-        mask = TARGET_PAGE_MASK;
-    }
-    bound = -(ctx->base.pc_first | mask) / 4;
+    bound = -(ctx->base.pc_first | TARGET_PAGE_MASK) / 4;
     ctx->base.max_insns = MIN(ctx->base.max_insns, bound);
 }
 
@@ -3095,7 +3024,7 @@ static void alpha_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
         tcg_gen_movi_i64(cpu_pc, ctx->base.pc_next);
         /* FALLTHRU */
     case DISAS_PC_UPDATED:
-        if (!use_exit_tb(ctx)) {
+        if (!ctx->base.singlestep_enabled) {
             tcg_gen_lookup_and_goto_ptr();
             break;
         }

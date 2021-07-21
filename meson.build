@@ -92,6 +92,12 @@ if cpu in ['x86', 'x86_64']
   }
 endif
 
+modular_tcg = []
+# Darwin does not support references to thread-local variables in modules
+if targetos != 'darwin'
+  modular_tcg = ['i386-softmmu', 'x86_64-softmmu']
+endif
+
 edk2_targets = [ 'arm-softmmu', 'aarch64-softmmu', 'i386-softmmu', 'x86_64-softmmu' ]
 install_edk2_blobs = false
 if get_option('install_blobs')
@@ -317,10 +323,6 @@ lttng = not_found
 if 'CONFIG_TRACE_UST' in config_host
   lttng = declare_dependency(link_args: config_host['LTTNG_UST_LIBS'].split())
 endif
-urcubp = not_found
-if 'CONFIG_TRACE_UST' in config_host
-  urcubp = declare_dependency(link_args: config_host['URCU_BP_LIBS'].split())
-endif
 pixman = not_found
 if have_system or have_tools
   pixman = dependency('pixman-1', required: have_system, version:'>=0.21.8',
@@ -453,7 +455,10 @@ endif
 rt = cc.find_library('rt', required: false)
 libdl = not_found
 if 'CONFIG_PLUGIN' in config_host
-  libdl = cc.find_library('dl', required: true)
+  libdl = cc.find_library('dl', required: false)
+  if not cc.has_function('dlopen', dependencies: libdl)
+    error('dlopen not found')
+  endif
 endif
 libiscsi = not_found
 if not get_option('libiscsi').auto() or have_block
@@ -710,13 +715,16 @@ if not get_option('rbd').auto() or have_block
       int main(void) {
         rados_t cluster;
         rados_create(&cluster, NULL);
+        #if LIBRBD_VERSION_CODE < LIBRBD_VERSION(1, 12, 0)
+        #error
+        #endif
         return 0;
       }''', dependencies: [librbd, librados])
       rbd = declare_dependency(dependencies: [librbd, librados])
     elif get_option('rbd').enabled()
-      error('could not link librados')
+      error('librbd >= 1.12.0 required')
     else
-      warning('could not link librados, disabling')
+      warning('librbd >= 1.12.0 not found, disabling')
     endif
   endif
 endif
@@ -815,50 +823,77 @@ if 'CONFIG_OPENGL' in config_host
 endif
 
 gnutls = not_found
+gnutls_crypto = not_found
 if not get_option('gnutls').auto() or have_system
-  gnutls = dependency('gnutls', version: '>=3.5.18',
-                      method: 'pkg-config',
-                      required: get_option('gnutls'),
-                      kwargs: static_kwargs)
+  # For general TLS support our min gnutls matches
+  # that implied by our platform support matrix
+  #
+  # For the crypto backends, we look for a newer
+  # gnutls:
+  #
+  #   Version 3.6.8  is needed to get XTS
+  #   Version 3.6.13 is needed to get PBKDF
+  #   Version 3.6.14 is needed to get HW accelerated XTS
+  #
+  # If newer enough gnutls isn't available, we can
+  # still use a different crypto backend to satisfy
+  # the platform support requirements
+  gnutls_crypto = dependency('gnutls', version: '>=3.6.14',
+                             method: 'pkg-config',
+                             required: false,
+                             kwargs: static_kwargs)
+  if gnutls_crypto.found()
+    gnutls = gnutls_crypto
+  else
+    # Our min version if all we need is TLS
+    gnutls = dependency('gnutls', version: '>=3.5.18',
+                        method: 'pkg-config',
+                        required: get_option('gnutls'),
+                        kwargs: static_kwargs)
+  endif
 endif
 
-# Nettle has priority over gcrypt
+# We prefer use of gnutls for crypto, unless the options
+# explicitly asked for nettle or gcrypt.
+#
+# If gnutls isn't available for crypto, then we'll prefer
+# gcrypt over nettle for performance reasons.
 gcrypt = not_found
 nettle = not_found
-xts = 'private'
+xts = 'none'
+
 if get_option('nettle').enabled() and get_option('gcrypt').enabled()
   error('Only one of gcrypt & nettle can be enabled')
-elif (not get_option('nettle').auto() or have_system) and not get_option('gcrypt').enabled()
-  nettle = dependency('nettle', version: '>=3.4',
-                      method: 'pkg-config',
-                      required: get_option('nettle'),
-                      kwargs: static_kwargs)
-  if nettle.found() and cc.has_header('nettle/xts.h', dependencies: nettle)
-    xts = 'nettle'
-  endif
 endif
-if (not get_option('gcrypt').auto() or have_system) and not nettle.found()
-  gcrypt = dependency('libgcrypt', version: '>=1.5',
-                         method: 'config-tool',
-                         required: get_option('gcrypt'),
-                         kwargs: static_kwargs)
-  if gcrypt.found() and cc.compiles('''
-    #include <gcrypt.h>
-    int main(void) {
-      gcry_cipher_hd_t handle;
-      gcry_cipher_open(&handle, GCRY_CIPHER_AES, GCRY_CIPHER_MODE_XTS, 0);
-      return 0;
-    }
-    ''', dependencies: gcrypt)
-    xts = 'gcrypt'
+
+# Explicit nettle/gcrypt request, so ignore gnutls for crypto
+if get_option('nettle').enabled() or get_option('gcrypt').enabled()
+  gnutls_crypto = not_found
+endif
+
+if not gnutls_crypto.found()
+  if (not get_option('gcrypt').auto() or have_system) and not get_option('nettle').enabled()
+    gcrypt = dependency('libgcrypt', version: '>=1.8',
+                        method: 'config-tool',
+                        required: get_option('gcrypt'),
+                        kwargs: static_kwargs)
+    # Debian has removed -lgpg-error from libgcrypt-config
+    # as it "spreads unnecessary dependencies" which in
+    # turn breaks static builds...
+    if gcrypt.found() and enable_static
+      gcrypt = declare_dependency(dependencies: [
+        gcrypt,
+        cc.find_library('gpg-error', required: true, kwargs: static_kwargs)])
+    endif
   endif
-  # Debian has removed -lgpg-error from libgcrypt-config
-  # as it "spreads unnecessary dependencies" which in
-  # turn breaks static builds...
-  if gcrypt.found() and enable_static
-    gcrypt = declare_dependency(dependencies: [
-      gcrypt,
-      cc.find_library('gpg-error', required: true, kwargs: static_kwargs)])
+  if (not get_option('nettle').auto() or have_system) and not gcrypt.found()
+    nettle = dependency('nettle', version: '>=3.4',
+                        method: 'pkg-config',
+                        required: get_option('nettle'),
+                        kwargs: static_kwargs)
+    if nettle.found() and not cc.has_header('nettle/xts.h', dependencies: nettle)
+      xts = 'private'
+    endif
   endif
 endif
 
@@ -1223,8 +1258,11 @@ config_host_data.set('CONFIG_VTE', vte.found())
 config_host_data.set('CONFIG_LIBATTR', have_old_libattr)
 config_host_data.set('CONFIG_LIBCAP_NG', libcap_ng.found())
 config_host_data.set('CONFIG_EBPF', libbpf.found())
+config_host_data.set('CONFIG_LIBDAXCTL', libdaxctl.found())
 config_host_data.set('CONFIG_LIBISCSI', libiscsi.found())
 config_host_data.set('CONFIG_LIBNFS', libnfs.found())
+config_host_data.set('CONFIG_LINUX_IO_URING', linux_io_uring.found())
+config_host_data.set('CONFIG_LIBPMEM', libpmem.found())
 config_host_data.set('CONFIG_RBD', rbd.found())
 config_host_data.set('CONFIG_SDL', sdl.found())
 config_host_data.set('CONFIG_SDL_IMAGE', sdl_image.found())
@@ -1237,10 +1275,12 @@ config_host_data.set('CONFIG_VNC_JPEG', jpeg.found())
 config_host_data.set('CONFIG_VNC_PNG', png.found())
 config_host_data.set('CONFIG_VNC_SASL', sasl.found())
 config_host_data.set('CONFIG_VIRTFS', have_virtfs)
+config_host_data.set('CONFIG_VTE', vte.found())
 config_host_data.set('CONFIG_XKBCOMMON', xkbcommon.found())
 config_host_data.set('CONFIG_KEYUTILS', keyutils.found())
 config_host_data.set('CONFIG_GETTID', has_gettid)
 config_host_data.set('CONFIG_GNUTLS', gnutls.found())
+config_host_data.set('CONFIG_GNUTLS_CRYPTO', gnutls_crypto.found())
 config_host_data.set('CONFIG_GCRYPT', gcrypt.found())
 config_host_data.set('CONFIG_NETTLE', nettle.found())
 config_host_data.set('CONFIG_QEMU_PRIVATE_XTS', xts == 'private')
@@ -1334,10 +1374,10 @@ config_host_data.set('HAVE_STRUCT_STAT_ST_ATIM',
                      cc.has_member('struct stat', 'st_atim',
                                    prefix: '#include <sys/stat.h>'))
 
-config_host_data.set('CONFIG_EVENTFD', cc.compiles('''
+config_host_data.set('CONFIG_EVENTFD', cc.links('''
   #include <sys/eventfd.h>
   int main(void) { return eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC); }'''))
-config_host_data.set('CONFIG_FDATASYNC', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_FDATASYNC', cc.links(gnu_source_prefix + '''
   #include <unistd.h>
   int main(void) {
   #if defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
@@ -1346,22 +1386,22 @@ config_host_data.set('CONFIG_FDATASYNC', cc.compiles(gnu_source_prefix + '''
   #error Not supported
   #endif
   }'''))
-config_host_data.set('CONFIG_MADVISE', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_MADVISE', cc.links(gnu_source_prefix + '''
   #include <sys/types.h>
   #include <sys/mman.h>
   #include <stddef.h>
   int main(void) { return madvise(NULL, 0, MADV_DONTNEED); }'''))
-config_host_data.set('CONFIG_MEMFD', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_MEMFD', cc.links(gnu_source_prefix + '''
   #include <sys/mman.h>
   int main(void) { return memfd_create("foo", MFD_ALLOW_SEALING); }'''))
-config_host_data.set('CONFIG_OPEN_BY_HANDLE', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_OPEN_BY_HANDLE', cc.links(gnu_source_prefix + '''
   #include <fcntl.h>
   #if !defined(AT_EMPTY_PATH)
   # error missing definition
   #else
   int main(void) { struct file_handle fh; return open_by_handle_at(0, &fh, 0); }
   #endif'''))
-config_host_data.set('CONFIG_PIPE2', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_PIPE2', cc.links(gnu_source_prefix + '''
   #include <unistd.h>
   #include <fcntl.h>
 
@@ -1370,16 +1410,16 @@ config_host_data.set('CONFIG_PIPE2', cc.compiles(gnu_source_prefix + '''
       int pipefd[2];
       return pipe2(pipefd, O_CLOEXEC);
   }'''))
-config_host_data.set('CONFIG_POSIX_MADVISE', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_POSIX_MADVISE', cc.links(gnu_source_prefix + '''
   #include <sys/mman.h>
   #include <stddef.h>
   int main(void) { return posix_madvise(NULL, 0, POSIX_MADV_DONTNEED); }'''))
-config_host_data.set('CONFIG_SIGNALFD', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_SIGNALFD', cc.links(gnu_source_prefix + '''
   #include <unistd.h>
   #include <sys/syscall.h>
   #include <signal.h>
   int main(void) { return syscall(SYS_signalfd, -1, NULL, _NSIG / 8); }'''))
-config_host_data.set('CONFIG_SPLICE', cc.compiles(gnu_source_prefix + '''
+config_host_data.set('CONFIG_SPLICE', cc.links(gnu_source_prefix + '''
   #include <unistd.h>
   #include <fcntl.h>
   #include <limits.h>
@@ -1527,6 +1567,11 @@ foreach target : target_dirs
       elif sym == 'CONFIG_XEN' and have_xen_pci_passthrough
         config_target += { 'CONFIG_XEN_PCI_PASSTHROUGH': 'y' }
       endif
+      if target in modular_tcg
+        config_target += { 'CONFIG_TCG_MODULAR': 'y' }
+      else
+        config_target += { 'CONFIG_TCG_BUILTIN': 'y' }
+      endif
       accel_kconfig += [ sym + '=y' ]
     endif
   endforeach
@@ -1538,7 +1583,7 @@ foreach target : target_dirs
   endif
 
   actual_target_dirs += target
-  config_target += keyval.load('default-configs/targets' / target + '.mak')
+  config_target += keyval.load('configs/targets' / target + '.mak')
   config_target += { 'TARGET_' + config_target['TARGET_ARCH'].to_upper(): 'y' }
 
   if 'TARGET_NEED_FDT' in config_target
@@ -1584,16 +1629,18 @@ foreach target : target_dirs
                                                configuration: config_target_data)}
 
   if target.endswith('-softmmu')
+    config_input = meson.get_external_property(target, 'default')
     config_devices_mak = target + '-config-devices.mak'
     config_devices_mak = configure_file(
-      input: ['default-configs/devices' / target + '.mak', 'Kconfig'],
+      input: ['configs/devices' / target / config_input + '.mak', 'Kconfig'],
       output: config_devices_mak,
       depfile: config_devices_mak + '.d',
       capture: true,
       command: [minikconf,
                 get_option('default_devices') ? '--defconfig' : '--allnoconfig',
                 config_devices_mak, '@DEPFILE@', '@INPUT@',
-                host_kconfig, accel_kconfig])
+                host_kconfig, accel_kconfig,
+                'CONFIG_' + config_target['TARGET_ARCH'].to_upper() + '=y'])
 
     config_devices_data = configuration_data()
     config_devices = keyval.load(config_devices_mak)
@@ -1641,6 +1688,19 @@ if capstone_opt in ['enabled', 'auto', 'system']
                         kwargs: static_kwargs, method: 'pkg-config',
                         required: capstone_opt == 'system' or
                                   capstone_opt == 'enabled' and not have_internal)
+
+  # Some versions of capstone have broken pkg-config file
+  # that reports a wrong -I path, causing the #include to
+  # fail later. If the system has such a broken version
+  # do not use it.
+  if capstone.found() and not cc.compiles('#include <capstone.h>',
+                                          dependencies: [capstone])
+    capstone = not_found
+    if capstone_opt == 'system'
+      error('system capstone requested, it does not appear to work')
+    endif
+  endif
+
   if capstone.found()
     capstone_opt = 'system'
   elif have_internal
@@ -1996,7 +2056,12 @@ trace_ss = ss.source_set()
 user_ss = ss.source_set()
 util_ss = ss.source_set()
 
+# accel modules
+qtest_module_ss = ss.source_set()
+tcg_module_ss = ss.source_set()
+
 modules = {}
+target_modules = {}
 hw_arch = {}
 target_arch = {}
 target_softmmu_arch = {}
@@ -2102,6 +2167,7 @@ if have_system or have_user
     'target/ppc',
     'target/riscv',
     'target/s390x',
+    'target/s390x/kvm',
     'target/sparc',
   ]
 endif
@@ -2233,9 +2299,20 @@ specific_ss.add_all(when: 'CONFIG_LINUX_USER', if_true: linux_user_ss)
 subdir('tests/qtest/libqos')
 subdir('tests/qtest/fuzz')
 
+# accel modules
+tcg_real_module_ss = ss.source_set()
+tcg_real_module_ss.add_all(when: 'CONFIG_TCG_MODULAR', if_true: tcg_module_ss)
+specific_ss.add_all(when: 'CONFIG_TCG_BUILTIN', if_true: tcg_module_ss)
+target_modules += { 'accel' : { 'qtest': qtest_module_ss,
+                                'tcg': tcg_real_module_ss }}
+
 ########################
 # Library dependencies #
 ########################
+
+modinfo_collect = find_program('scripts/modinfo-collect.py')
+modinfo_generate = find_program('scripts/modinfo-generate.py')
+modinfo_files = []
 
 block_mods = []
 softmmu_mods = []
@@ -2250,6 +2327,18 @@ foreach d, list : modules
       else
         softmmu_mods += sl
       endif
+      if module_ss.sources() != []
+        # FIXME: Should use sl.extract_all_objects(recursive: true) as
+        # input. Sources can be used multiple times but objects are
+        # unique when it comes to lookup in compile_commands.json.
+        # Depnds on a mesion version with
+        # https://github.com/mesonbuild/meson/pull/8900
+        modinfo_files += custom_target(d + '-' + m + '.modinfo',
+                                       output: d + '-' + m + '.modinfo',
+                                       input: module_ss.sources(),
+                                       capture: true,
+                                       command: [modinfo_collect, '@INPUT@'])
+      endif
     else
       if d == 'block'
         block_ss.add_all(module_ss)
@@ -2259,6 +2348,53 @@ foreach d, list : modules
     endif
   endforeach
 endforeach
+
+foreach d, list : target_modules
+  foreach m, module_ss : list
+    if enable_modules and targetos != 'windows'
+      foreach target : target_dirs
+        if target.endswith('-softmmu')
+          config_target = config_target_mak[target]
+          config_target += config_host
+          target_inc = [include_directories('target' / config_target['TARGET_BASE_ARCH'])]
+          c_args = ['-DNEED_CPU_H',
+                    '-DCONFIG_TARGET="@0@-config-target.h"'.format(target),
+                    '-DCONFIG_DEVICES="@0@-config-devices.h"'.format(target)]
+          target_module_ss = module_ss.apply(config_target, strict: false)
+          if target_module_ss.sources() != []
+            module_name = d + '-' + m + '-' + config_target['TARGET_NAME']
+            sl = static_library(module_name,
+                                [genh, target_module_ss.sources()],
+                                dependencies: [modulecommon, target_module_ss.dependencies()],
+                                include_directories: target_inc,
+                                c_args: c_args,
+                                pic: true)
+            softmmu_mods += sl
+            # FIXME: Should use sl.extract_all_objects(recursive: true) too.
+            modinfo_files += custom_target(module_name + '.modinfo',
+                                           output: module_name + '.modinfo',
+                                           input: target_module_ss.sources(),
+                                           capture: true,
+                                           command: [modinfo_collect, '--target', target, '@INPUT@'])
+          endif
+        endif
+      endforeach
+    else
+      specific_ss.add_all(module_ss)
+    endif
+  endforeach
+endforeach
+
+if enable_modules
+  modinfo_src = custom_target('modinfo.c',
+                              output: 'modinfo.c',
+                              input: modinfo_files,
+                              command: [modinfo_generate, '@INPUT@'],
+                              capture: true)
+  modinfo_lib = static_library('modinfo', modinfo_src)
+  modinfo_dep = declare_dependency(link_whole: modinfo_lib)
+  softmmu_ss.add(modinfo_dep)
+endif
 
 nm = find_program('nm')
 undefsym = find_program('scripts/undefsym.py')
@@ -2521,28 +2657,32 @@ foreach target : target_dirs
                link_args: link_args,
                gui_app: exe['gui'])
 
-    if 'CONFIG_HVF' in config_target
-      entitlements = meson.current_source_dir() / 'accel/hvf/entitlements.plist'
-    else
-      entitlements = '/dev/null'
-    endif
     if targetos == 'darwin'
-      icon = meson.current_source_dir() / 'pc-bios/qemu.rsrc'
+      icon = 'pc-bios/qemu.rsrc'
+      build_input = [emulator, files(icon)]
+      install_input = [
+        get_option('bindir') / exe_name,
+        meson.current_source_dir() / icon
+      ]
+      if 'CONFIG_HVF' in config_target
+        entitlements = 'accel/hvf/entitlements.plist'
+        build_input += files(entitlements)
+        install_input += meson.current_source_dir() / entitlements
+      endif
+
       emulators += {exe['name'] : custom_target(exe['name'],
-                   depends: emulator,
+                   input: build_input,
                    output: exe['name'],
                    command: [
-                     meson.current_source_dir() / 'scripts/entitlement.sh',
-                     meson.current_build_dir() / exe_name,
-                     meson.current_build_dir() / exe['name'],
-                     entitlements, icon
+                     files('scripts/entitlement.sh'),
+                     '@OUTPUT@',
+                     '@INPUT@'
                    ])
       }
 
       meson.add_install_script('scripts/entitlement.sh', '--install',
-                               get_option('bindir') / exe_name,
                                get_option('bindir') / exe['name'],
-                               entitlements, icon)
+                               install_input)
     else
       emulators += {exe['name']: emulator}
     endif
@@ -2724,7 +2864,6 @@ summary_info += {'module support':    config_host.has_key('CONFIG_MODULES')}
 if config_host.has_key('CONFIG_MODULES')
   summary_info += {'alternative module path': config_host.has_key('CONFIG_MODULE_UPGRADES')}
 endif
-summary_info += {'plugin support':    config_host.has_key('CONFIG_PLUGIN')}
 summary_info += {'fuzzing support':   config_host.has_key('CONFIG_FUZZ')}
 if have_system
   summary_info += {'Audio drivers':     config_host['CONFIG_AUDIO_DRIVERS']}
@@ -2840,6 +2979,7 @@ if config_all.has_key('CONFIG_TCG')
   else
     summary_info += {'TCG backend':   'native (@0@)'.format(cpu)}
   endif
+  summary_info += {'TCG plugins': config_host.has_key('CONFIG_PLUGIN')}
   summary_info += {'TCG debug enabled': config_host.has_key('CONFIG_DEBUG_TCG')}
 endif
 summary_info += {'target list':       ' '.join(target_dirs)}
@@ -2856,6 +2996,7 @@ summary_info += {'coroutine pool':    config_host['CONFIG_COROUTINE_POOL'] == '1
 if have_block
   summary_info += {'Block whitelist (rw)': config_host['CONFIG_BDRV_RW_WHITELIST']}
   summary_info += {'Block whitelist (ro)': config_host['CONFIG_BDRV_RO_WHITELIST']}
+  summary_info += {'Use block whitelist in tools': config_host.has_key('CONFIG_BDRV_WHITELIST_TOOLS')}
   summary_info += {'VirtFS support':    have_virtfs}
   summary_info += {'build virtiofs daemon': have_virtiofsd}
   summary_info += {'Live block migration': config_host.has_key('CONFIG_LIVE_BLOCK_MIGRATION')}
@@ -2876,11 +3017,9 @@ summary(summary_info, bool_yn: true, section: 'Block layer support')
 summary_info = {}
 summary_info += {'TLS priority':      config_host['CONFIG_TLS_PRIORITY']}
 summary_info += {'GNUTLS support':    gnutls.found()}
+summary_info += {'GNUTLS crypto':     gnutls_crypto.found()}
 # TODO: add back version
 summary_info += {'libgcrypt':         gcrypt.found()}
-if gcrypt.found()
-   summary_info += {'  XTS':             xts != 'private'}
-endif
 # TODO: add back version
 summary_info += {'nettle':            nettle.found()}
 if nettle.found()

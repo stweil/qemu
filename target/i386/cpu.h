@@ -268,6 +268,8 @@ typedef enum X86Seg {
 #define DR7_TYPE_IO_RW       0x2
 #define DR7_TYPE_DATA_RW     0x3
 
+#define DR_RESERVED_MASK 0xffffffff00000000ULL
+
 #define PG_PRESENT_BIT  0
 #define PG_RW_BIT       1
 #define PG_USER_BIT     2
@@ -1435,6 +1437,8 @@ typedef struct CPUX86State {
     FPReg fpregs[8];
     /* KVM-only so far */
     uint16_t fpop;
+    uint16_t fpcs;
+    uint16_t fpds;
     uint64_t fpip;
     uint64_t fpdp;
 
@@ -1745,6 +1749,9 @@ struct X86CPU {
 
     /* Enable auto level-increase for all CPUID leaves */
     bool full_cpuid_auto_level;
+
+    /* Only advertise CPUID leaves defined by the vendor */
+    bool vendor_cpuid_only;
 
     /* Enable auto level-increase for Intel Processor Trace leave */
     bool intel_pt_auto_level;
