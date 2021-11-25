@@ -139,7 +139,7 @@ void qmp___org_qemu_x_command(__org_qemu_x_EnumList *a,
     }
 }
 
-
+#pragma GCC diagnostic ignored "-Wsuggest-attribute=format"
 static QObject *do_qmp_dispatch(bool allow_oob, const char *template, ...)
 {
     va_list ap;

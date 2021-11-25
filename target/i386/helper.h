@@ -52,13 +52,8 @@ DEF_HELPER_FLAGS_2(get_dr, TCG_CALL_NO_WG, tl, env, int)
 DEF_HELPER_1(sysenter, void, env)
 DEF_HELPER_2(sysexit, void, env, int)
 #ifdef TARGET_X86_64
-DEF_HELPER_2(sysret, void, env, int)
-#if defined(CONFIG_USER_ONLY)
-DEF_HELPER_2(syscall, noreturn, env, int)
-DEF_HELPER_1(vsyscall, noreturn, env)
-#else
 DEF_HELPER_2(syscall, void, env, int)
-#endif
+DEF_HELPER_2(sysret, void, env, int)
 #endif
 DEF_HELPER_FLAGS_2(pause, TCG_CALL_NO_WG, noreturn, env, int)
 DEF_HELPER_1(reset_rf, void, env)
