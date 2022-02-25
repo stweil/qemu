@@ -73,12 +73,7 @@ bool cpu_is_stopped(CPUState *cpu)
 
 bool cpu_work_list_empty(CPUState *cpu)
 {
-    bool ret;
-
-    qemu_mutex_lock(&cpu->work_mutex);
-    ret = QSIMPLEQ_EMPTY(&cpu->work_list);
-    qemu_mutex_unlock(&cpu->work_mutex);
-    return ret;
+    return QSIMPLEQ_EMPTY_ATOMIC(&cpu->work_list);
 }
 
 bool cpu_thread_is_idle(CPUState *cpu)
@@ -352,6 +347,10 @@ static void qemu_init_sigbus(void)
 {
     struct sigaction action;
 
+    /*
+     * ALERT: when modifying this, take care that SIGBUS forwarding in
+     * os_mem_prealloc() will continue working as expected.
+     */
     memset(&action, 0, sizeof(action));
     action.sa_flags = SA_SIGINFO;
     action.sa_sigaction = sigbus_handler;

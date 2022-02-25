@@ -20,7 +20,6 @@
 #define RX_CPU_H
 
 #include "qemu/bitops.h"
-#include "qemu-common.h"
 #include "hw/registerfields.h"
 #include "cpu-qom.h"
 
@@ -116,8 +115,6 @@ struct RXCPU {
 };
 
 typedef RXCPU ArchCPU;
-
-#define ENV_OFFSET offsetof(RXCPU, env)
 
 #define RX_CPU_TYPE_SUFFIX "-" TYPE_RX_CPU
 #define RX_CPU_TYPE_NAME(model) model RX_CPU_TYPE_SUFFIX

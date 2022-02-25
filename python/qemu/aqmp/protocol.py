@@ -15,6 +15,7 @@ from asyncio import StreamReader, StreamWriter
 from enum import Enum
 from functools import wraps
 import logging
+import socket
 from ssl import SSLContext
 from typing import (
     Any,
@@ -29,7 +30,7 @@ from typing import (
     cast,
 )
 
-from .error import AQMPError
+from .error import QMPError
 from .util import (
     bottom_half,
     create_task,
@@ -43,8 +44,12 @@ from .util import (
 
 
 T = TypeVar('T')
+_U = TypeVar('_U')
 _TaskFN = Callable[[], Awaitable[None]]  # aka ``async def func() -> None``
-_FutureT = TypeVar('_FutureT', bound=Optional['asyncio.Future[Any]'])
+
+InternetAddrT = Tuple[str, int]
+UnixAddrT = str
+SocketAddrT = Union[UnixAddrT, InternetAddrT]
 
 
 class Runstate(Enum):
@@ -61,7 +66,7 @@ class Runstate(Enum):
     DISCONNECTING = 3
 
 
-class ConnectError(AQMPError):
+class ConnectError(QMPError):
     """
     Raised when the initial connection process has failed.
 
@@ -86,7 +91,7 @@ class ConnectError(AQMPError):
         return f"{self.error_message}: {cause}"
 
 
-class StateError(AQMPError):
+class StateError(QMPError):
     """
     An API command (connect, execute, etc) was issued at an inappropriate time.
 
@@ -234,6 +239,9 @@ class AsyncProtocol(Generic[T]):
         self._runstate = Runstate.IDLE
         self._runstate_changed: Optional[asyncio.Event] = None
 
+        # Workaround for bind()
+        self._sock: Optional[socket.socket] = None
+
     def __repr__(self) -> str:
         cls_name = type(self).__name__
         tokens = []
@@ -257,7 +265,7 @@ class AsyncProtocol(Generic[T]):
 
     @upper_half
     @require(Runstate.IDLE)
-    async def accept(self, address: Union[str, Tuple[str, int]],
+    async def accept(self, address: SocketAddrT,
                      ssl: Optional[SSLContext] = None) -> None:
         """
         Accept a connection and begin processing message queues.
@@ -275,7 +283,7 @@ class AsyncProtocol(Generic[T]):
 
     @upper_half
     @require(Runstate.IDLE)
-    async def connect(self, address: Union[str, Tuple[str, int]],
+    async def connect(self, address: SocketAddrT,
                       ssl: Optional[SSLContext] = None) -> None:
         """
         Connect to the server and begin processing message queues.
@@ -337,7 +345,7 @@ class AsyncProtocol(Generic[T]):
 
     @upper_half
     async def _new_session(self,
-                           address: Union[str, Tuple[str, int]],
+                           address: SocketAddrT,
                            ssl: Optional[SSLContext] = None,
                            accept: bool = False) -> None:
         """
@@ -359,7 +367,7 @@ class AsyncProtocol(Generic[T]):
             This exception will wrap a more concrete one. In most cases,
             the wrapped exception will be `OSError` or `EOFError`. If a
             protocol-level failure occurs while establishing a new
-            session, the wrapped error may also be an `AQMPError`.
+            session, the wrapped error may also be an `QMPError`.
         """
         assert self.runstate == Runstate.IDLE
 
@@ -397,7 +405,7 @@ class AsyncProtocol(Generic[T]):
     @upper_half
     async def _establish_connection(
             self,
-            address: Union[str, Tuple[str, int]],
+            address: SocketAddrT,
             ssl: Optional[SSLContext] = None,
             accept: bool = False
     ) -> None:
@@ -423,8 +431,36 @@ class AsyncProtocol(Generic[T]):
         else:
             await self._do_connect(address, ssl)
 
+    def _bind_hack(self, address: Union[str, Tuple[str, int]]) -> None:
+        """
+        Used to create a socket in advance of accept().
+
+        This is a workaround to ensure that we can guarantee timing of
+        precisely when a socket exists to avoid a connection attempt
+        bouncing off of nothing.
+
+        Python 3.7+ adds a feature to separate the server creation and
+        listening phases instead, and should be used instead of this
+        hack.
+        """
+        if isinstance(address, tuple):
+            family = socket.AF_INET
+        else:
+            family = socket.AF_UNIX
+
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        try:
+            sock.bind(address)
+        except:
+            sock.close()
+            raise
+
+        self._sock = sock
+
     @upper_half
-    async def _do_accept(self, address: Union[str, Tuple[str, int]],
+    async def _do_accept(self, address: SocketAddrT,
                          ssl: Optional[SSLContext] = None) -> None:
         """
         Acting as the transport server, accept a single connection.
@@ -460,29 +496,32 @@ class AsyncProtocol(Generic[T]):
         if isinstance(address, tuple):
             coro = asyncio.start_server(
                 _client_connected_cb,
-                host=address[0],
-                port=address[1],
+                host=None if self._sock else address[0],
+                port=None if self._sock else address[1],
                 ssl=ssl,
                 backlog=1,
                 limit=self._limit,
+                sock=self._sock,
             )
         else:
             coro = asyncio.start_unix_server(
                 _client_connected_cb,
-                path=address,
+                path=None if self._sock else address,
                 ssl=ssl,
                 backlog=1,
                 limit=self._limit,
+                sock=self._sock,
             )
 
         server = await coro     # Starts listening
         await connected.wait()  # Waits for the callback to fire (and finish)
         assert server is None
+        self._sock = None
 
         self.logger.debug("Connection accepted.")
 
     @upper_half
-    async def _do_connect(self, address: Union[str, Tuple[str, int]],
+    async def _do_connect(self, address: SocketAddrT,
                           ssl: Optional[SSLContext] = None) -> None:
         """
         Acting as the transport client, initiate a connection to a server.
@@ -591,7 +630,8 @@ class AsyncProtocol(Generic[T]):
         """
         Fully reset this object to a clean state and return to `IDLE`.
         """
-        def _paranoid_task_erase(task: _FutureT) -> Optional[_FutureT]:
+        def _paranoid_task_erase(task: Optional['asyncio.Future[_U]']
+                                 ) -> Optional['asyncio.Future[_U]']:
             # Help to erase a task, ENSURING it is fully quiesced first.
             assert (task is None) or task.done()
             return None if (task and task.done()) else task

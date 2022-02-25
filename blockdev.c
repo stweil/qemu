@@ -168,23 +168,6 @@ void blockdev_auto_del(BlockBackend *blk)
     }
 }
 
-/**
- * Returns the current mapping of how many units per bus
- * a particular interface can support.
- *
- *  A positive integer indicates n units per bus.
- *  0 implies the mapping has not been established.
- * -1 indicates an invalid BlockInterfaceType was given.
- */
-int drive_get_max_devs(BlockInterfaceType type)
-{
-    if (type >= IF_IDE && type < IF_COUNT) {
-        return if_max_devs[type];
-    }
-
-    return -1;
-}
-
 static int drive_index_to_bus_id(BlockInterfaceType type, int index)
 {
     int max_devs = if_max_devs[type];
@@ -197,17 +180,12 @@ static int drive_index_to_unit_id(BlockInterfaceType type, int index)
     return max_devs ? index % max_devs : index;
 }
 
-QemuOpts *drive_def(const char *optstr)
-{
-    return qemu_opts_parse_noisily(qemu_find_opts("drive"), optstr, false);
-}
-
 QemuOpts *drive_add(BlockInterfaceType type, int index, const char *file,
                     const char *optstr)
 {
     QemuOpts *opts;
 
-    opts = drive_def(optstr);
+    opts = qemu_opts_parse_noisily(qemu_find_opts("drive"), optstr, false);
     if (!opts) {
         return NULL;
     }
@@ -301,16 +279,6 @@ int drive_get_max_bus(BlockInterfaceType type)
         }
     }
     return max_bus;
-}
-
-/* Get a block device.  This should only be used for single-drive devices
-   (e.g. SD/Floppy/MTD).  Multi-disk devices (scsi/ide) should use the
-   appropriate bus.  */
-DriveInfo *drive_get_next(BlockInterfaceType type)
-{
-    static int next_block_unit[IF_COUNT];
-
-    return drive_get(type, 0, next_block_unit[type]++);
 }
 
 static void bdrv_format_print(void *opaque, const char *name)
@@ -3325,7 +3293,7 @@ static BlockJob *find_block_job(const char *id, AioContext **aio_context,
         return NULL;
     }
 
-    *aio_context = blk_get_aio_context(job->blk);
+    *aio_context = block_job_get_aio_context(job);
     aio_context_acquire(*aio_context);
 
     return job;
@@ -3430,7 +3398,7 @@ void qmp_block_job_finalize(const char *id, Error **errp)
      * automatically acquires the new one), so make sure we release the correct
      * one.
      */
-    aio_context = blk_get_aio_context(job->blk);
+    aio_context = block_job_get_aio_context(job);
     job_unref(&job->job);
     aio_context_release(aio_context);
 }
@@ -3562,6 +3530,7 @@ void qmp_blockdev_reopen(BlockdevOptionsList *reopen_list, Error **errp)
 {
     BlockReopenQueue *queue = NULL;
     GSList *drained = NULL;
+    GSList *p;
 
     /* Add each one of the BDS that we want to reopen to the queue */
     for (; reopen_list != NULL; reopen_list = reopen_list->next) {
@@ -3611,7 +3580,15 @@ void qmp_blockdev_reopen(BlockdevOptionsList *reopen_list, Error **errp)
 
 fail:
     bdrv_reopen_queue_free(queue);
-    g_slist_free_full(drained, (GDestroyNotify) bdrv_subtree_drained_end);
+    for (p = drained; p; p = p->next) {
+        BlockDriverState *bs = p->data;
+        AioContext *ctx = bdrv_get_aio_context(bs);
+
+        aio_context_acquire(ctx);
+        bdrv_subtree_drained_end(bs);
+        aio_context_release(ctx);
+    }
+    g_slist_free(drained);
 }
 
 void qmp_blockdev_del(const char *node_name, Error **errp)
@@ -3721,7 +3698,7 @@ BlockJobInfoList *qmp_query_block_jobs(Error **errp)
         if (block_job_is_internal(job)) {
             continue;
         }
-        aio_context = blk_get_aio_context(job->blk);
+        aio_context = block_job_get_aio_context(job);
         aio_context_acquire(aio_context);
         value = block_job_query(job, errp);
         aio_context_release(aio_context);

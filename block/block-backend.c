@@ -190,6 +190,7 @@ static void blk_root_activate(BdrvChild *child, Error **errp)
 {
     BlockBackend *blk = child->opaque;
     Error *local_err = NULL;
+    uint64_t saved_shared_perm;
 
     if (!blk->disable_perm) {
         return;
@@ -197,12 +198,22 @@ static void blk_root_activate(BdrvChild *child, Error **errp)
 
     blk->disable_perm = false;
 
+    /*
+     * blk->shared_perm contains the permissions we want to share once
+     * migration is really completely done.  For now, we need to share
+     * all; but we also need to retain blk->shared_perm, which is
+     * overwritten by a successful blk_set_perm() call.  Save it and
+     * restore it below.
+     */
+    saved_shared_perm = blk->shared_perm;
+
     blk_set_perm(blk, blk->perm, BLK_PERM_ALL, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         blk->disable_perm = true;
         return;
     }
+    blk->shared_perm = saved_shared_perm;
 
     if (runstate_check(RUN_STATE_INMIGRATE)) {
         /* Activation can happen when migration process is still active, for
@@ -822,16 +833,22 @@ BlockBackend *blk_by_public(BlockBackendPublic *public)
 void blk_remove_bs(BlockBackend *blk)
 {
     ThrottleGroupMember *tgm = &blk->public.throttle_group_member;
-    BlockDriverState *bs;
     BdrvChild *root;
 
     notifier_list_notify(&blk->remove_bs_notifiers, blk);
     if (tgm->throttle_state) {
-        bs = blk_bs(blk);
+        BlockDriverState *bs = blk_bs(blk);
+
+        /*
+         * Take a ref in case blk_bs() changes across bdrv_drained_begin(), for
+         * example, if a temporary filter node is removed by a blockjob.
+         */
+        bdrv_ref(bs);
         bdrv_drained_begin(bs);
         throttle_group_detach_aio_context(tgm);
         throttle_group_attach_aio_context(tgm, qemu_get_aio_context());
         bdrv_drained_end(bs);
+        bdrv_unref(bs);
     }
 
     blk_update_root_state(blk);
@@ -1705,6 +1722,7 @@ void blk_drain(BlockBackend *blk)
     BlockDriverState *bs = blk_bs(blk);
 
     if (bs) {
+        bdrv_ref(bs);
         bdrv_drained_begin(bs);
     }
 
@@ -1714,6 +1732,7 @@ void blk_drain(BlockBackend *blk)
 
     if (bs) {
         bdrv_drained_end(bs);
+        bdrv_unref(bs);
     }
 }
 
@@ -2044,10 +2063,13 @@ static int blk_do_set_aio_context(BlockBackend *blk, AioContext *new_context,
     int ret;
 
     if (bs) {
+        bdrv_ref(bs);
+
         if (update_root_node) {
             ret = bdrv_child_try_set_aio_context(bs, new_context, blk->root,
                                                  errp);
             if (ret < 0) {
+                bdrv_unref(bs);
                 return ret;
             }
         }
@@ -2057,6 +2079,8 @@ static int blk_do_set_aio_context(BlockBackend *blk, AioContext *new_context,
             throttle_group_attach_aio_context(tgm, new_context);
             bdrv_drained_end(bs);
         }
+
+        bdrv_unref(bs);
     }
 
     blk->ctx = new_context;
@@ -2326,11 +2350,13 @@ void blk_io_limits_disable(BlockBackend *blk)
     ThrottleGroupMember *tgm = &blk->public.throttle_group_member;
     assert(tgm->throttle_state);
     if (bs) {
+        bdrv_ref(bs);
         bdrv_drained_begin(bs);
     }
     throttle_group_unregister_tgm(tgm);
     if (bs) {
         bdrv_drained_end(bs);
+        bdrv_unref(bs);
     }
 }
 
