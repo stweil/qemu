@@ -38,6 +38,9 @@
 !define OUTFILE "qemu-setup.exe"
 !endif
 
+; Build a unicode installer
+Unicode true
+
 ; Use maximum compression.
 SetCompressor /SOLID lzma
 
@@ -266,6 +269,7 @@ SectionEnd
     !insertmacro MUI_DESCRIPTION_TEXT ${System_Emulation_Section_Description}  $(System_Emulation_Section_Description_Text)
     !insertmacro MUI_DESCRIPTION_TEXT ${Desktop_Icon_Section_Description}      $(Desktop_Icon_Section_Description_Text)
     !insertmacro MUI_DESCRIPTION_TEXT ${Uninstall_Section_Description}         $(Uninstall_Section_Description_Text)
+!include "${BINDIR}\system-mui-text.nsh"
 !ifdef DLLDIR
     !insertmacro MUI_DESCRIPTION_TEXT ${DLL_Library_Section_Description}       $(DLL_Library_Section_Description_Text)
 !endif
@@ -274,4 +278,3 @@ SectionEnd
 !endif
     !insertmacro MUI_DESCRIPTION_TEXT ${Start_Menu_Section_Description}        $(Start_Menu_Section_Description_Text)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
-

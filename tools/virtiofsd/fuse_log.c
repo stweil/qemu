@@ -12,7 +12,7 @@
 #include "fuse_log.h"
 
 
-static void GCC_FMT_ATTR(2, 0)
+static void G_GNUC_PRINTF(2, 0)
 default_log_func(__attribute__((unused)) enum fuse_log_level level,
                  const char *fmt, va_list ap)
 {

@@ -4191,7 +4191,7 @@ static void setup_nofile_rlimit(unsigned long rlimit_nofile)
     }
 }
 
-static void GCC_FMT_ATTR(2, 0)
+static void G_GNUC_PRINTF(2, 0)
 log_func(enum fuse_log_level level, const char *fmt, va_list ap)
 {
     g_autofree char *localfmt = NULL;

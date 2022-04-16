@@ -222,7 +222,7 @@ static void dsound_log_hresult (HRESULT hr)
     AUD_log (AUDIO_CAP, "Reason: %s\n", str);
 }
 
-static void GCC_FMT_ATTR (2, 3) dsound_logerr (
+static void G_GNUC_PRINTF (2, 3) dsound_logerr (
     HRESULT hr,
     const char *fmt,
     ...
@@ -237,7 +237,7 @@ static void GCC_FMT_ATTR (2, 3) dsound_logerr (
     dsound_log_hresult (hr);
 }
 
-static void GCC_FMT_ATTR (3, 4) dsound_logerr2 (
+static void G_GNUC_PRINTF (3, 4) dsound_logerr2 (
     HRESULT hr,
     const char *typ,
     const char *fmt,
@@ -623,7 +623,7 @@ static void *dsound_audio_init(Audiodev *dev)
 {
     int err;
     HRESULT hr;
-    dsound *s = g_malloc0(sizeof(dsound));
+    dsound *s = g_new0(dsound, 1);
     AudiodevDsoundOptions *dso;
 
     assert(dev->driver == AUDIODEV_DRIVER_DSOUND);

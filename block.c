@@ -1931,7 +1931,7 @@ fail_opts:
     return ret;
 }
 
-static GCC_FMT_ATTR(1, 0)
+static G_GNUC_PRINTF(1, 0)
 QDict *parse_json_filename(const char *filename, Error **errp)
 {
     QObject *options_obj;

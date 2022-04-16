@@ -44,7 +44,7 @@ enum fuse_log_level {
  * @param fmt sprintf-style format string including newline
  * @param ap format string arguments
  */
-typedef void GCC_FMT_ATTR(2, 0) (*fuse_log_func_t)(enum fuse_log_level level, const char *fmt,
+typedef void G_GNUC_PRINTF(2, 0) (*fuse_log_func_t)(enum fuse_log_level level, const char *fmt,
                                 va_list ap);
 
 /**
@@ -68,6 +68,6 @@ void fuse_set_log_func(fuse_log_func_t func);
  * @param level severity level (FUSE_LOG_ERR, FUSE_LOG_DEBUG, etc)
  * @param fmt sprintf-style format string including newline
  */
-void fuse_log(enum fuse_log_level level, const char *fmt, ...) GCC_FMT_ATTR(2, 3);
+void fuse_log(enum fuse_log_level level, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 
 #endif /* FUSE_LOG_H_ */

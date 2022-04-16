@@ -248,7 +248,7 @@ void target_disas(FILE *out, CPUState *cpu, target_ulong code,
     }
 }
 
-static GCC_FMT_ATTR(2, 3) int plugin_printf(FILE *stream, const char *fmt, ...)
+static G_GNUC_PRINTF(2, 3) int plugin_printf(FILE *stream, const char *fmt, ...)
 {
     /* We abuse the FILE parameter to pass a GString. */
     GString *s = (GString *)stream;

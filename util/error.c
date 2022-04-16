@@ -45,7 +45,7 @@ static void error_handle_fatal(Error **errp, Error *err)
     }
 }
 
-static GCC_FMT_ATTR(6, 0)
+static G_GNUC_PRINTF(6, 0)
 void error_setv(Error **errp,
                 const char *src, int line, const char *func,
                 ErrorClass err_class, const char *fmt, va_list ap,

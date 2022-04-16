@@ -155,7 +155,7 @@ static void ahci_migrate(AHCIQState *from, AHCIQState *to, const char *uri)
 /**
  * Start a Q35 machine and bookmark a handle to the AHCI device.
  */
-static GCC_FMT_ATTR(1, 0)
+static G_GNUC_PRINTF(1, 0)
 AHCIQState *ahci_vboot(const char *cli, va_list ap)
 {
     AHCIQState *s;
@@ -173,7 +173,7 @@ AHCIQState *ahci_vboot(const char *cli, va_list ap)
 /**
  * Start a Q35 machine and bookmark a handle to the AHCI device.
  */
-static GCC_FMT_ATTR(1, 0)
+static G_GNUC_PRINTF(1, 0)
 AHCIQState *ahci_boot(const char *cli, ...)
 {
     AHCIQState *s;
@@ -212,7 +212,7 @@ static void ahci_shutdown(AHCIQState *ahci)
  * Boot and fully enable the HBA device.
  * @see ahci_boot, ahci_pci_enable and ahci_hba_enable.
  */
-static GCC_FMT_ATTR(1, 0)
+static G_GNUC_PRINTF(1, 0)
 AHCIQState *ahci_boot_and_enable(const char *cli, ...)
 {
     AHCIQState *ahci;
