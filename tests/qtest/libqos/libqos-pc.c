@@ -10,13 +10,11 @@ static QOSOps qos_ops = {
     .shutdown = qtest_pc_shutdown,
 };
 
-G_GNUC_PRINTF(1, 0)
 QOSState *qtest_pc_vboot(const char *cmdline_fmt, va_list ap)
 {
     return qtest_vboot(&qos_ops, cmdline_fmt, ap);
 }
 
-G_GNUC_PRINTF(1, 2)
 QOSState *qtest_pc_boot(const char *cmdline_fmt, ...)
 {
     QOSState *qs;
