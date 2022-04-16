@@ -160,7 +160,9 @@ qtests_ppc = \
   (slirp.found() ? ['test-netfilter'] : []) + \
   (config_all_devices.has_key('CONFIG_ISA_TESTDEV') ? ['endianness-test'] : []) +            \
   (config_all_devices.has_key('CONFIG_M48T59') ? ['m48t59-test'] : []) +                     \
-  ['boot-order-test', 'prom-env-test', 'boot-serial-test']                 \
+  (config_all_devices.has_key('CONFIG_TCG') ? ['prom-env-test'] : []) +                      \
+  (config_all_devices.has_key('CONFIG_TCG') ? ['boot-serial-test'] : []) +                   \
+  ['boot-order-test']
 
 qtests_ppc64 = \
   qtests_ppc + \
@@ -190,6 +192,7 @@ qtests_npcm7xx = \
    'npcm7xx_gpio-test',
    'npcm7xx_pwm-test',
    'npcm7xx_rng-test',
+   'npcm7xx_sdhci-test',
    'npcm7xx_smbus-test',
    'npcm7xx_timer-test',
    'npcm7xx_watchdog_timer-test'] + \
@@ -244,6 +247,7 @@ qos_test_ss.add(
   'es1370-test.c',
   'ipoctal232-test.c',
   'lsm303dlhc-mag-test.c',
+  'isl_pmbus_vr-test.c',
   'max34451-test.c',
   'megasas-test.c',
   'ne2000-test.c',

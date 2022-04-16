@@ -39,6 +39,7 @@ from contextlib import contextmanager
 
 from qemu.machine import qtest
 from qemu.qmp import QMPMessage
+from qemu.aqmp.legacy import QEMUMonitorProtocol
 
 # Use this logger for logging messages directly from the iotests module
 logger = logging.getLogger('qemu.iotests')
@@ -84,7 +85,6 @@ qemu_print = os.environ.get('PRINT_QEMU', False)
 
 imgfmt = os.environ.get('IMGFMT', 'raw')
 imgproto = os.environ.get('IMGPROTO', 'file')
-output_dir = os.environ.get('OUTPUT_DIR', '.')
 
 try:
     test_dir = os.environ['TEST_DIR']
@@ -278,6 +278,9 @@ def qemu_io(*args):
     '''Run qemu-io and return the stdout data'''
     return qemu_tool_pipe_and_status('qemu-io', qemu_io_wrap_args(args))[0]
 
+def qemu_io_pipe_and_status(*args):
+    return qemu_tool_pipe_and_status('qemu-io', qemu_io_wrap_args(args))
+
 def qemu_io_log(*args):
     result = qemu_io(*args)
     log(result, filters=[filter_testfiles, filter_qemu_io])
@@ -348,14 +351,30 @@ class QemuIoInteractive:
 
 
 class QemuStorageDaemon:
-    def __init__(self, *args: str, instance_id: str = 'a'):
+    _qmp: Optional[QEMUMonitorProtocol] = None
+    _qmpsock: Optional[str] = None
+    # Python < 3.8 would complain if this type were not a string literal
+    # (importing `annotations` from `__future__` would work; but not on <= 3.6)
+    _p: 'Optional[subprocess.Popen[bytes]]' = None
+
+    def __init__(self, *args: str, instance_id: str = 'a', qmp: bool = False):
         assert '--pidfile' not in args
         self.pidfile = os.path.join(test_dir, f'qsd-{instance_id}-pid')
         all_args = [qsd_prog] + list(args) + ['--pidfile', self.pidfile]
 
+        if qmp:
+            self._qmpsock = os.path.join(sock_dir, f'qsd-{instance_id}.sock')
+            all_args += ['--chardev',
+                         f'socket,id=qmp-sock,path={self._qmpsock}',
+                         '--monitor', 'qmp-sock']
+
+            self._qmp = QEMUMonitorProtocol(self._qmpsock, server=True)
+
         # Cannot use with here, we want the subprocess to stay around
         # pylint: disable=consider-using-with
         self._p = subprocess.Popen(all_args)
+        if self._qmp is not None:
+            self._qmp.accept()
         while not os.path.exists(self.pidfile):
             if self._p.poll() is not None:
                 cmd = ' '.join(all_args)
@@ -370,11 +389,24 @@ class QemuStorageDaemon:
 
         assert self._pid == self._p.pid
 
+    def qmp(self, cmd: str, args: Optional[Dict[str, object]] = None) \
+            -> QMPMessage:
+        assert self._qmp is not None
+        return self._qmp.cmd(cmd, args)
+
     def stop(self, kill_signal=15):
         self._p.send_signal(kill_signal)
         self._p.wait()
         self._p = None
 
+        if self._qmp:
+            self._qmp.close()
+
+        if self._qmpsock is not None:
+            try:
+                os.remove(self._qmpsock)
+            except OSError:
+                pass
         try:
             os.remove(self.pidfile)
         except OSError:
@@ -1209,7 +1241,7 @@ def notrun(reason):
     # Each test in qemu-iotests has a number ("seq")
     seq = os.path.basename(sys.argv[0])
 
-    with open('%s/%s.notrun' % (output_dir, seq), 'w', encoding='utf-8') \
+    with open('%s/%s.notrun' % (test_dir, seq), 'w', encoding='utf-8') \
             as outfile:
         outfile.write(reason + '\n')
     logger.warning("%s not run: %s", seq, reason)
@@ -1224,7 +1256,7 @@ def case_notrun(reason):
     # Each test in qemu-iotests has a number ("seq")
     seq = os.path.basename(sys.argv[0])
 
-    with open('%s/%s.casenotrun' % (output_dir, seq), 'a', encoding='utf-8') \
+    with open('%s/%s.casenotrun' % (test_dir, seq), 'a', encoding='utf-8') \
             as outfile:
         outfile.write('    [case not run] ' + reason + '\n')
 

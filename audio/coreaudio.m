@@ -44,10 +44,15 @@ typedef struct coreaudioVoiceOut {
     bool enabled;
 } coreaudioVoiceOut;
 
+#if !defined(MAC_OS_VERSION_12_0) \
+    || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_VERSION_12_0)
+#define kAudioObjectPropertyElementMain kAudioObjectPropertyElementMaster
+#endif
+
 static const AudioObjectPropertyAddress voice_addr = {
     kAudioHardwarePropertyDefaultOutputDevice,
     kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyElementMaster
+    kAudioObjectPropertyElementMain
 };
 
 static OSStatus coreaudio_get_voice(AudioDeviceID *id)
@@ -69,7 +74,7 @@ static OSStatus coreaudio_get_framesizerange(AudioDeviceID id,
     AudioObjectPropertyAddress addr = {
         kAudioDevicePropertyBufferFrameSizeRange,
         kAudioDevicePropertyScopeOutput,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     return AudioObjectGetPropertyData(id,
@@ -86,7 +91,7 @@ static OSStatus coreaudio_get_framesize(AudioDeviceID id, UInt32 *framesize)
     AudioObjectPropertyAddress addr = {
         kAudioDevicePropertyBufferFrameSize,
         kAudioDevicePropertyScopeOutput,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     return AudioObjectGetPropertyData(id,
@@ -103,7 +108,7 @@ static OSStatus coreaudio_set_framesize(AudioDeviceID id, UInt32 *framesize)
     AudioObjectPropertyAddress addr = {
         kAudioDevicePropertyBufferFrameSize,
         kAudioDevicePropertyScopeOutput,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     return AudioObjectSetPropertyData(id,
@@ -121,7 +126,7 @@ static OSStatus coreaudio_set_streamformat(AudioDeviceID id,
     AudioObjectPropertyAddress addr = {
         kAudioDevicePropertyStreamFormat,
         kAudioDevicePropertyScopeOutput,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     return AudioObjectSetPropertyData(id,
@@ -138,7 +143,7 @@ static OSStatus coreaudio_get_isrunning(AudioDeviceID id, UInt32 *result)
     AudioObjectPropertyAddress addr = {
         kAudioDevicePropertyDeviceIsRunning,
         kAudioDevicePropertyScopeOutput,
-        kAudioObjectPropertyElementMaster
+        kAudioObjectPropertyElementMain
     };
 
     return AudioObjectGetPropertyData(id,
@@ -283,6 +288,7 @@ static int coreaudio_buf_unlock (coreaudioVoiceOut *core, const char *fn_name)
         coreaudio_buf_unlock(core, "coreaudio_" #name);             \
         return ret;                                             \
     }
+COREAUDIO_WRAPPER_FUNC(buffer_get_free, size_t, (HWVoiceOut *hw), (hw))
 COREAUDIO_WRAPPER_FUNC(get_buffer_out, void *, (HWVoiceOut *hw, size_t *size),
                        (hw, size))
 COREAUDIO_WRAPPER_FUNC(put_buffer_out, size_t,
@@ -333,12 +339,10 @@ static OSStatus audioDeviceIOProc(
 
     len = frameCount * hw->info.bytes_per_frame;
     while (len) {
-        size_t write_len;
-        ssize_t start = ((ssize_t) hw->pos_emul) - hw->pending_emul;
-        if (start < 0) {
-            start += hw->size_emul;
-        }
-        assert(start >= 0 && start < hw->size_emul);
+        size_t write_len, start;
+
+        start = audio_ring_posb(hw->pos_emul, hw->pending_emul, hw->size_emul);
+        assert(start < hw->size_emul);
 
         write_len = MIN(MIN(hw->pending_emul, len),
                         hw->size_emul - start);
@@ -541,7 +545,6 @@ static OSStatus handle_voice_change(
     const AudioObjectPropertyAddress *in_addresses,
     void *in_client_data)
 {
-    OSStatus status;
     coreaudioVoiceOut *core = in_client_data;
 
     qemu_mutex_lock_iothread();
@@ -550,13 +553,12 @@ static OSStatus handle_voice_change(
         fini_out_device(core);
     }
 
-    status = init_out_device(core);
-    if (!status) {
+    if (!init_out_device(core)) {
         update_device_playback_state(core);
     }
 
     qemu_mutex_unlock_iothread();
-    return status;
+    return 0;
 }
 
 static int coreaudio_init_out(HWVoiceOut *hw, struct audsettings *as,
@@ -604,6 +606,8 @@ static int coreaudio_init_out(HWVoiceOut *hw, struct audsettings *as,
             coreaudio_playback_logerr(status,
                                       "Could not remove voice property change listener\n");
         }
+
+        return -1;
     }
 
     return 0;
@@ -654,6 +658,8 @@ static struct audio_pcm_ops coreaudio_pcm_ops = {
     .fini_out = coreaudio_fini_out,
   /* wrapper for audio_generic_write */
     .write    = coreaudio_write,
+  /* wrapper for audio_generic_buffer_get_free */
+    .buffer_get_free = coreaudio_buffer_get_free,
   /* wrapper for audio_generic_get_buffer_out */
     .get_buffer_out = coreaudio_get_buffer_out,
   /* wrapper for audio_generic_put_buffer_out */

@@ -811,10 +811,13 @@ static void tx_command(EEPRO100State *s)
     if (s->tx.command & COMMAND_SF) {
         /* No simplified mode. TODO: check code in this block. */
         for (size = 0; size < tcb_bytes; ) {
-            uint32_t tx_buffer_address = ldl_le_pci_dma(&s->dev, tbd_address);
-            uint16_t tx_buffer_size = lduw_le_pci_dma(&s->dev, tbd_address + 4);
+            uint32_t tx_buffer_address;
+            ldl_le_pci_dma(&s->dev, tbd_address, &tx_buffer_address, attrs);
+            uint16_t tx_buffer_size;
+            lduw_le_pci_dma(&s->dev, tbd_address + 4, &tx_buffer_size, attrs);
 #if 0
-            uint16_t tx_buffer_el = lduw_le_pci_dma(&s->dev, tbd_address + 6);
+            uint16_t tx_buffer_el;
+            lduw_le_pci_dma(&s->dev, tbd_address + 6, &tx_buffer_el, attrs);
 #endif
             if (tx_buffer_size == 0) {
                 /* Prevent an endless loop. */

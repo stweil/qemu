@@ -173,11 +173,13 @@ endif
 
 qemu_cflags = config_host['QEMU_CFLAGS'].split()
 qemu_cxxflags = config_host['QEMU_CXXFLAGS'].split()
+qemu_objcflags = config_host['QEMU_OBJCFLAGS'].split()
 qemu_ldflags = config_host['QEMU_LDFLAGS'].split()
 
 if get_option('gprof')
   qemu_cflags += ['-p']
   qemu_cxxflags += ['-p']
+  qemu_objcflags += ['-p']
   qemu_ldflags += ['-p']
 endif
 
@@ -216,8 +218,9 @@ if get_option('fuzzing')
   endif
 endif
 
-add_global_arguments(qemu_cflags, native: false, language: ['c', 'objc'])
+add_global_arguments(qemu_cflags, native: false, language: ['c'])
 add_global_arguments(qemu_cxxflags, native: false, language: ['cpp'])
+add_global_arguments(qemu_objcflags, native: false, language: ['objc'])
 add_global_link_arguments(qemu_ldflags, native: false, language: ['c', 'cpp', 'objc'])
 
 if targetos == 'linux'
@@ -1306,6 +1309,18 @@ statx_test = gnu_source_prefix + '''
 
 has_statx = cc.links(statx_test)
 
+# Check whether statx() provides mount ID information
+
+statx_mnt_id_test = gnu_source_prefix + '''
+  #include <sys/stat.h>
+  int main(void) {
+    struct statx statxbuf;
+    statx(0, "", 0, STATX_BASIC_STATS | STATX_MNT_ID, &statxbuf);
+    return statxbuf.stx_mnt_id;
+  }'''
+
+has_statx_mnt_id = cc.links(statx_mnt_id_test)
+
 have_vhost_user_blk_server = get_option('vhost_user_blk_server') \
   .require(targetos == 'linux',
            error_message: 'vhost_user_blk_server requires linux') \
@@ -1450,14 +1465,16 @@ dbus_display = get_option('dbus_display') \
   .allowed()
 
 have_virtfs = get_option('virtfs') \
-    .require(targetos == 'linux',
-             error_message: 'virtio-9p (virtfs) requires Linux') \
-    .require(libattr.found() and libcap_ng.found(),
-             error_message: 'virtio-9p (virtfs) requires libcap-ng-devel and libattr-devel') \
+    .require(targetos == 'linux' or targetos == 'darwin',
+             error_message: 'virtio-9p (virtfs) requires Linux or macOS') \
+    .require(targetos == 'linux' or cc.has_function('pthread_fchdir_np'),
+             error_message: 'virtio-9p (virtfs) on macOS requires the presence of pthread_fchdir_np') \
+    .require(targetos == 'darwin' or (libattr.found() and libcap_ng.found()),
+             error_message: 'virtio-9p (virtfs) on Linux requires libcap-ng-devel and libattr-devel') \
     .disable_auto_if(not have_tools and not have_system) \
     .allowed()
 
-have_virtfs_proxy_helper = have_virtfs and have_tools
+have_virtfs_proxy_helper = targetos != 'darwin' and have_virtfs and have_tools
 
 foreach k : get_option('trace_backends')
   config_host_data.set('CONFIG_TRACE_' + k.to_upper(), true)
@@ -1553,6 +1570,7 @@ config_host_data.set('CONFIG_NETTLE', nettle.found())
 config_host_data.set('CONFIG_QEMU_PRIVATE_XTS', xts == 'private')
 config_host_data.set('CONFIG_MALLOC_TRIM', has_malloc_trim)
 config_host_data.set('CONFIG_STATX', has_statx)
+config_host_data.set('CONFIG_STATX_MNT_ID', has_statx_mnt_id)
 config_host_data.set('CONFIG_ZSTD', zstd.found())
 config_host_data.set('CONFIG_FUSE', fuse.found())
 config_host_data.set('CONFIG_FUSE_LSEEK', fuse_lseek.found())
@@ -1606,9 +1624,15 @@ config_host_data.set('CONFIG_CLOCK_ADJTIME', cc.has_function('clock_adjtime'))
 config_host_data.set('CONFIG_DUP3', cc.has_function('dup3'))
 config_host_data.set('CONFIG_FALLOCATE', cc.has_function('fallocate'))
 config_host_data.set('CONFIG_POSIX_FALLOCATE', cc.has_function('posix_fallocate'))
-config_host_data.set('CONFIG_POSIX_MEMALIGN', cc.has_function('posix_memalign'))
+# Note that we need to specify prefix: here to avoid incorrectly
+# thinking that Windows has posix_memalign()
+config_host_data.set('CONFIG_POSIX_MEMALIGN', cc.has_function('posix_memalign', prefix: '#include <stdlib.h>'))
+config_host_data.set('CONFIG_ALIGNED_MALLOC', cc.has_function('_aligned_malloc'))
+config_host_data.set('CONFIG_VALLOC', cc.has_function('valloc'))
+config_host_data.set('CONFIG_MEMALIGN', cc.has_function('memalign'))
 config_host_data.set('CONFIG_PPOLL', cc.has_function('ppoll'))
 config_host_data.set('CONFIG_PREADV', cc.has_function('preadv', prefix: '#include <sys/uio.h>'))
+config_host_data.set('CONFIG_PTHREAD_FCHDIR_NP', cc.has_function('pthread_fchdir_np'))
 config_host_data.set('CONFIG_SEM_TIMEDWAIT', cc.has_function('sem_timedwait', dependencies: threads))
 config_host_data.set('CONFIG_SENDFILE', cc.has_function('sendfile'))
 config_host_data.set('CONFIG_SETNS', cc.has_function('setns') and cc.has_function('unshare'))
@@ -1933,12 +1957,15 @@ config_host_data.set('CONFIG_AF_VSOCK', cc.compiles(gnu_source_prefix + '''
   }'''))
 
 have_vss = false
+have_vss_sdk = false # old xp/2003 SDK
 if targetos == 'windows' and link_language == 'cpp'
   have_vss = cxx.compiles('''
     #define __MIDL_user_allocate_free_DEFINED__
-    #include <inc/win2003/vss.h>
+    #include <vss.h>
     int main(void) { return VSS_CTX_BACKUP; }''')
+  have_vss_sdk = cxx.has_header('vscoordint.h')
 endif
+config_host_data.set('HAVE_VSS_SDK', have_vss_sdk)
 
 have_ntddscsi = false
 if targetos == 'windows'
@@ -2419,8 +2446,8 @@ if get_option('cfi') and slirp_opt == 'system'
 endif
 
 fdt = not_found
-fdt_opt = get_option('fdt')
 if have_system
+  fdt_opt = get_option('fdt')
   if fdt_opt in ['enabled', 'auto', 'system']
     have_internal = fs.exists(meson.current_source_dir() / 'dtc/libfdt/Makefile.libfdt')
     fdt = cc.find_library('fdt', kwargs: static_kwargs,
@@ -2463,6 +2490,8 @@ if have_system
     fdt = declare_dependency(link_with: libfdt,
                              include_directories: fdt_inc)
   endif
+else
+  fdt_opt = 'disabled'
 endif
 if not fdt.found() and fdt_required.length() > 0
   error('fdt not available but required by targets ' + ', '.join(fdt_required))
@@ -2692,6 +2721,7 @@ if have_system or have_user
     'target/i386',
     'target/i386/kvm',
     'target/mips/tcg',
+    'target/nios2',
     'target/ppc',
     'target/riscv',
     'target/s390x',
@@ -2701,7 +2731,7 @@ if have_system or have_user
 endif
 
 vhost_user = not_found
-if 'CONFIG_VHOST_USER' in config_host
+if targetos == 'linux' and 'CONFIG_VHOST_USER' in config_host
   libvhost_user = subproject('libvhost-user')
   vhost_user = libvhost_user.get_variable('vhost_user_dep')
 endif
@@ -3049,6 +3079,10 @@ common_all = static_library('common',
 
 feature_to_c = find_program('scripts/feature_to_c.sh')
 
+if targetos == 'darwin'
+  entitlement = find_program('scripts/entitlement.sh')
+endif
+
 emulators = {}
 foreach target : target_dirs
   config_target = config_target_mak[target]
@@ -3206,7 +3240,6 @@ foreach target : target_dirs
         install_input += meson.current_source_dir() / entitlements
       endif
 
-      entitlement = find_program('scripts/entitlement.sh')
       emulators += {exe['name'] : custom_target(exe['name'],
                    input: build_input,
                    output: exe['name'],
@@ -3443,11 +3476,18 @@ if link_language == 'cpp'
                                                + ['-O' + get_option('optimization')]
                                                + (get_option('debug') ? ['-g'] : []))}
 endif
+if targetos == 'darwin'
+  summary_info += {'OBJCFLAGS':       ' '.join(get_option('objc_args')
+                                               + ['-O' + get_option('optimization')]
+                                               + (get_option('debug') ? ['-g'] : []))}
+endif
 link_args = get_option(link_language + '_link_args')
 if link_args.length() > 0
   summary_info += {'LDFLAGS':         ' '.join(link_args)}
 endif
 summary_info += {'QEMU_CFLAGS':       config_host['QEMU_CFLAGS']}
+summary_info += {'QEMU_CXXFLAGS':     config_host['QEMU_CXXFLAGS']}
+summary_info += {'QEMU_OBJCFLAGS':    config_host['QEMU_OBJCFLAGS']}
 summary_info += {'QEMU_LDFLAGS':      config_host['QEMU_LDFLAGS']}
 summary_info += {'profiler':          get_option('profiler')}
 summary_info += {'link-time optimization (LTO)': get_option('b_lto')}

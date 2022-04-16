@@ -64,9 +64,9 @@ fi
 : ${cross_cc_ppc="powerpc-linux-gnu-gcc"}
 : ${cross_cc_cflags_ppc="-m32"}
 : ${cross_cc_ppc64="powerpc64-linux-gnu-gcc"}
-: ${cross_cc_cflags_ppc64="-m64 -mbig"}
+: ${cross_cc_cflags_ppc64="-m64 -mbig-endian"}
 : ${cross_cc_ppc64le="$cross_cc_ppc64"}
-: ${cross_cc_cflags_ppc64le="-m64 -mlittle"}
+: ${cross_cc_cflags_ppc64le="-m64 -mlittle-endian"}
 : ${cross_cc_riscv64="riscv64-linux-gnu-gcc"}
 : ${cross_cc_s390x="s390x-linux-gnu-gcc"}
 : ${cross_cc_sh4="sh4-linux-gnu-gcc"}
@@ -97,7 +97,7 @@ for target in $target_list; do
     aarch64-*)
       # We don't have any bigendian build tools so we only use this for AArch64
       container_hosts="x86_64 aarch64"
-      container_image=debian-arm64-test-cross
+      container_image=debian-arm64-cross
       container_cross_cc=aarch64-linux-gnu-gcc-10
       ;;
     alpha-*)
@@ -180,7 +180,7 @@ for target in $target_list; do
       ;;
     riscv64-*)
       container_hosts=x86_64
-      container_image=debian-riscv64-cross
+      container_image=debian-riscv64-test-cross
       container_cross_cc=riscv64-linux-gnu-gcc
       ;;
     s390x-*)

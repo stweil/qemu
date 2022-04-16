@@ -127,8 +127,10 @@ enum {
     /* ISA 3.00 additions */
     POWERPC_EXCP_HVIRT    = 101,
     POWERPC_EXCP_SYSCALL_VECTORED = 102, /* scv exception                     */
+    POWERPC_EXCP_PERFM_EBB = 103,    /* Performance Monitor EBB Exception    */
+    POWERPC_EXCP_EXTERNAL_EBB = 104, /* External EBB Exception               */
     /* EOL                                                                   */
-    POWERPC_EXCP_NB       = 103,
+    POWERPC_EXCP_NB       = 105,
     /* QEMU exceptions: special cases we want to stop translation            */
     POWERPC_EXCP_SYSCALL_USER = 0x203, /* System call in user mode only      */
 };
@@ -1075,7 +1077,7 @@ struct ppc_radix_page_info {
 #define PPC_CPU_OPCODES_LEN          0x40
 #define PPC_CPU_INDIRECT_OPCODES_LEN 0x20
 
-struct CPUPPCState {
+struct CPUArchState {
     /* Most commonly used resources during translated code execution first */
     target_ulong gpr[32];  /* general purpose registers */
     target_ulong gprh[32]; /* storage for GPR MSB, used by the SPE extension */
@@ -1273,7 +1275,7 @@ typedef struct PPCVirtualHypervisorClass PPCVirtualHypervisorClass;
  *
  * A PowerPC CPU.
  */
-struct PowerPCCPU {
+struct ArchCPU {
     /*< private >*/
     CPUState parent_obj;
     /*< public >*/
@@ -1474,9 +1476,6 @@ int ppc_compat_max_vthreads(PowerPCCPU *cpu);
 void ppc_compat_add_property(Object *obj, const char *name,
                              uint32_t *compat_pvr, const char *basedesc);
 #endif /* defined(TARGET_PPC64) */
-
-typedef CPUPPCState CPUArchState;
-typedef PowerPCCPU ArchCPU;
 
 #include "exec/cpu-all.h"
 
@@ -2434,6 +2433,7 @@ enum {
     PPC_INTERRUPT_HMI,            /* Hypervisor Maintenance interrupt    */
     PPC_INTERRUPT_HDOORBELL,      /* Hypervisor Doorbell interrupt        */
     PPC_INTERRUPT_HVIRT,          /* Hypervisor virtualization interrupt  */
+    PPC_INTERRUPT_EBB,            /* Event-based Branch exception         */
 };
 
 /* Processor Compatibility mask (PCR) */
@@ -2498,6 +2498,11 @@ void QEMU_NORETURN raise_exception_err(CPUPPCState *env, uint32_t exception,
                                        uint32_t error_code);
 void QEMU_NORETURN raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
                                           uint32_t error_code, uintptr_t raddr);
+
+/* PERFM EBB helper*/
+#if defined(TARGET_PPC64) && !defined(CONFIG_USER_ONLY)
+void raise_ebb_perfm_exception(CPUPPCState *env);
+#endif
 
 #if !defined(CONFIG_USER_ONLY)
 static inline int booke206_tlbm_id(CPUPPCState *env, ppcmas_tlb_t *tlbm)
