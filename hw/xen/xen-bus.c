@@ -561,7 +561,7 @@ void xen_device_backend_printf(XenDevice *xendev, const char *key,
     }
 }
 
-static int GCC_SCANF_ATTR(3, 4)
+static int G_GNUC_SCANF(3, 4)
 xen_device_backend_scanf(XenDevice *xendev, const char *key,
                          const char *fmt, ...)
 {
