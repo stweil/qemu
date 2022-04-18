@@ -443,7 +443,7 @@ sdl2_config="${SDL2_CONFIG-${cross_prefix}sdl2-config}"
 # provides these semantics.)
 QEMU_CFLAGS="-fno-strict-aliasing -fno-common -fwrapv"
 QEMU_CFLAGS="-Wundef -Wwrite-strings -Wmissing-prototypes $QEMU_CFLAGS"
-QEMU_CFLAGS="-Wstrict-prototypes -Wredundant-decls $QEMU_CFLAGS"
+QEMU_CFLAGS="-Wstrict-prototypes $QEMU_CFLAGS"
 QEMU_CFLAGS="-Wno-unused-parameter $QEMU_CFLAGS"
 QEMU_CFLAGS="-Wno-missing-field-initializers $QEMU_CFLAGS"
 QEMU_CFLAGS="-Wno-sign-compare $QEMU_CFLAGS"
