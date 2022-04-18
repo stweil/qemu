@@ -44,9 +44,6 @@ Unicode true
 ; Use maximum compression.
 SetCompressor /SOLID lzma
 
-; Generate a Unicode installer.
-Unicode true
-
 !include "MUI2.nsh"
 
 ; The name of the installer.
@@ -166,6 +163,7 @@ Section "$(Tools_Section_Name)" Tools_Section_Description
     File "${BINDIR}\qemu-img.exe"
     File "${BINDIR}\qemu-io.exe"
     File "${BINDIR}\qemu-nbd.exe"
+    File "${BINDIR}\qemu-storage-daemon.exe"
 SectionEnd
 
 SectionGroup "$(System_Emulation_Section_Name)" System_Emulation_Section_Description
