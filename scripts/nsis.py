@@ -9,7 +9,6 @@ import glob
 import os
 import shutil
 import subprocess
-import tempfile
 
 
 def signcode(path):
