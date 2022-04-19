@@ -175,9 +175,9 @@ SectionGroupEnd
 Section "$(Desktop_Icon_Section_Name)" Desktop_Icon_Section_Description
     SetOutPath "$INSTDIR\share"
 !ifdef W64
-    File /r /usr/x86_64-w64-mingw32/sys-root/mingw/share/icons
+    File /r /mingw64/share/icons
 !else
-    File /r /usr/i686-w64-mingw32/sys-root/mingw/share/icons
+    File /r /mingw32/share/icons
 !endif
 SectionEnd
 
@@ -228,12 +228,8 @@ Section "Uninstall" Uninstall_Section_Description
     Delete "$INSTDIR\README.rst"
     Delete "$INSTDIR\VERSION"
     Delete "$INSTDIR\*.dll"
-    Delete "$INSTDIR\qemu-nbd.exe"
-    Delete "$INSTDIR\qemu-io.exe"
-    Delete "$INSTDIR\qemu-img.exe"
-    Delete "$INSTDIR\qemu-ga.exe"
-    Delete "$INSTDIR\qemu-edid.exe"
-    Delete "$INSTDIR\qemu-system-*.exe"
+    Delete "$INSTDIR\qemu-*.exe"
+    RMDir /r "$INSTDIR\lib"
     RMDir /r "$INSTDIR\share"
     ; Remove generated files
     Delete "$INSTDIR\stderr.txt"
