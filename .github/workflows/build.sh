@@ -110,6 +110,7 @@ mkdir -p $BUILDDIR && cd $BUILDDIR
 # Run configure.
 ../../../configure --cross-prefix=$HOST- --disable-guest-agent-msi \
     --disable-werror \
+    --enable-strip \
     --extra-cflags="-I$mingw/include" \
     --extra-ldflags="-L$mingw/lib"
 
