@@ -34,6 +34,13 @@
 !ifndef SRCDIR
 !define SRCDIR .
 !endif
+!ifndef ICONSDIR
+!ifdef W64
+!define ICONSDIR /mingw64/share/icons
+!else
+!define ICONSDIR /mingw32/share/icons
+!endif
+!endif
 !ifndef OUTFILE
 !define OUTFILE "qemu-setup.exe"
 !endif
@@ -174,11 +181,7 @@ SectionGroupEnd
 
 Section "$(Desktop_Icon_Section_Name)" Desktop_Icon_Section_Description
     SetOutPath "$INSTDIR\share"
-!ifdef W64
-    File /r /mingw64/share/icons
-!else
-    File /r /mingw32/share/icons
-!endif
+    File /r ${ICONSDIR}
 SectionEnd
 
 !ifdef DLLDIR

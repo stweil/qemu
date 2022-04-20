@@ -71,12 +71,16 @@ def main():
             "-DBINDIR=" + destdir + args.prefix,
         ]
         dlldir = "w32"
+        iconsdir = "/mingw32/share/icons"
         if args.cpu == "x86_64":
             dlldir = "w64"
+            iconsdir = "/mingw64/share/icons"
             makensis += ["-DW64"]
         if os.path.exists(os.path.join(args.srcdir, "dll")):
             makensis += ["-DDLLDIR={0}/dll/{1}".format(args.srcdir, dlldir)]
-
+        if os.path.exists("/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"):
+            iconsdir = "/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"
+        makensis += ["-DICONSDIR=" + iconsdir]
         makensis += ["-DOUTFILE=" + args.outfile] + args.nsisargs
         subprocess.run(makensis)
         signcode(args.outfile)

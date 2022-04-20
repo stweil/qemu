@@ -61,7 +61,11 @@ sudo ln -s winhvplatformdefs.h WinHvPlatformDefs.h
 )
 fi
 
-DLL_PATH=$PWD/dll/$HOST
+if test "$ARCH" = "i686"; then
+DLL_PATH=$PWD/dll/w32
+else
+DLL_PATH=$PWD/dll/w64
+fi
 
 mkdir -p $DISTDIR
 mkdir -p $DLL_PATH
