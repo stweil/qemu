@@ -996,7 +996,7 @@ static void gt64120_reset(DeviceState *dev)
     /* FIXME: Malta specific hw assumptions ahead */
 
     /* CPU Configuration */
-#ifdef TARGET_WORDS_BIGENDIAN
+#if TARGET_BIG_ENDIAN
     s->regs[GT_CPU]           = 0x00000000;
 #else
     s->regs[GT_CPU]           = 0x00001000;
