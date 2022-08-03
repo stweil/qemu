@@ -216,7 +216,6 @@ typedef enum {
 
 /* QEMU interface */
 
-#include "qemu-common.h"        /* BlockBackend */
 #include "hw/block/flash.h"
 
 /* NOR flash devices */

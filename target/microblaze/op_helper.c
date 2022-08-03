@@ -62,7 +62,7 @@ uint32_t helper_get(uint32_t id, uint32_t ctrl)
     return 0xdead0000 | id;
 }
 
-void QEMU_NORETURN helper_raise_exception(CPUMBState *env, uint32_t index)
+void G_NORETURN helper_raise_exception(CPUMBState *env, uint32_t index)
 {
     CPUState *cs = env_cpu(env);
 

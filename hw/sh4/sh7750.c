@@ -217,7 +217,7 @@ static void ignore_access(const char *kind, hwaddr addr)
             kind, regname(addr), addr);
 }
 
-static uint32_t QEMU_NORETURN sh7750_mem_readb(void *opaque, hwaddr addr)
+static uint32_t G_NORETURN sh7750_mem_readb(void *opaque, hwaddr addr)
 {
     switch (addr) {
     default:
@@ -669,7 +669,7 @@ static struct intc_group groups_irl[] = {
 #define MM_UTLB_DATA     (7)
 #define MM_REGION_TYPE(addr)  ((addr & MM_REGION_MASK) >> 24)
 
-static uint64_t QEMU_NORETURN invalid_read(void *opaque, hwaddr addr)
+static uint64_t G_NORETURN invalid_read(void *opaque, hwaddr addr)
 {
     abort();
 
@@ -714,7 +714,7 @@ static uint64_t sh7750_mmct_read(void *opaque, hwaddr addr,
     return ret;
 }
 
-static void QEMU_NORETURN invalid_write(void *opaque, hwaddr addr,
+static void G_NORETURN invalid_write(void *opaque, hwaddr addr,
                                         uint64_t mem_value)
 {
     abort();

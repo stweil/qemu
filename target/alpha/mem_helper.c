@@ -61,7 +61,7 @@ void alpha_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
     cpu_loop_exit(cs);
 }
 
-void QEMU_NORETURN
+void G_NORETURN
 alpha_cpu_do_transaction_failed(CPUState *cs, hwaddr physaddr,
                                 vaddr addr, unsigned size,
                                 MMUAccessType access_type,

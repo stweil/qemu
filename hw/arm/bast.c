@@ -32,7 +32,6 @@
 #include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "net/net.h"
-#include "qemu-common.h"         /* qemu_find_file */
 #include "s3c2410x.h"
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/dma.h"         /* QEMUSGList (in ide/internal.h) */

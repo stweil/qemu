@@ -17,7 +17,6 @@
 #include <pthread.h>
 #include <execinfo.h>
 #include <sys/ioctl.h>
-#include "qemu-common.h"
 #include "block/block_int.h"
 #include "qemu/option.h"
 #include "qemu/queue.h"

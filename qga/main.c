@@ -223,6 +223,10 @@ void reopen_fd_to_null(int fd)
 
 static void usage(const char *cmd)
 {
+#ifdef CONFIG_FSFREEZE
+    g_autofree char *fsfreeze_hook = get_relocated_path(QGA_FSFREEZE_HOOK_DEFAULT);
+#endif
+
     printf(
 "Usage: %s [-m <method> -p <path>] [<options>]\n"
 "QEMU Guest Agent " QEMU_FULL_VERSION "\n"
@@ -270,7 +274,7 @@ QEMU_HELP_BOTTOM "\n"
     , cmd, QGA_VIRTIO_PATH_DEFAULT, QGA_SERIAL_PATH_DEFAULT,
     dfl_pathnames.pidfile,
 #ifdef CONFIG_FSFREEZE
-    QGA_FSFREEZE_HOOK_DEFAULT,
+    fsfreeze_hook,
 #endif
     dfl_pathnames.state_dir);
 }
@@ -1270,6 +1274,8 @@ static GAState *initialize_agent(GAConfig *config, int socket_activation)
     g_log_set_default_handler(ga_log, s);
     g_log_set_fatal_mask(NULL, G_LOG_LEVEL_ERROR);
     ga_enable_logging(s);
+
+    g_debug("Guest agent version %s started", QEMU_FULL_VERSION);
 
 #ifdef _WIN32
     /* On win32 the state directory is application specific (be it the default

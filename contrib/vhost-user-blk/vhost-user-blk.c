@@ -146,7 +146,7 @@ vub_readv(VubReq *req, struct iovec *iov, uint32_t iovcnt)
     req->size = vub_iov_size(iov, iovcnt);
     rc = preadv(vdev_blk->blk_fd, iov, iovcnt, req->sector_num * 512);
     if (rc < 0) {
-        fprintf(stderr, "%s, Sector %"PRIu64", Size %lu failed with %s\n",
+        fprintf(stderr, "%s, Sector %"PRIu64", Size %zu failed with %s\n",
                 vdev_blk->blk_name, req->sector_num, req->size,
                 strerror(errno));
         return -1;
@@ -169,7 +169,7 @@ vub_writev(VubReq *req, struct iovec *iov, uint32_t iovcnt)
     req->size = vub_iov_size(iov, iovcnt);
     rc = pwritev(vdev_blk->blk_fd, iov, iovcnt, req->sector_num * 512);
     if (rc < 0) {
-        fprintf(stderr, "%s, Sector %"PRIu64", Size %lu failed with %s\n",
+        fprintf(stderr, "%s, Sector %"PRIu64", Size %zu failed with %s\n",
                 vdev_blk->blk_name, req->sector_num, req->size,
                 strerror(errno));
         return -1;
@@ -188,7 +188,7 @@ vub_discard_write_zeroes(VubReq *req, struct iovec *iov, uint32_t iovcnt,
 
     size = vub_iov_size(iov, iovcnt);
     if (size != sizeof(*desc)) {
-        fprintf(stderr, "Invalid size %ld, expect %ld\n", size, sizeof(*desc));
+        fprintf(stderr, "Invalid size %zd, expect %zd\n", size, sizeof(*desc));
         return -1;
     }
     buf = g_new0(char, size);
@@ -593,7 +593,8 @@ static GOptionEntry entries[] = {
     {"blk-file", 'b', 0, G_OPTION_ARG_FILENAME, &opt_blk_file,
      "block device or file path", "PATH"},
     { "read-only", 'r', 0, G_OPTION_ARG_NONE, &opt_read_only,
-      "Enable read-only", NULL }
+      "Enable read-only", NULL },
+    { NULL, },
 };
 
 int main(int argc, char **argv)

@@ -137,7 +137,7 @@ typedef struct DisasContext {
     int delayed_branch;
 } DisasContext;
 
-static void QEMU_NORETURN gen_BUG(DisasContext *dc, const char *file, int line)
+static void G_NORETURN gen_BUG(DisasContext *dc, const char *file, int line)
 {
     cpu_abort(CPU(dc->cpu), "%s:%d pc=%x\n", file, line, dc->pc);
 }
@@ -2863,7 +2863,7 @@ static int dec_ftag_fidx_i_m(CPUCRISState *env, DisasContext *dc)
     return 2;
 }
 
-static int QEMU_NORETURN dec_null(CPUCRISState *env, DisasContext *dc)
+static int G_NORETURN dec_null(CPUCRISState *env, DisasContext *dc)
 {
     printf("unknown insn pc=%x opc=%x op1=%x op2=%x\n",
         dc->pc, dc->opcode, dc->op1, dc->op2);

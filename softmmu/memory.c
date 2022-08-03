@@ -23,8 +23,8 @@
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
 #include "qemu/qemu-print.h"
-#include "qemu-common.h"            /* trace_unassigned */
 #include "qom/object.h"
+#include "sysemu/sysemu.h"          /* trace_unassigned */
 #include "trace.h"
 
 #include "exec/memory-internal.h"

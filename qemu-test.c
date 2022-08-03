@@ -17,7 +17,6 @@
 #include "qemu/osdep.h"
 #include <getopt.h>
 
-#include "qemu-common.h"
 #include "qemu/timer.h"
 #include "block/block_int.h"
 #include "block/fvd-ext.h"

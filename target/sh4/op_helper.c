@@ -49,7 +49,7 @@ void superh_cpu_do_unaligned_access(CPUState *cs, vaddr addr,
 #endif
 
 #ifdef CONFIG_USER_ONLY
-void QEMU_NORETURN helper_ldtlb(CPUSH4State *env)
+void G_NORETURN helper_ldtlb(CPUSH4State *env)
 #else
 void helper_ldtlb(CPUSH4State *env)
 #endif
@@ -71,27 +71,27 @@ void raise_exception(CPUSH4State *env, int index,
     cpu_loop_exit_restore(cs, retaddr);
 }
 
-void QEMU_NORETURN helper_raise_illegal_instruction(CPUSH4State *env)
+void G_NORETURN helper_raise_illegal_instruction(CPUSH4State *env)
 {
     raise_exception(env, 0x180, 0);
 }
 
-void QEMU_NORETURN helper_raise_slot_illegal_instruction(CPUSH4State *env)
+void G_NORETURN helper_raise_slot_illegal_instruction(CPUSH4State *env)
 {
     raise_exception(env, 0x1a0, 0);
 }
 
-void QEMU_NORETURN helper_raise_fpu_disable(CPUSH4State *env)
+void G_NORETURN helper_raise_fpu_disable(CPUSH4State *env)
 {
     raise_exception(env, 0x800, 0);
 }
 
-void QEMU_NORETURN helper_raise_slot_fpu_disable(CPUSH4State *env)
+void G_NORETURN helper_raise_slot_fpu_disable(CPUSH4State *env)
 {
     raise_exception(env, 0x820, 0);
 }
 
-void QEMU_NORETURN helper_sleep(CPUSH4State *env)
+void G_NORETURN helper_sleep(CPUSH4State *env)
 {
     CPUState *cs = env_cpu(env);
 
@@ -100,7 +100,7 @@ void QEMU_NORETURN helper_sleep(CPUSH4State *env)
     raise_exception(env, EXCP_HLT, 0);
 }
 
-void QEMU_NORETURN helper_trapa(CPUSH4State *env, uint32_t tra)
+void G_NORETURN helper_trapa(CPUSH4State *env, uint32_t tra)
 {
     env->tra = tra << 2;
     raise_exception(env, 0x160, 0);

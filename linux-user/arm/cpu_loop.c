@@ -230,7 +230,7 @@ do_kernel_trap(CPUARMState *env)
     /* Jump back to the caller.  */
     addr = env->regs[14];
     if (addr & 1) {
-        env->thumb = 1;
+        env->thumb = true;
         addr &= ~1;
     }
     env->regs[15] = addr;
@@ -449,7 +449,7 @@ void cpu_loop(CPUARMState *env)
             }
             break;
         case EXCP_SEMIHOST:
-            env->regs[0] = do_common_semihosting(cs);
+            do_common_semihosting(cs);
             env->regs[15] += env->thumb ? 2 : 4;
             break;
         case EXCP_INTERRUPT:

@@ -21,7 +21,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "irq.h"
 #include "net/net.h"
 #include "sysbus.h"

@@ -512,7 +512,7 @@ static int tap_win32_write(tap_win32_overlapped_t *overlapped,
     return write_size;
 }
 
-static DWORD WINAPI QEMU_NORETURN tap_win32_thread_entry(LPVOID param)
+static DWORD WINAPI G_NORETURN tap_win32_thread_entry(LPVOID param)
 {
     tap_win32_overlapped_t *overlapped = (tap_win32_overlapped_t*)param;
     unsigned long read_size;
