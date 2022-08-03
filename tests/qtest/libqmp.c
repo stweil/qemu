@@ -134,6 +134,7 @@ static void socket_send_fds(int socket_fd, int *fds, size_t fds_num,
  * a particular EVENT is received.
  */
 static void
+G_GNUC_PRINTF(4, 0)
 _qmp_fd_vsend_fds(int fd, int *fds, size_t fds_num,
                   const char *fmt, va_list ap)
 {
