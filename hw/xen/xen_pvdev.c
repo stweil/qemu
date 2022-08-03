@@ -196,8 +196,9 @@ const char *xenbus_strstate(enum xenbus_state state)
  *  2 == noisy debug messages (logfile only).
  *  3 == will flood your log (logfile only).
  */
-static void xen_pv_output_msg(struct XenLegacyDevice *xendev,
-                              FILE *f, const char *fmt, va_list args)
+static void G_GNUC_PRINTF(3, 0)
+xen_pv_output_msg(struct XenLegacyDevice *xendev,
+                  FILE *f, const char *fmt, va_list args)
 {
     if (xendev) {
         fprintf(f, "xen be: %s: ", xendev->name);
