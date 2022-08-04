@@ -29,7 +29,7 @@ file /usr/bin/$HOST-pkg-config
 /usr/bin/$HOST-pkg-config
 
 # Install cygwin key and add cygwin sources.
-sudo curl -o /etc/apt/trusted.gpg.d/weilnetz.gpg https://qemu.weilnetz.de/debian/weilnetz.gpg
+sudo curl -sS -o /etc/apt/trusted.gpg.d/weilnetz.gpg https://qemu.weilnetz.de/debian/weilnetz.gpg
 echo deb https://qemu.weilnetz.de/debian/ testing contrib | \
   sudo tee /etc/apt/sources.list.d/cygwin.list
 
@@ -43,6 +43,13 @@ sudo apt-get install --no-install-recommends \
   $PKG_ARCH-adwaita-icon-theme $PKG_ARCH-cogl $PKG_ARCH-curl \
   $PKG_ARCH-gmp $PKG_ARCH-gnutls $PKG_ARCH-gtk3 $PKG_ARCH-icu \
   $PKG_ARCH-libxml2 $PKG_ARCH-ncurses $PKG_ARCH-sdl2 $PKG_ARCH-usbredir
+if test "$ARCH" = "i686"; then
+curl -sS -O http://de.archive.ubuntu.com/ubuntu/pool/universe/m/mingw-w64/mingw-w64-i686-dev_10.0.0-2_all.deb
+sudo dpkg -i mingw-w64-i686-dev_10.0.0-2_all.deb
+else
+curl -sS -O http://de.archive.ubuntu.com/ubuntu/pool/universe/m/mingw-w64/mingw-w64-x86-64-dev_10.0.0-2_all.deb
+sudo dpkg -i mingw-w64-x86-64-dev_10.0.0-2_all.deb
+fi
 
 # Workaround for buggy cross pkg-config.
 sudo ln -sf $PWD/.github/workflows/pkg-config-crosswrapper /usr/bin/$HOST-pkg-config
@@ -52,9 +59,9 @@ if test "$ARCH" != "i686"; then
 (
 sudo mkdir -p /usr/$HOST/sys-include
 cd /usr/$HOST/sys-include
-sudo curl -s -o winhvemulation.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvemulation.h?format=raw
-sudo curl -s -o winhvplatform.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatform.h?format=raw
-sudo curl -s -o winhvplatformdefs.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatformdefs.h?format=raw
+sudo curl -sS -o winhvemulation.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvemulation.h?format=raw
+sudo curl -sS -o winhvplatform.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatform.h?format=raw
+sudo curl -sS -o winhvplatformdefs.h https://sourceforge.net/p/mingw-w64/mingw-w64/ci/master/tree/mingw-w64-headers/include/winhvplatformdefs.h?format=raw
 sudo ln -s winhvemulation.h WinHvEmulation.h
 sudo ln -s winhvplatform.h WinHvPlatform.h
 sudo ln -s winhvplatformdefs.h WinHvPlatformDefs.h
