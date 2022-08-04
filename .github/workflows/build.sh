@@ -2,7 +2,7 @@
 
 # GitHub actions - Create QEMU installer for Windows
 
-# Author: Stefan Weil (2020)
+# Author: Stefan Weil (2020-2022)
 
 #~ set -e
 set -x
@@ -24,9 +24,15 @@ PKG_ARCH=mingw64-${ARCH/_/-}
 pwd
 find .github
 
+echo deb http://de.archive.ubuntu.com/ubuntu kinetic main universe | \
+  sudo tee /etc/apt/sources.list.d/kinetic.list
+
+sudo apt-get update
+sudo apt-get install --yes curl make pkg-config
+
 sudo ln -sf $PWD/.github/workflows/pkg-config-crosswrapper /usr/bin/$HOST-pkg-config
-file /usr/bin/$HOST-pkg-config
-/usr/bin/$HOST-pkg-config
+# file /usr/bin/$HOST-pkg-config
+# /usr/bin/$HOST-pkg-config
 
 # Install cygwin key and add cygwin sources.
 sudo curl -sS -o /etc/apt/trusted.gpg.d/weilnetz.gpg https://qemu.weilnetz.de/debian/weilnetz.gpg
@@ -35,7 +41,7 @@ echo deb https://qemu.weilnetz.de/debian/ testing contrib | \
 
 # Install packages.
 sudo apt-get update
-sudo apt-get install --no-install-recommends \
+sudo apt-get install --yes --no-install-recommends \
   mingw-w64-tools ninja-build nsis \
   gcc libc6-dev \
   g++-mingw-w64-${ARCH/_/-} gcc-mingw-w64-${ARCH/_/-} \
