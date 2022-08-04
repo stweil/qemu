@@ -1309,9 +1309,6 @@ for flag in $gcc_flags; do
     fi
 done
 
-if test "$mingw32" = "yes"; then
-  stack_protector="no"
-fi
 if test "$stack_protector" != "no"; then
   cat > $TMPC << EOF
 int main(int argc, char *argv[])
