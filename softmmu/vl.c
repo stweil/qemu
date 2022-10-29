@@ -53,7 +53,6 @@
 #include "hw/isa/isa.h"
 #include "hw/scsi/scsi.h"
 #include "hw/display/vga.h"
-#include "sysemu/watchdog.h"
 #include "hw/firmware/smbios.h"
 #include "hw/acpi/acpi.h"
 #include "hw/xen/xen.h"
@@ -181,7 +180,6 @@ static Chardev **serial_hds;
 static const char *log_mask;
 static const char *log_file;
 static bool list_data_dirs;
-static const char *watchdog;
 static const char *qtest_chrdev;
 static const char *qtest_log;
 
@@ -1825,7 +1823,7 @@ static void qemu_apply_machine_options(QDict *qdict)
 {
     object_set_properties_from_keyval(OBJECT(current_machine), qdict, false, &error_fatal);
 
-    if (semihosting_enabled() && !semihosting_get_argc()) {
+    if (semihosting_enabled(false) && !semihosting_get_argc()) {
         /* fall back to the -kernel/-append */
         semihosting_arg_fallback(current_machine->kernel_filename, current_machine->kernel_cmdline);
     }
@@ -1888,7 +1886,9 @@ static void qemu_create_early_backends(void)
      * setting machine properties, so they can be referred to.
      */
     configure_blockdev(&bdo_queue, machine_class, snapshot);
-    audio_init_audiodevs();
+    if (!audio_init_audiodevs()) {
+        exit(1);
+    }
 }
 
 
@@ -2330,12 +2330,6 @@ static void qemu_process_sugar_options(void)
         }
         object_register_sugar_prop("memory-backend", "prealloc", "on", false);
     }
-
-    if (watchdog) {
-        int i = select_watchdog(watchdog);
-        if (i > 0)
-            exit (i == 1 ? 1 : 0);
-    }
 }
 
 /* -action processing */
@@ -2606,7 +2600,7 @@ void qmp_x_exit_preconfig(Error **errp)
     }
 }
 
-void qemu_init(int argc, char **argv, char **envp)
+void qemu_init(int argc, char **argv)
 {
     QemuOpts *opts;
     QemuOpts *icount_opts = NULL, *accel_opts = NULL;
@@ -2843,11 +2837,16 @@ void qemu_init(int argc, char **argv, char **envp)
                 audio_parse_option(optarg);
                 break;
             case QEMU_OPTION_audio: {
-                QDict *dict = keyval_parse(optarg, "driver", NULL, &error_fatal);
+                bool help;
                 char *model;
                 Audiodev *dev = NULL;
                 Visitor *v;
-
+                QDict *dict = keyval_parse(optarg, "driver", &help, &error_fatal);
+                if (help || (qdict_haskey(dict, "driver") &&
+                             is_help_option(qdict_get_str(dict, "driver")))) {
+                    audio_help();
+                    exit(EXIT_SUCCESS);
+                }
                 if (!qdict_haskey(dict, "id")) {
                     qdict_put_str(dict, "id", "audiodev0");
                 }
@@ -3102,14 +3101,6 @@ void qemu_init(int argc, char **argv, char **envp)
                 if (strncmp(optarg, "mon:", 4) == 0) {
                     default_monitor = 0;
                 }
-                break;
-            case QEMU_OPTION_watchdog:
-                if (watchdog) {
-                    error_report("only one watchdog option may be given");
-                    exit(1);
-                }
-                warn_report("-watchdog is deprecated; use -device instead.");
-                watchdog = optarg;
                 break;
             case QEMU_OPTION_action:
                 olist = qemu_find_opts("action");

@@ -29,7 +29,6 @@
 #include "hw/irq.h"
 #include "hw/ppc/ppc.h"
 #include "hw/ppc/ppc4xx.h"
-#include "hw/intc/ppc-uic.h"
 #include "hw/qdev-properties.h"
 #include "qemu/log.h"
 #include "exec/address-spaces.h"
@@ -37,103 +36,49 @@
 #include "qapi/error.h"
 #include "trace.h"
 
-static void ppc4xx_reset(void *opaque)
-{
-    PowerPCCPU *cpu = opaque;
-
-    cpu_reset(CPU(cpu));
-}
-
-/*****************************************************************************/
-/* Generic PowerPC 4xx processor instantiation */
-PowerPCCPU *ppc4xx_init(const char *cpu_type,
-                        clk_setup_t *cpu_clk, clk_setup_t *tb_clk,
-                        uint32_t sysclk)
-{
-    PowerPCCPU *cpu;
-    CPUPPCState *env;
-
-    /* init CPUs */
-    cpu = POWERPC_CPU(cpu_create(cpu_type));
-    env = &cpu->env;
-
-    cpu_clk->cb = NULL; /* We don't care about CPU clock frequency changes */
-    cpu_clk->opaque = env;
-    /* Set time-base frequency to sysclk */
-    tb_clk->cb = ppc_40x_timers_init(env, sysclk, PPC_INTERRUPT_PIT);
-    tb_clk->opaque = env;
-    ppc_dcr_init(env, NULL, NULL);
-    /* Register qemu callbacks */
-    qemu_register_reset(ppc4xx_reset, cpu);
-
-    return cpu;
-}
-
 /*****************************************************************************/
 /* SDRAM controller */
-typedef struct ppc4xx_sdram_t ppc4xx_sdram_t;
-struct ppc4xx_sdram_t {
-    uint32_t addr;
-    int nbanks;
-    MemoryRegion containers[4]; /* used for clipping */
-    MemoryRegion *ram_memories;
-    hwaddr ram_bases[4];
-    hwaddr ram_sizes[4];
-    uint32_t besr0;
-    uint32_t besr1;
-    uint32_t bear;
-    uint32_t cfg;
-    uint32_t status;
-    uint32_t rtr;
-    uint32_t pmit;
-    uint32_t bcr[4];
-    uint32_t tr;
-    uint32_t ecccfg;
-    uint32_t eccesr;
-    qemu_irq irq;
-};
-
 enum {
     SDRAM0_CFGADDR = 0x010,
     SDRAM0_CFGDATA = 0x011,
 };
 
-/* XXX: TOFIX: some patches have made this code become inconsistent:
+/*
+ * XXX: TOFIX: some patches have made this code become inconsistent:
  *      there are type inconsistencies, mixing hwaddr, target_ulong
  *      and uint32_t
  */
-static uint32_t sdram_bcr (hwaddr ram_base,
-                           hwaddr ram_size)
+static uint32_t sdram_ddr_bcr(hwaddr ram_base, hwaddr ram_size)
 {
     uint32_t bcr;
 
     switch (ram_size) {
     case 4 * MiB:
-        bcr = 0x00000000;
+        bcr = 0;
         break;
     case 8 * MiB:
-        bcr = 0x00020000;
+        bcr = 0x20000;
         break;
     case 16 * MiB:
-        bcr = 0x00040000;
+        bcr = 0x40000;
         break;
     case 32 * MiB:
-        bcr = 0x00060000;
+        bcr = 0x60000;
         break;
     case 64 * MiB:
-        bcr = 0x00080000;
+        bcr = 0x80000;
         break;
     case 128 * MiB:
-        bcr = 0x000A0000;
+        bcr = 0xA0000;
         break;
     case 256 * MiB:
-        bcr = 0x000C0000;
+        bcr = 0xC0000;
         break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR,
                       "%s: invalid RAM size 0x%" HWADDR_PRIx "\n", __func__,
                       ram_size);
-        return 0x00000000;
+        return 0;
     }
     bcr |= ram_base & 0xFF800000;
     bcr |= 1;
@@ -141,83 +86,83 @@ static uint32_t sdram_bcr (hwaddr ram_base,
     return bcr;
 }
 
-static inline hwaddr sdram_base(uint32_t bcr)
+static inline hwaddr sdram_ddr_base(uint32_t bcr)
 {
     return bcr & 0xFF800000;
 }
 
-static target_ulong sdram_size (uint32_t bcr)
+static target_ulong sdram_ddr_size(uint32_t bcr)
 {
     target_ulong size;
     int sh;
 
     sh = (bcr >> 17) & 0x7;
-    if (sh == 7)
+    if (sh == 7) {
         size = -1;
-    else
+    } else {
         size = (4 * MiB) << sh;
+    }
 
     return size;
 }
 
-static void sdram_set_bcr(ppc4xx_sdram_t *sdram, int i,
-                          uint32_t bcr, int enabled)
+static void sdram_ddr_set_bcr(Ppc4xxSdramDdrState *sdram, int i,
+                              uint32_t bcr, int enabled)
 {
-    if (sdram->bcr[i] & 0x00000001) {
+    if (sdram->bank[i].bcr & 1) {
         /* Unmap RAM */
-        trace_ppc4xx_sdram_unmap(sdram_base(sdram->bcr[i]),
-                                 sdram_size(sdram->bcr[i]));
+        trace_ppc4xx_sdram_unmap(sdram_ddr_base(sdram->bank[i].bcr),
+                                 sdram_ddr_size(sdram->bank[i].bcr));
         memory_region_del_subregion(get_system_memory(),
-                                    &sdram->containers[i]);
-        memory_region_del_subregion(&sdram->containers[i],
-                                    &sdram->ram_memories[i]);
-        object_unparent(OBJECT(&sdram->containers[i]));
+                                    &sdram->bank[i].container);
+        memory_region_del_subregion(&sdram->bank[i].container,
+                                    &sdram->bank[i].ram);
+        object_unparent(OBJECT(&sdram->bank[i].container));
     }
-    sdram->bcr[i] = bcr & 0xFFDEE001;
-    if (enabled && (bcr & 0x00000001)) {
-        trace_ppc4xx_sdram_unmap(sdram_base(bcr), sdram_size(bcr));
-        memory_region_init(&sdram->containers[i], NULL, "sdram-containers",
-                           sdram_size(bcr));
-        memory_region_add_subregion(&sdram->containers[i], 0,
-                                    &sdram->ram_memories[i]);
+    sdram->bank[i].bcr = bcr & 0xFFDEE001;
+    if (enabled && (bcr & 1)) {
+        trace_ppc4xx_sdram_map(sdram_ddr_base(bcr), sdram_ddr_size(bcr));
+        memory_region_init(&sdram->bank[i].container, NULL, "sdram-container",
+                           sdram_ddr_size(bcr));
+        memory_region_add_subregion(&sdram->bank[i].container, 0,
+                                    &sdram->bank[i].ram);
         memory_region_add_subregion(get_system_memory(),
-                                    sdram_base(bcr),
-                                    &sdram->containers[i]);
+                                    sdram_ddr_base(bcr),
+                                    &sdram->bank[i].container);
     }
 }
 
-static void sdram_map_bcr (ppc4xx_sdram_t *sdram)
+static void sdram_ddr_map_bcr(Ppc4xxSdramDdrState *sdram)
 {
     int i;
 
     for (i = 0; i < sdram->nbanks; i++) {
-        if (sdram->ram_sizes[i] != 0) {
-            sdram_set_bcr(sdram, i, sdram_bcr(sdram->ram_bases[i],
-                                              sdram->ram_sizes[i]), 1);
+        if (sdram->bank[i].size != 0) {
+            sdram_ddr_set_bcr(sdram, i, sdram_ddr_bcr(sdram->bank[i].base,
+                                                      sdram->bank[i].size), 1);
         } else {
-            sdram_set_bcr(sdram, i, 0x00000000, 0);
+            sdram_ddr_set_bcr(sdram, i, 0, 0);
         }
     }
 }
 
-static void sdram_unmap_bcr (ppc4xx_sdram_t *sdram)
+static void sdram_ddr_unmap_bcr(Ppc4xxSdramDdrState *sdram)
 {
     int i;
 
     for (i = 0; i < sdram->nbanks; i++) {
-        trace_ppc4xx_sdram_unmap(sdram_base(sdram->bcr[i]),
-                                 sdram_size(sdram->bcr[i]));
+        trace_ppc4xx_sdram_unmap(sdram_ddr_base(sdram->bank[i].bcr),
+                                 sdram_ddr_size(sdram->bank[i].bcr));
         memory_region_del_subregion(get_system_memory(),
-                                    &sdram->ram_memories[i]);
+                                    &sdram->bank[i].ram);
     }
 }
 
-static uint32_t dcr_read_sdram (void *opaque, int dcrn)
+static uint32_t sdram_ddr_dcr_read(void *opaque, int dcrn)
 {
-    ppc4xx_sdram_t *sdram;
+    Ppc4xxSdramDdrState *sdram = opaque;
     uint32_t ret;
 
-    sdram = opaque;
     switch (dcrn) {
     case SDRAM0_CFGADDR:
         ret = sdram->addr;
@@ -246,16 +191,16 @@ static uint32_t dcr_read_sdram (void *opaque, int dcrn)
             ret = sdram->pmit;
             break;
         case 0x40: /* SDRAM_B0CR */
-            ret = sdram->bcr[0];
+            ret = sdram->bank[0].bcr;
             break;
         case 0x44: /* SDRAM_B1CR */
-            ret = sdram->bcr[1];
+            ret = sdram->bank[1].bcr;
             break;
         case 0x48: /* SDRAM_B2CR */
-            ret = sdram->bcr[2];
+            ret = sdram->bank[2].bcr;
             break;
         case 0x4C: /* SDRAM_B3CR */
-            ret = sdram->bcr[3];
+            ret = sdram->bank[3].bcr;
             break;
         case 0x80: /* SDRAM_TR */
             ret = -1; /* ? */
@@ -273,18 +218,17 @@ static uint32_t dcr_read_sdram (void *opaque, int dcrn)
         break;
     default:
         /* Avoid gcc warning */
-        ret = 0x00000000;
+        ret = 0;
         break;
     }
 
     return ret;
 }
 
-static void dcr_write_sdram (void *opaque, int dcrn, uint32_t val)
+static void sdram_ddr_dcr_write(void *opaque, int dcrn, uint32_t val)
 {
-    ppc4xx_sdram_t *sdram;
+    Ppc4xxSdramDdrState *sdram = opaque;
 
-    sdram = opaque;
     switch (dcrn) {
     case SDRAM0_CFGADDR:
         sdram->addr = val;
@@ -305,18 +249,19 @@ static void dcr_write_sdram (void *opaque, int dcrn, uint32_t val)
             if (!(sdram->cfg & 0x80000000) && (val & 0x80000000)) {
                 trace_ppc4xx_sdram_enable("enable");
                 /* validate all RAM mappings */
-                sdram_map_bcr(sdram);
+                sdram_ddr_map_bcr(sdram);
                 sdram->status &= ~0x80000000;
             } else if ((sdram->cfg & 0x80000000) && !(val & 0x80000000)) {
                 trace_ppc4xx_sdram_enable("disable");
                 /* invalidate all RAM mappings */
-                sdram_unmap_bcr(sdram);
+                sdram_ddr_unmap_bcr(sdram);
                 sdram->status |= 0x80000000;
             }
-            if (!(sdram->cfg & 0x40000000) && (val & 0x40000000))
+            if (!(sdram->cfg & 0x40000000) && (val & 0x40000000)) {
                 sdram->status |= 0x40000000;
-            else if ((sdram->cfg & 0x40000000) && !(val & 0x40000000))
+            } else if ((sdram->cfg & 0x40000000) && !(val & 0x40000000)) {
                 sdram->status &= ~0x40000000;
+            }
             sdram->cfg = val;
             break;
         case 0x24: /* SDRAM_STATUS */
@@ -329,16 +274,16 @@ static void dcr_write_sdram (void *opaque, int dcrn, uint32_t val)
             sdram->pmit = (val & 0xF8000000) | 0x07C00000;
             break;
         case 0x40: /* SDRAM_B0CR */
-            sdram_set_bcr(sdram, 0, val, sdram->cfg & 0x80000000);
+            sdram_ddr_set_bcr(sdram, 0, val, sdram->cfg & 0x80000000);
             break;
         case 0x44: /* SDRAM_B1CR */
-            sdram_set_bcr(sdram, 1, val, sdram->cfg & 0x80000000);
+            sdram_ddr_set_bcr(sdram, 1, val, sdram->cfg & 0x80000000);
             break;
         case 0x48: /* SDRAM_B2CR */
-            sdram_set_bcr(sdram, 2, val, sdram->cfg & 0x80000000);
+            sdram_ddr_set_bcr(sdram, 2, val, sdram->cfg & 0x80000000);
             break;
         case 0x4C: /* SDRAM_B3CR */
-            sdram_set_bcr(sdram, 3, val, sdram->cfg & 0x80000000);
+            sdram_ddr_set_bcr(sdram, 3, val, sdram->cfg & 0x80000000);
             break;
         case 0x80: /* SDRAM_TR */
             sdram->tr = val & 0x018FC01F;
@@ -348,10 +293,11 @@ static void dcr_write_sdram (void *opaque, int dcrn, uint32_t val)
             break;
         case 0x98: /* SDRAM_ECCESR */
             val &= 0xFFF0F000;
-            if (sdram->eccesr == 0 && val != 0)
+            if (sdram->eccesr == 0 && val != 0) {
                 qemu_irq_raise(sdram->irq);
-            else if (sdram->eccesr != 0 && val == 0)
+            } else if (sdram->eccesr != 0 && val == 0) {
                 qemu_irq_lower(sdram->irq);
+            }
             sdram->eccesr = val;
             break;
         default: /* Error */
@@ -361,51 +307,73 @@ static void dcr_write_sdram (void *opaque, int dcrn, uint32_t val)
     }
 }
 
-static void sdram_reset (void *opaque)
+static void ppc4xx_sdram_ddr_reset(DeviceState *dev)
 {
-    ppc4xx_sdram_t *sdram;
+    Ppc4xxSdramDdrState *sdram = PPC4xx_SDRAM_DDR(dev);
 
-    sdram = opaque;
-    sdram->addr = 0x00000000;
-    sdram->bear = 0x00000000;
-    sdram->besr0 = 0x00000000; /* No error */
-    sdram->besr1 = 0x00000000; /* No error */
-    sdram->cfg = 0x00000000;
-    sdram->ecccfg = 0x00000000; /* No ECC */
-    sdram->eccesr = 0x00000000; /* No error */
+    sdram->addr = 0;
+    sdram->bear = 0;
+    sdram->besr0 = 0; /* No error */
+    sdram->besr1 = 0; /* No error */
+    sdram->cfg = 0;
+    sdram->ecccfg = 0; /* No ECC */
+    sdram->eccesr = 0; /* No error */
     sdram->pmit = 0x07C00000;
     sdram->rtr = 0x05F00000;
     sdram->tr = 0x00854009;
     /* We pre-initialize RAM banks */
-    sdram->status = 0x00000000;
+    sdram->status = 0;
     sdram->cfg = 0x00800000;
 }
 
-void ppc4xx_sdram_init (CPUPPCState *env, qemu_irq irq, int nbanks,
-                        MemoryRegion *ram_memories,
-                        hwaddr *ram_bases,
-                        hwaddr *ram_sizes,
-                        int do_init)
+static void ppc4xx_sdram_ddr_realize(DeviceState *dev, Error **errp)
 {
-    ppc4xx_sdram_t *sdram;
+    Ppc4xxSdramDdrState *s = PPC4xx_SDRAM_DDR(dev);
+    Ppc4xxDcrDeviceState *dcr = PPC4xx_DCR_DEVICE(dev);
+    const ram_addr_t valid_bank_sizes[] = {
+        256 * MiB, 128 * MiB, 64 * MiB, 32 * MiB, 16 * MiB, 8 * MiB, 4 * MiB, 0
+    };
 
-    sdram = g_new0(ppc4xx_sdram_t, 1);
-    sdram->irq = irq;
-    sdram->nbanks = nbanks;
-    sdram->ram_memories = ram_memories;
-    memset(sdram->ram_bases, 0, 4 * sizeof(hwaddr));
-    memcpy(sdram->ram_bases, ram_bases,
-           nbanks * sizeof(hwaddr));
-    memset(sdram->ram_sizes, 0, 4 * sizeof(hwaddr));
-    memcpy(sdram->ram_sizes, ram_sizes,
-           nbanks * sizeof(hwaddr));
-    qemu_register_reset(&sdram_reset, sdram);
-    ppc_dcr_register(env, SDRAM0_CFGADDR,
-                     sdram, &dcr_read_sdram, &dcr_write_sdram);
-    ppc_dcr_register(env, SDRAM0_CFGDATA,
-                     sdram, &dcr_read_sdram, &dcr_write_sdram);
-    if (do_init)
-        sdram_map_bcr(sdram);
+    if (s->nbanks < 1 || s->nbanks > 4) {
+        error_setg(errp, "Invalid number of RAM banks");
+        return;
+    }
+    if (!s->dram_mr) {
+        error_setg(errp, "Missing dram memory region");
+        return;
+    }
+    ppc4xx_sdram_banks(s->dram_mr, s->nbanks, s->bank, valid_bank_sizes);
+
+    sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq);
+
+    ppc4xx_dcr_register(dcr, SDRAM0_CFGADDR,
+                        s, &sdram_ddr_dcr_read, &sdram_ddr_dcr_write);
+    ppc4xx_dcr_register(dcr, SDRAM0_CFGDATA,
+                        s, &sdram_ddr_dcr_read, &sdram_ddr_dcr_write);
+}
+
+static Property ppc4xx_sdram_ddr_props[] = {
+    DEFINE_PROP_LINK("dram", Ppc4xxSdramDdrState, dram_mr, TYPE_MEMORY_REGION,
+                     MemoryRegion *),
+    DEFINE_PROP_UINT32("nbanks", Ppc4xxSdramDdrState, nbanks, 4),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
+static void ppc4xx_sdram_ddr_class_init(ObjectClass *oc, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(oc);
+
+    dc->realize = ppc4xx_sdram_ddr_realize;
+    dc->reset = ppc4xx_sdram_ddr_reset;
+    /* Reason: only works as function of a ppc4xx SoC */
+    dc->user_creatable = false;
+    device_class_set_props(dc, ppc4xx_sdram_ddr_props);
+}
+
+void ppc4xx_sdram_ddr_enable(Ppc4xxSdramDdrState *s)
+{
+    sdram_ddr_dcr_write(s, SDRAM0_CFGADDR, 0x20);
+    sdram_ddr_dcr_write(s, SDRAM0_CFGDATA, 0x80000000);
 }
 
 /*
@@ -419,8 +387,7 @@ void ppc4xx_sdram_init (CPUPPCState *env, qemu_irq irq, int nbanks,
  * sizes varies by SoC.
  */
 void ppc4xx_sdram_banks(MemoryRegion *ram, int nr_banks,
-                        MemoryRegion ram_memories[],
-                        hwaddr ram_bases[], hwaddr ram_sizes[],
+                        Ppc4xxSdramBank ram_banks[],
                         const ram_addr_t sdram_bank_sizes[])
 {
     ram_addr_t size_left = memory_region_size(ram);
@@ -435,13 +402,13 @@ void ppc4xx_sdram_banks(MemoryRegion *ram, int nr_banks,
             if (bank_size <= size_left) {
                 char name[32];
 
-                ram_bases[i] = base;
-                ram_sizes[i] = bank_size;
+                ram_banks[i].base = base;
+                ram_banks[i].size = bank_size;
                 base += bank_size;
                 size_left -= bank_size;
                 snprintf(name, sizeof(name), "ppc4xx.sdram%d", i);
-                memory_region_init_alias(&ram_memories[i], NULL, name, ram,
-                                         ram_bases[i], ram_sizes[i]);
+                memory_region_init_alias(&ram_banks[i].ram, NULL, name, ram,
+                                         ram_banks[i].base, ram_banks[i].size);
                 break;
             }
         }
@@ -462,7 +429,7 @@ void ppc4xx_sdram_banks(MemoryRegion *ram, int nr_banks,
         }
         error_report("at most %d bank%s of %s MiB each supported",
                      nr_banks, nr_banks == 1 ? "" : "s", s->str);
-        error_printf("Possible valid RAM size: %" PRIi64 " MiB \n",
+        error_printf("Possible valid RAM size: %" PRIi64 " MiB\n",
             used_size ? used_size / MiB : sdram_bank_sizes[i - 1] / MiB);
 
         g_string_free(s, true);
@@ -491,32 +458,10 @@ enum {
     MAL0_RCBS1    = 0x1E1,
 };
 
-typedef struct ppc4xx_mal_t ppc4xx_mal_t;
-struct ppc4xx_mal_t {
-    qemu_irq irqs[4];
-    uint32_t cfg;
-    uint32_t esr;
-    uint32_t ier;
-    uint32_t txcasr;
-    uint32_t txcarr;
-    uint32_t txeobisr;
-    uint32_t txdeir;
-    uint32_t rxcasr;
-    uint32_t rxcarr;
-    uint32_t rxeobisr;
-    uint32_t rxdeir;
-    uint32_t *txctpr;
-    uint32_t *rxctpr;
-    uint32_t *rcbs;
-    uint8_t  txcnum;
-    uint8_t  rxcnum;
-};
-
-static void ppc4xx_mal_reset(void *opaque)
+static void ppc4xx_mal_reset(DeviceState *dev)
 {
-    ppc4xx_mal_t *mal;
+    Ppc4xxMalState *mal = PPC4xx_MAL(dev);
 
-    mal = opaque;
     mal->cfg = 0x0007C000;
     mal->esr = 0x00000000;
     mal->ier = 0x00000000;
@@ -530,10 +475,9 @@ static void ppc4xx_mal_reset(void *opaque)
 
 static uint32_t dcr_read_mal(void *opaque, int dcrn)
 {
-    ppc4xx_mal_t *mal;
+    Ppc4xxMalState *mal = opaque;
     uint32_t ret;
 
-    mal = opaque;
     switch (dcrn) {
     case MAL0_CFG:
         ret = mal->cfg;
@@ -587,13 +531,12 @@ static uint32_t dcr_read_mal(void *opaque, int dcrn)
 
 static void dcr_write_mal(void *opaque, int dcrn, uint32_t val)
 {
-    ppc4xx_mal_t *mal;
+    Ppc4xxMalState *mal = opaque;
 
-    mal = opaque;
     switch (dcrn) {
     case MAL0_CFG:
         if (val & 0x80000000) {
-            ppc4xx_mal_reset(mal);
+            ppc4xx_mal_reset(DEVICE(mal));
         }
         mal->cfg = val & 0x00FFC087;
         break;
@@ -644,55 +587,409 @@ static void dcr_write_mal(void *opaque, int dcrn, uint32_t val)
     }
 }
 
-void ppc4xx_mal_init(CPUPPCState *env, uint8_t txcnum, uint8_t rxcnum,
-                     qemu_irq irqs[4])
+static void ppc4xx_mal_realize(DeviceState *dev, Error **errp)
 {
-    ppc4xx_mal_t *mal;
+    Ppc4xxMalState *mal = PPC4xx_MAL(dev);
+    Ppc4xxDcrDeviceState *dcr = PPC4xx_DCR_DEVICE(dev);
     int i;
 
-    assert(txcnum <= 32 && rxcnum <= 32);
-    mal = g_malloc0(sizeof(*mal));
-    mal->txcnum = txcnum;
-    mal->rxcnum = rxcnum;
-    mal->txctpr = g_new0(uint32_t, txcnum);
-    mal->rxctpr = g_new0(uint32_t, rxcnum);
-    mal->rcbs = g_new0(uint32_t, rxcnum);
-    for (i = 0; i < 4; i++) {
-        mal->irqs[i] = irqs[i];
+    if (mal->txcnum > 32 || mal->rxcnum > 32) {
+        error_setg(errp, "invalid TXC/RXC number");
+        return;
     }
-    qemu_register_reset(&ppc4xx_mal_reset, mal);
-    ppc_dcr_register(env, MAL0_CFG,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_ESR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_IER,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_TXCASR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_TXCARR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_TXEOBISR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_TXDEIR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_RXCASR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_RXCARR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_RXEOBISR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    ppc_dcr_register(env, MAL0_RXDEIR,
-                     mal, &dcr_read_mal, &dcr_write_mal);
-    for (i = 0; i < txcnum; i++) {
-        ppc_dcr_register(env, MAL0_TXCTP0R + i,
-                         mal, &dcr_read_mal, &dcr_write_mal);
+
+    mal->txctpr = g_new0(uint32_t, mal->txcnum);
+    mal->rxctpr = g_new0(uint32_t, mal->rxcnum);
+    mal->rcbs = g_new0(uint32_t, mal->rxcnum);
+
+    for (i = 0; i < ARRAY_SIZE(mal->irqs); i++) {
+        sysbus_init_irq(SYS_BUS_DEVICE(dev), &mal->irqs[i]);
     }
-    for (i = 0; i < rxcnum; i++) {
-        ppc_dcr_register(env, MAL0_RXCTP0R + i,
-                         mal, &dcr_read_mal, &dcr_write_mal);
+
+    ppc4xx_dcr_register(dcr, MAL0_CFG, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_ESR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_IER, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_TXCASR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_TXCARR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_TXEOBISR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_TXDEIR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_RXCASR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_RXCARR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_RXEOBISR, mal, &dcr_read_mal, &dcr_write_mal);
+    ppc4xx_dcr_register(dcr, MAL0_RXDEIR, mal, &dcr_read_mal, &dcr_write_mal);
+    for (i = 0; i < mal->txcnum; i++) {
+        ppc4xx_dcr_register(dcr, MAL0_TXCTP0R + i,
+                            mal, &dcr_read_mal, &dcr_write_mal);
     }
-    for (i = 0; i < rxcnum; i++) {
-        ppc_dcr_register(env, MAL0_RCBS0 + i,
-                         mal, &dcr_read_mal, &dcr_write_mal);
+    for (i = 0; i < mal->rxcnum; i++) {
+        ppc4xx_dcr_register(dcr, MAL0_RXCTP0R + i,
+                            mal, &dcr_read_mal, &dcr_write_mal);
+    }
+    for (i = 0; i < mal->rxcnum; i++) {
+        ppc4xx_dcr_register(dcr, MAL0_RCBS0 + i,
+                            mal, &dcr_read_mal, &dcr_write_mal);
     }
 }
+
+static void ppc4xx_mal_finalize(Object *obj)
+{
+    Ppc4xxMalState *mal = PPC4xx_MAL(obj);
+
+    g_free(mal->rcbs);
+    g_free(mal->rxctpr);
+    g_free(mal->txctpr);
+}
+
+static Property ppc4xx_mal_properties[] = {
+    DEFINE_PROP_UINT8("txc-num", Ppc4xxMalState, txcnum, 0),
+    DEFINE_PROP_UINT8("rxc-num", Ppc4xxMalState, rxcnum, 0),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
+static void ppc4xx_mal_class_init(ObjectClass *oc, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(oc);
+
+    dc->realize = ppc4xx_mal_realize;
+    dc->reset = ppc4xx_mal_reset;
+    /* Reason: only works as function of a ppc4xx SoC */
+    dc->user_creatable = false;
+    device_class_set_props(dc, ppc4xx_mal_properties);
+}
+
+/*****************************************************************************/
+/* Peripheral local bus arbitrer */
+enum {
+    PLB3A0_ACR = 0x077,
+    PLB4A0_ACR = 0x081,
+    PLB0_BESR  = 0x084,
+    PLB0_BEAR  = 0x086,
+    PLB0_ACR   = 0x087,
+    PLB4A1_ACR = 0x089,
+};
+
+static uint32_t dcr_read_plb(void *opaque, int dcrn)
+{
+    Ppc4xxPlbState *plb = opaque;
+    uint32_t ret;
+
+    switch (dcrn) {
+    case PLB0_ACR:
+        ret = plb->acr;
+        break;
+    case PLB0_BEAR:
+        ret = plb->bear;
+        break;
+    case PLB0_BESR:
+        ret = plb->besr;
+        break;
+    default:
+        /* Avoid gcc warning */
+        ret = 0;
+        break;
+    }
+
+    return ret;
+}
+
+static void dcr_write_plb(void *opaque, int dcrn, uint32_t val)
+{
+    Ppc4xxPlbState *plb = opaque;
+
+    switch (dcrn) {
+    case PLB0_ACR:
+        /*
+         * We don't care about the actual parameters written as
+         * we don't manage any priorities on the bus
+         */
+        plb->acr = val & 0xF8000000;
+        break;
+    case PLB0_BEAR:
+        /* Read only */
+        break;
+    case PLB0_BESR:
+        /* Write-clear */
+        plb->besr &= ~val;
+        break;
+    }
+}
+
+static void ppc405_plb_reset(DeviceState *dev)
+{
+    Ppc4xxPlbState *plb = PPC4xx_PLB(dev);
+
+    plb->acr = 0x00000000;
+    plb->bear = 0x00000000;
+    plb->besr = 0x00000000;
+}
+
+static void ppc405_plb_realize(DeviceState *dev, Error **errp)
+{
+    Ppc4xxPlbState *plb = PPC4xx_PLB(dev);
+    Ppc4xxDcrDeviceState *dcr = PPC4xx_DCR_DEVICE(dev);
+
+    ppc4xx_dcr_register(dcr, PLB3A0_ACR, plb, &dcr_read_plb, &dcr_write_plb);
+    ppc4xx_dcr_register(dcr, PLB4A0_ACR, plb, &dcr_read_plb, &dcr_write_plb);
+    ppc4xx_dcr_register(dcr, PLB0_ACR, plb, &dcr_read_plb, &dcr_write_plb);
+    ppc4xx_dcr_register(dcr, PLB0_BEAR, plb, &dcr_read_plb, &dcr_write_plb);
+    ppc4xx_dcr_register(dcr, PLB0_BESR, plb, &dcr_read_plb, &dcr_write_plb);
+    ppc4xx_dcr_register(dcr, PLB4A1_ACR, plb, &dcr_read_plb, &dcr_write_plb);
+}
+
+static void ppc405_plb_class_init(ObjectClass *oc, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(oc);
+
+    dc->realize = ppc405_plb_realize;
+    dc->reset = ppc405_plb_reset;
+    /* Reason: only works as function of a ppc4xx SoC */
+    dc->user_creatable = false;
+}
+
+/*****************************************************************************/
+/* Peripheral controller */
+enum {
+    EBC0_CFGADDR = 0x012,
+    EBC0_CFGDATA = 0x013,
+};
+
+static uint32_t dcr_read_ebc(void *opaque, int dcrn)
+{
+    Ppc4xxEbcState *ebc = opaque;
+    uint32_t ret;
+
+    switch (dcrn) {
+    case EBC0_CFGADDR:
+        ret = ebc->addr;
+        break;
+    case EBC0_CFGDATA:
+        switch (ebc->addr) {
+        case 0x00: /* B0CR */
+            ret = ebc->bcr[0];
+            break;
+        case 0x01: /* B1CR */
+            ret = ebc->bcr[1];
+            break;
+        case 0x02: /* B2CR */
+            ret = ebc->bcr[2];
+            break;
+        case 0x03: /* B3CR */
+            ret = ebc->bcr[3];
+            break;
+        case 0x04: /* B4CR */
+            ret = ebc->bcr[4];
+            break;
+        case 0x05: /* B5CR */
+            ret = ebc->bcr[5];
+            break;
+        case 0x06: /* B6CR */
+            ret = ebc->bcr[6];
+            break;
+        case 0x07: /* B7CR */
+            ret = ebc->bcr[7];
+            break;
+        case 0x10: /* B0AP */
+            ret = ebc->bap[0];
+            break;
+        case 0x11: /* B1AP */
+            ret = ebc->bap[1];
+            break;
+        case 0x12: /* B2AP */
+            ret = ebc->bap[2];
+            break;
+        case 0x13: /* B3AP */
+            ret = ebc->bap[3];
+            break;
+        case 0x14: /* B4AP */
+            ret = ebc->bap[4];
+            break;
+        case 0x15: /* B5AP */
+            ret = ebc->bap[5];
+            break;
+        case 0x16: /* B6AP */
+            ret = ebc->bap[6];
+            break;
+        case 0x17: /* B7AP */
+            ret = ebc->bap[7];
+            break;
+        case 0x20: /* BEAR */
+            ret = ebc->bear;
+            break;
+        case 0x21: /* BESR0 */
+            ret = ebc->besr0;
+            break;
+        case 0x22: /* BESR1 */
+            ret = ebc->besr1;
+            break;
+        case 0x23: /* CFG */
+            ret = ebc->cfg;
+            break;
+        default:
+            ret = 0x00000000;
+            break;
+        }
+        break;
+    default:
+        ret = 0x00000000;
+        break;
+    }
+
+    return ret;
+}
+
+static void dcr_write_ebc(void *opaque, int dcrn, uint32_t val)
+{
+    Ppc4xxEbcState *ebc = opaque;
+
+    switch (dcrn) {
+    case EBC0_CFGADDR:
+        ebc->addr = val;
+        break;
+    case EBC0_CFGDATA:
+        switch (ebc->addr) {
+        case 0x00: /* B0CR */
+            break;
+        case 0x01: /* B1CR */
+            break;
+        case 0x02: /* B2CR */
+            break;
+        case 0x03: /* B3CR */
+            break;
+        case 0x04: /* B4CR */
+            break;
+        case 0x05: /* B5CR */
+            break;
+        case 0x06: /* B6CR */
+            break;
+        case 0x07: /* B7CR */
+            break;
+        case 0x10: /* B0AP */
+            break;
+        case 0x11: /* B1AP */
+            break;
+        case 0x12: /* B2AP */
+            break;
+        case 0x13: /* B3AP */
+            break;
+        case 0x14: /* B4AP */
+            break;
+        case 0x15: /* B5AP */
+            break;
+        case 0x16: /* B6AP */
+            break;
+        case 0x17: /* B7AP */
+            break;
+        case 0x20: /* BEAR */
+            break;
+        case 0x21: /* BESR0 */
+            break;
+        case 0x22: /* BESR1 */
+            break;
+        case 0x23: /* CFG */
+            break;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static void ppc405_ebc_reset(DeviceState *dev)
+{
+    Ppc4xxEbcState *ebc = PPC4xx_EBC(dev);
+    int i;
+
+    ebc->addr = 0x00000000;
+    ebc->bap[0] = 0x7F8FFE80;
+    ebc->bcr[0] = 0xFFE28000;
+    for (i = 0; i < 8; i++) {
+        ebc->bap[i] = 0x00000000;
+        ebc->bcr[i] = 0x00000000;
+    }
+    ebc->besr0 = 0x00000000;
+    ebc->besr1 = 0x00000000;
+    ebc->cfg = 0x80400000;
+}
+
+static void ppc405_ebc_realize(DeviceState *dev, Error **errp)
+{
+    Ppc4xxEbcState *ebc = PPC4xx_EBC(dev);
+    Ppc4xxDcrDeviceState *dcr = PPC4xx_DCR_DEVICE(dev);
+
+    ppc4xx_dcr_register(dcr, EBC0_CFGADDR, ebc, &dcr_read_ebc, &dcr_write_ebc);
+    ppc4xx_dcr_register(dcr, EBC0_CFGDATA, ebc, &dcr_read_ebc, &dcr_write_ebc);
+}
+
+static void ppc405_ebc_class_init(ObjectClass *oc, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(oc);
+
+    dc->realize = ppc405_ebc_realize;
+    dc->reset = ppc405_ebc_reset;
+    /* Reason: only works as function of a ppc4xx SoC */
+    dc->user_creatable = false;
+}
+
+/* PPC4xx_DCR_DEVICE */
+
+void ppc4xx_dcr_register(Ppc4xxDcrDeviceState *dev, int dcrn, void *opaque,
+                         dcr_read_cb dcr_read, dcr_write_cb dcr_write)
+{
+    assert(dev->cpu);
+    ppc_dcr_register(&dev->cpu->env, dcrn, opaque, dcr_read, dcr_write);
+}
+
+bool ppc4xx_dcr_realize(Ppc4xxDcrDeviceState *dev, PowerPCCPU *cpu,
+                        Error **errp)
+{
+    object_property_set_link(OBJECT(dev), "cpu", OBJECT(cpu), &error_abort);
+    return sysbus_realize(SYS_BUS_DEVICE(dev), errp);
+}
+
+static Property ppc4xx_dcr_properties[] = {
+    DEFINE_PROP_LINK("cpu", Ppc4xxDcrDeviceState, cpu, TYPE_POWERPC_CPU,
+                     PowerPCCPU *),
+    DEFINE_PROP_END_OF_LIST(),
+};
+
+static void ppc4xx_dcr_class_init(ObjectClass *oc, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(oc);
+
+    device_class_set_props(dc, ppc4xx_dcr_properties);
+}
+
+static const TypeInfo ppc4xx_types[] = {
+    {
+        .name           = TYPE_PPC4xx_SDRAM_DDR,
+        .parent         = TYPE_PPC4xx_DCR_DEVICE,
+        .instance_size  = sizeof(Ppc4xxSdramDdrState),
+        .class_init     = ppc4xx_sdram_ddr_class_init,
+    }, {
+        .name           = TYPE_PPC4xx_MAL,
+        .parent         = TYPE_PPC4xx_DCR_DEVICE,
+        .instance_size  = sizeof(Ppc4xxMalState),
+        .instance_finalize = ppc4xx_mal_finalize,
+        .class_init     = ppc4xx_mal_class_init,
+    }, {
+        .name           = TYPE_PPC4xx_PLB,
+        .parent         = TYPE_PPC4xx_DCR_DEVICE,
+        .instance_size  = sizeof(Ppc4xxPlbState),
+        .class_init     = ppc405_plb_class_init,
+    }, {
+        .name           = TYPE_PPC4xx_EBC,
+        .parent         = TYPE_PPC4xx_DCR_DEVICE,
+        .instance_size  = sizeof(Ppc4xxEbcState),
+        .class_init     = ppc405_ebc_class_init,
+    }, {
+        .name           = TYPE_PPC4xx_DCR_DEVICE,
+        .parent         = TYPE_SYS_BUS_DEVICE,
+        .instance_size  = sizeof(Ppc4xxDcrDeviceState),
+        .class_init     = ppc4xx_dcr_class_init,
+        .abstract       = true,
+    }
+};
+
+DEFINE_TYPES(ppc4xx_types)
