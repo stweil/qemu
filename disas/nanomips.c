@@ -95,7 +95,7 @@ typedef struct Pool {
 #define IMGASSERTONCE(test)
 
 
-static char *img_format(const char *format, ...)
+static char * G_GNUC_PRINTF(1, 2) img_format(const char *format, ...)
 {
     char *buffer;
     va_list args;
@@ -3252,7 +3252,7 @@ static char *CACHE(uint64 instruction, Dis_info *info)
 
     const char *rs = GPR(rs_value, info);
 
-    return img_format("CACHE 0x%" PRIx64 ", %s(%s)", op_value, s_value, rs);
+    return img_format("CACHE 0x%" PRIx64 ", 0x%" PRIx64 "(%s)", op_value, s_value, rs);
 }
 
 
@@ -3274,7 +3274,7 @@ static char *CACHEE(uint64 instruction, Dis_info *info)
 
     const char *rs = GPR(rs_value, info);
 
-    return img_format("CACHEE 0x%" PRIx64 ", %s(%s)", op_value, s_value, rs);
+    return img_format("CACHEE 0x%" PRIx64 ", 0x%" PRIx64 "(%s)", op_value, s_value, rs);
 }
 
 
