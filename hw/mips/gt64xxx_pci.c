@@ -221,16 +221,6 @@
 #define GT_PCI0_HICMASK         (0xca4 >> 2)
 #define GT_PCI1_SERR1MASK       (0xca8 >> 2)
 
-#if 0
-#define DEBUG
-#endif
-
-#if defined(DEBUG)
-#define logout(fmt, ...) fprintf(stderr, "GT64XXX\t%-24s" fmt, __func__, ##__VA_ARGS__)
-#else
-#define logout(fmt, ...) ((void)0)
-#endif
-
 #define PCI_MAPPING_ENTRY(regname)            \
     hwaddr regname ##_start;      \
     hwaddr regname ##_length;     \
