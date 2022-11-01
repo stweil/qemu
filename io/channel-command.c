@@ -175,7 +175,7 @@ static void qio_channel_command_finalize(Object *obj)
         close(ioc->writefd);
     }
     ioc->writefd = ioc->readfd = -1;
-    if (ioc->pid > 0) {
+    if (ioc->pid != 0) {
         qio_channel_command_abort(ioc, NULL);
         g_spawn_close_pid(ioc->pid);
     }
