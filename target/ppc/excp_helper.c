@@ -2563,9 +2563,8 @@ bool ppc_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 /*****************************************************************************/
 /* Exceptions processing helpers */
 
-void G_NORETURN
-raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
-                       uint32_t error_code, uintptr_t raddr)
+void raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
+                            uint32_t error_code, uintptr_t raddr)
 {
     CPUState *cs = env_cpu(env);
 
@@ -2574,14 +2573,13 @@ raise_exception_err_ra(CPUPPCState *env, uint32_t exception,
     cpu_loop_exit_restore(cs, raddr);
 }
 
-void G_NORETURN
-raise_exception_err(CPUPPCState *env, uint32_t exception,
-                    uint32_t error_code)
+void raise_exception_err(CPUPPCState *env, uint32_t exception,
+                         uint32_t error_code)
 {
     raise_exception_err_ra(env, exception, error_code, 0);
 }
 
-void G_NORETURN raise_exception(CPUPPCState *env, uint32_t exception)
+void raise_exception(CPUPPCState *env, uint32_t exception)
 {
     raise_exception_err_ra(env, exception, 0, 0);
 }
@@ -2593,14 +2591,13 @@ void raise_exception_ra(CPUPPCState *env, uint32_t exception,
 }
 
 #ifdef CONFIG_TCG
-void G_NORETURN
-helper_raise_exception_err(CPUPPCState *env, uint32_t exception,
-                           uint32_t error_code)
+void helper_raise_exception_err(CPUPPCState *env, uint32_t exception,
+                                uint32_t error_code)
 {
     raise_exception_err_ra(env, exception, error_code, 0);
 }
 
-void G_NORETURN helper_raise_exception(CPUPPCState *env, uint32_t exception)
+void helper_raise_exception(CPUPPCState *env, uint32_t exception)
 {
     raise_exception_err_ra(env, exception, 0, 0);
 }
