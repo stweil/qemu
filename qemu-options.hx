@@ -5293,8 +5293,8 @@ SRST
         read the colo-compare git log.
 
     ``-object cryptodev-backend-builtin,id=id[,queues=queues]``
-        Creates a cryptodev backend which executes crypto operation from
-        the QEMU cipher APIS. The id parameter is a unique ID that will
+        Creates a cryptodev backend which executes crypto operations from
+        the QEMU cipher APIs. The id parameter is a unique ID that will
         be used to reference this cryptodev backend from the
         ``virtio-crypto`` device. The queues parameter is optional,
         which specify the queue number of cryptodev backend, the default
