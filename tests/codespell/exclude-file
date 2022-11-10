@@ -1,0 +1,6 @@
+ * VAS controller.
+number generator daemon such as the one found in the vhost-device crate of
+introspection.  The latter can conceivably confuse clients, so tread
+<dt><code class="docutils literal notranslate"><span class="pre">crypted</span></code>: <code class="docutils literal notranslate"><span class="pre">boolean</span></code></dt><dd><p>true if password is already crypt()d, false if raw</p>
+<p>If the <code class="docutils literal notranslate"><span class="pre">crypted</span></code> flag is true, it is the caller’s responsibility
+<code class="docutils literal notranslate"><span class="pre">crypted</span></code> flag, as they may require the clear-text password</p>
