@@ -33,6 +33,6 @@ for exe in $WEBDIR/w*/qemu-w*-setup-$date.exe; do
 done
 
 echo Update documentation...
-echo skipping make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32 install-doc prefix=$WEBDIR/doc/latest
+cp -auv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32/docs/manual/* /var/www/html/doc/latest/
 
 echo Done.
