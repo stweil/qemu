@@ -105,6 +105,10 @@ QEMU_EXTERN_C int daemon(int, int);
 #define _WANT_SEMUN
 #endif
 
+#if defined(__MINGW_PRINTF_FORMAT)
+# error qemu/osdep.h was included too late after stdio.h
+#endif
+
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdbool.h>
