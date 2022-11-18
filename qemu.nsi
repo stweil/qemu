@@ -59,6 +59,34 @@ Name "QEMU"
 ; The file to write
 OutFile "${OUTFILE}"
 
+!ifdef DISPLAYVERSION
+; Caption for installer window.
+!ifdef W64
+Caption "QEMU ${DISPLAYVERSION} (64bit)"
+!else
+Caption "QEMU ${DISPLAYVERSION} (32bit)"
+!endif
+!endif
+
+; File properties.
+!ifdef DISPLAYVERSION
+VIProductVersion "${DISPLAYVERSION}.0"
+!endif
+VIAddVersionKey "ProductName" "QEMU"
+VIAddVersionKey "Comments "http://qemu.weilnetz.de/"
+VIAddVersionKey "CompanyName" "qemu.weilnetz.de"
+VIAddVersionKey "FileDescription" "QEMU machine emulator and virtualizer"
+!ifdef DISPLAYVERSION
+VIAddVersionKey "FileVersion" "${DISPLAYVERSION}"
+!endif
+VIAddVersionKey "InternalName" "QEMU"
+VIAddVersionKey "LegalCopyright" "GNU General Public License version 2"
+VIAddVersionKey "LegalTrademarks" "QEMU is a trademark of Fabrice Bellard."
+VIAddVersionKey "OriginalFilename" "${OUTFILE}"
+!ifdef DISPLAYVERSION
+VIAddVersionKey "ProductVersion" "${DISPLAYVERSION}"
+!endif
+
 ; The default installation directory.
 !ifdef W64
 InstallDir $PROGRAMFILES64\qemu
@@ -154,9 +182,11 @@ Section "${PRODUCT}" QEMU_System_File_Section_Description
 
     ; Write the uninstall keys for Windows
     WriteRegStr HKLM "${UNINST_KEY}" "DisplayName" "QEMU"
+    WriteRegStr HKLM "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\qemu-uninstall.exe"
 !ifdef DISPLAYVERSION
     WriteRegStr HKLM "${UNINST_KEY}" "DisplayVersion" "${DISPLAYVERSION}"
 !endif
+    WriteRegStr HKLM "${UNINST_KEY}" "Publisher" "QEMU Community"
     WriteRegStr HKLM "${UNINST_KEY}" "UninstallString" '"${UNINST_EXE}"'
     WriteRegDWORD HKLM "${UNINST_KEY}" "NoModify" 1
     WriteRegDWORD HKLM "${UNINST_KEY}" "NoRepair" 1
