@@ -88,8 +88,7 @@ def main():
 
         search_path = args.dlldir
         print("Searching '%s' for the dependent dlls ..." % search_path)
-        dlldir = os.path.join(destdir + prefix, "dll")
-        os.mkdir(dlldir)
+        dlldir = destdir + prefix
 
         for exe in glob.glob(os.path.join(destdir + prefix, "*.exe")):
             signcode(exe)
