@@ -105,27 +105,31 @@ def main():
                 print("Copying '%s' to '%s'" % (dep, dllfile))
                 shutil.copy(dep, dllfile)
 
+        iconsdir = "/mingw32/share/icons"
+        if args.cpu == "x86_64":
+            iconsdir = "/mingw64/share/icons"
+        if os.path.exists("/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"):
+            iconsdir = "/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"
+
         makensis = [
             "makensis",
             "-V2",
             "-NOCD",
             "-DSRCDIR=" + args.srcdir,
             "-DBINDIR=" + destdir + prefix,
+            "-DDLLDIR=" + dlldir,
+            "-DICONSDIR=" + iconsdir,
+            "-DOUTFILE=" + args.outfile] + args.nsisargs,
         ]
-        iconsdir = "/mingw32/share/icons"
-        if args.cpu == "x86_64":
-            iconsdir = "/mingw64/share/icons"
-        if os.path.exists("/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"):
-            iconsdir = "/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"
-        makensis += ["-DICONSDIR=" + iconsdir]
+
+        signcode_cmd = os.environ.get("SIGNCODE")
+        if signcode_cmd:
+            makensis += ["-DSIGNCODE=" + signcode_cmd]
 
         if args.cpu == "x86_64":
             makensis += ["-DW64"]
-        makensis += ["-DDLLDIR=" + dlldir]
 
-        makensis += ["-DOUTFILE=" + args.outfile] + args.nsisargs
         subprocess.run(makensis)
-        signcode(args.outfile)
     finally:
         print("Done.")
 

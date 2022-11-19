@@ -59,6 +59,11 @@ Name "QEMU"
 ; The file to write
 OutFile "${OUTFILE}"
 
+!ifdef SIGNCODE
+!finalize "${SIGNCODE} %1"
+!uninstfinalize "${SIGNCODE} %1"
+!endif
+
 !ifdef DISPLAYVERSION
 ; Caption for installer window.
 !ifdef W64
