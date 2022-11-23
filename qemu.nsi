@@ -75,15 +75,15 @@ Caption "QEMU ${DISPLAYVERSION} (32bit)"
 
 ; File properties.
 !ifdef DISPLAYVERSION
-VIProductVersion "${DISPLAYVERSION}.0"
+!define /date DATEVERSION "%Y%m%d%H%M%S"
+VIProductVersion "${DISPLAYVERSION}.${DATEVERSION}"
 !endif
 VIAddVersionKey "ProductName" "QEMU"
-VIAddVersionKey "Comments "http://qemu.weilnetz.de/"
-VIAddVersionKey "CompanyName" "qemu.weilnetz.de"
-VIAddVersionKey "FileDescription" "QEMU machine emulator and virtualizer"
-!ifdef DISPLAYVERSION
-VIAddVersionKey "FileVersion" "${DISPLAYVERSION}"
-!endif
+VIAddVersionKey "Comments" "patched version provided by Stefan Weil"
+VIAddVersionKey "CompanyName" "https://qemu.weilnetz.de"
+VIAddVersionKey "FileDescription" "QEMU machine emulators and tools"
+!define /date DATETIME "%Y-%m-%d-%H-%M-%S"
+VIAddVersionKey "FileVersion" "${DATETIME}"
 VIAddVersionKey "InternalName" "QEMU"
 VIAddVersionKey "LegalCopyright" "GNU General Public License version 2"
 VIAddVersionKey "LegalTrademarks" "QEMU is a trademark of Fabrice Bellard."
