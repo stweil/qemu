@@ -119,7 +119,7 @@ def main():
             "-DBINDIR=" + destdir + prefix,
             "-DDLLDIR=" + dlldir,
             "-DICONSDIR=" + iconsdir,
-            "-DOUTFILE=" + args.outfile] + args.nsisargs,
+            "-DOUTFILE=" + args.outfile,
         ]
 
         signcode_cmd = os.environ.get("SIGNCODE")
@@ -129,6 +129,7 @@ def main():
         if args.cpu == "x86_64":
             makensis += ["-DW64"]
 
+        makensis += args.nsisargs
         subprocess.run(makensis)
     finally:
         print("Done.")
