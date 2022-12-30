@@ -1,0 +1,34 @@
+# GitHub actions - Create QEMU installers for Windows
+
+name: Cross build for Windows
+
+on: [push]
+
+jobs:
+  build32:
+    if: github.repository == 'stweil/qemu'
+    runs-on: [ubuntu-22.04]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Get pacman package manager
+      run: .github/workflows/pacman.sh i686
+    - name: Build QEMU installer (32 bit)
+      run: .github/workflows/build.sh i686
+    - uses: actions/upload-artifact@v3
+      with:
+        name: QEMU Installer Windows 32 bit
+        path: dist
+
+  build64:
+    if: github.repository == 'stweil/qemu'
+    runs-on: [ubuntu-22.04]
+    steps:
+    - uses: actions/checkout@v3
+    - name: Get pacman package manager
+      run: .github/workflows/pacman.sh x86_64
+    - name: Build QEMU installer (64 bit)
+      run: .github/workflows/build.sh x86_64
+    - uses: actions/upload-artifact@v3
+      with:
+        name: QEMU Installer Windows 64 bit
+        path: dist
