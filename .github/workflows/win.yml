@@ -2,11 +2,26 @@
 
 name: Cross build for Windows
 
-on: [push]
+on:
+  #push:
+  #  branches: [ master ]
+
+  # Trigger workflow in GitHub web frontend or from API.
+  workflow_dispatch:
+    inputs:
+      bits:
+        description: 'Windows target'
+        required: true
+        default: any
+        type: choice
+        options:
+          - 'any'
+          - '32-bit'
+          - '64-bit'
 
 jobs:
   build32:
-    if: github.repository == 'stweil/qemu'
+    if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '32-bit') }}
     runs-on: [ubuntu-22.04]
     steps:
     - uses: actions/checkout@v3
@@ -20,7 +35,7 @@ jobs:
         path: dist
 
   build64:
-    if: github.repository == 'stweil/qemu'
+    if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '64-bit') }}
     runs-on: [ubuntu-22.04]
     steps:
     - uses: actions/checkout@v3
