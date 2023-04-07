@@ -1,10 +1,5 @@
-if get_option('sphinx_build') == ''
-  sphinx_build = find_program(['sphinx-build-3', 'sphinx-build'],
-                              required: get_option('docs'))
-else
-  sphinx_build = find_program(get_option('sphinx_build'),
-                              required: get_option('docs'))
-endif
+sphinx_build = find_program(get_option('sphinx_build'),
+                            required: get_option('docs'))
 
 # Check if tools are available to build documentation.
 build_docs = false
@@ -48,7 +43,6 @@ if build_docs
         'qemu-storage-daemon.1': (have_tools ? 'man1' : ''),
         'qemu-trace-stap.1': (stap.found() ? 'man1' : ''),
         'virtfs-proxy-helper.1': (have_virtfs_proxy_helper ? 'man1' : ''),
-        'virtiofsd.1': (have_virtiofsd ? 'man1' : ''),
         'qemu.1': 'man1',
         'qemu-block-drivers.7': 'man7',
         'qemu-cpu-models.7': 'man7'

@@ -1324,8 +1324,8 @@ static uint64_t unassigned_mem_read(void *opaque, hwaddr addr,
 {
     if (trace_unassigned) {
         char buffer[256];
-        fprintf(stderr, "Unassigned mem read " TARGET_FMT_plx " %s\n",
-                addr, qemu_sprint_backtrace(buffer, sizeof(buffer)));
+        printf("Unassigned mem read " HWADDR_FMT_plx " %s\n",
+               addr, qemu_sprint_backtrace(buffer, sizeof(buffer)));
     }
     //~ vm_stop(0);
     return 0;
@@ -1336,9 +1336,9 @@ static void unassigned_mem_write(void *opaque, hwaddr addr,
 {
     if (trace_unassigned) {
         char buffer[256];
-        fprintf(stderr, "Unassigned mem write " TARGET_FMT_plx
-                " = 0x%" PRIx64 " %s\n",
-                addr, val, qemu_sprint_backtrace(buffer, sizeof(buffer)));
+        printf("Unassigned mem write " HWADDR_FMT_plx
+               " = 0x%" PRIx64 " %s\n",
+               addr, val, qemu_sprint_backtrace(buffer, sizeof(buffer)));
     }
 }
 
@@ -1948,6 +1948,7 @@ int memory_region_register_iommu_notifier(MemoryRegion *mr,
     iommu_mr = IOMMU_MEMORY_REGION(mr);
     assert(n->notifier_flags != IOMMU_NOTIFIER_NONE);
     assert(n->start <= n->end);
+    assert(n->end <= memory_region_size(mr));
     assert(n->iommu_idx >= 0 &&
            n->iommu_idx < memory_region_iommu_num_indexes(iommu_mr));
 
@@ -1971,7 +1972,6 @@ uint64_t memory_region_iommu_get_min_page_size(IOMMUMemoryRegion *iommu_mr)
 
 void memory_region_iommu_replay(IOMMUMemoryRegion *iommu_mr, IOMMUNotifier *n)
 {
-    MemoryRegion *mr = MEMORY_REGION(iommu_mr);
     IOMMUMemoryRegionClass *imrc = IOMMU_MEMORY_REGION_GET_CLASS(iommu_mr);
     hwaddr addr, granularity;
     IOMMUTLBEntry iotlb;
@@ -1984,7 +1984,7 @@ void memory_region_iommu_replay(IOMMUMemoryRegion *iommu_mr, IOMMUNotifier *n)
 
     granularity = memory_region_iommu_get_min_page_size(iommu_mr);
 
-    for (addr = 0; addr < memory_region_size(mr); addr += granularity) {
+    for (addr = n->start; addr < n->end; addr += granularity) {
         iotlb = imrc->translate(iommu_mr, addr, IOMMU_NONE, n->iommu_idx);
         if (iotlb.perm != IOMMU_NONE) {
             n->notify(n, &iotlb);
@@ -2042,6 +2042,19 @@ void memory_region_notify_iommu_one(IOMMUNotifier *notifier,
     if (event->type & notifier->notifier_flags) {
         notifier->notify(notifier, &tmp);
     }
+}
+
+void memory_region_unmap_iommu_notifier_range(IOMMUNotifier *n)
+{
+    IOMMUTLBEvent event;
+
+    event.type = IOMMU_NOTIFIER_UNMAP;
+    event.entry.target_as = &address_space_memory;
+    event.entry.iova = n->start;
+    event.entry.perm = IOMMU_NONE;
+    event.entry.addr_mask = n->end - n->start;
+
+    memory_region_notify_iommu_one(n, &event);
 }
 
 void memory_region_notify_iommu(IOMMUMemoryRegion *iommu_mr,
@@ -2420,20 +2433,15 @@ void memory_region_reset_dirty(MemoryRegion *mr, hwaddr addr,
 
 int memory_region_get_fd(MemoryRegion *mr)
 {
-    int fd;
-
     RCU_READ_LOCK_GUARD();
     while (mr->alias) {
         mr = mr->alias;
     }
-    fd = mr->ram_block->fd;
-
-    return fd;
+    return mr->ram_block->fd;
 }
 
 void *memory_region_get_ram_ptr(MemoryRegion *mr)
 {
-    void *ptr;
     uint64_t offset = 0;
 
     RCU_READ_LOCK_GUARD();
@@ -2442,9 +2450,7 @@ void *memory_region_get_ram_ptr(MemoryRegion *mr)
         mr = mr->alias;
     }
     assert(mr->ram_block);
-    ptr = qemu_map_ram_ptr(mr->ram_block, offset);
-
-    return ptr;
+    return qemu_map_ram_ptr(mr->ram_block, offset);
 }
 
 MemoryRegion *memory_region_from_host(void *ptr, ram_addr_t *offset)
@@ -3275,9 +3281,9 @@ static void mtree_print_mr(const MemoryRegion *mr, unsigned int level,
             for (i = 0; i < level; i++) {
                 qemu_printf(MTREE_INDENT);
             }
-            qemu_printf(TARGET_FMT_plx "-" TARGET_FMT_plx
-                        " (prio %d, %s%s): alias %s @%s " TARGET_FMT_plx
-                        "-" TARGET_FMT_plx "%s",
+            qemu_printf(HWADDR_FMT_plx "-" HWADDR_FMT_plx
+                        " (prio %d, %s%s): alias %s @%s " HWADDR_FMT_plx
+                        "-" HWADDR_FMT_plx "%s",
                         cur_start, cur_end,
                         mr->priority,
                         mr->nonvolatile ? "nv-" : "",
@@ -3297,7 +3303,7 @@ static void mtree_print_mr(const MemoryRegion *mr, unsigned int level,
             for (i = 0; i < level; i++) {
                 qemu_printf(MTREE_INDENT);
             }
-            qemu_printf(TARGET_FMT_plx "-" TARGET_FMT_plx
+            qemu_printf(HWADDR_FMT_plx "-" HWADDR_FMT_plx
                         " (prio %d, %s%s): %s%s",
                         cur_start, cur_end,
                         mr->priority,
@@ -3384,8 +3390,8 @@ static void mtree_print_flatview(gpointer key, gpointer value,
     while (n--) {
         mr = range->mr;
         if (range->offset_in_region) {
-            qemu_printf(MTREE_INDENT TARGET_FMT_plx "-" TARGET_FMT_plx
-                        " (prio %d, %s%s): %s @" TARGET_FMT_plx,
+            qemu_printf(MTREE_INDENT HWADDR_FMT_plx "-" HWADDR_FMT_plx
+                        " (prio %d, %s%s): %s @" HWADDR_FMT_plx,
                         int128_get64(range->addr.start),
                         int128_get64(range->addr.start)
                         + MR_SIZE(range->addr.size),
@@ -3395,7 +3401,7 @@ static void mtree_print_flatview(gpointer key, gpointer value,
                         memory_region_name(mr),
                         range->offset_in_region);
         } else {
-            qemu_printf(MTREE_INDENT TARGET_FMT_plx "-" TARGET_FMT_plx
+            qemu_printf(MTREE_INDENT HWADDR_FMT_plx "-" HWADDR_FMT_plx
                         " (prio %d, %s%s): %s",
                         int128_get64(range->addr.start),
                         int128_get64(range->addr.start)

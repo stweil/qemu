@@ -60,7 +60,7 @@ struct BCM2835PeripheralState {
     BCM2835AuxState aux;
     BCM2835FBState fb;
     BCM2835DMAState dma;
-    qemu_or_irq orgated_dma_irq;
+    OrIRQState orgated_dma_irq;
     BCM2835ICState ic;
     BCM2835PowerState power;
     BCM2835PropertyState property;

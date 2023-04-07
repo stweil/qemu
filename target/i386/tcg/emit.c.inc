@@ -629,7 +629,6 @@ static inline void gen_ternary_sse(DisasContext *s, CPUX86State *env, X86Decoded
     /* The format of the fourth input is Lx */
     tcg_gen_addi_ptr(ptr3, cpu_env, ZMM_OFFSET(op3));
     fn(cpu_env, OP_PTR0, OP_PTR1, OP_PTR2, ptr3);
-    tcg_temp_free_ptr(ptr3);
 }
 #define TERNARY_SSE(uname, uvname, lname)                                          \
 static void gen_##uvname(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode) \
@@ -1001,7 +1000,6 @@ static inline void gen_vsib_avx(DisasContext *s, CPUX86State *env, X86DecodedIns
         int ymmh_ofs = vector_elem_offset(&decode->op[1], MO_128, 1);
         tcg_gen_gvec_dup_imm(MO_64, ymmh_ofs, 16, 16, 0);
     }
-    tcg_temp_free_ptr(index);
 }
 #define VSIB_AVX(uname, lname)                                                     \
 static void gen_##uname(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode) \
@@ -1037,6 +1035,8 @@ static void gen_ADCOX(DisasContext *s, CPUX86State *env, MemOp ot, int cc_op)
 #ifdef TARGET_X86_64
     case MO_32:
         /* If TL is 64-bit just do everything in 64-bit arithmetic.  */
+        tcg_gen_ext32u_tl(s->T0, s->T0);
+        tcg_gen_ext32u_tl(s->T1, s->T1);
         tcg_gen_add_i64(s->T0, s->T0, s->T1);
         tcg_gen_add_i64(s->T0, s->T0, carry_in);
         tcg_gen_shri_i64(carry_out, s->T0, 32);
@@ -1625,7 +1625,6 @@ static void gen_PMOVMSKB(DisasContext *s, CPUX86State *env, X86DecodedInsn *deco
             tcg_gen_deposit_tl(s->T0, t, s->T0, 8, TARGET_LONG_BITS - 8);
         }
     }
-    tcg_temp_free(t);
 }
 
 static void gen_PSHUFW(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode)
@@ -1760,7 +1759,6 @@ static void gen_PSRLDQ_i(DisasContext *s, CPUX86State *env, X86DecodedInsn *deco
     } else {
         gen_helper_psrldq_xmm(cpu_env, OP_PTR0, OP_PTR1, imm_vec);
     }
-    tcg_temp_free_ptr(imm_vec);
 }
 
 static void gen_PSLLDQ_i(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode)
@@ -1773,7 +1771,6 @@ static void gen_PSLLDQ_i(DisasContext *s, CPUX86State *env, X86DecodedInsn *deco
     } else {
         gen_helper_pslldq_xmm(cpu_env, OP_PTR0, OP_PTR1, imm_vec);
     }
-    tcg_temp_free_ptr(imm_vec);
 }
 
 static void gen_RORX(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode)
@@ -2291,7 +2288,6 @@ static void gen_VZEROALL(DisasContext *s, CPUX86State *env, X86DecodedInsn *deco
     tcg_gen_addi_ptr(ptr, cpu_env, offsetof(CPUX86State, xmm_t0));
     gen_helper_memset(ptr, ptr, tcg_constant_i32(0),
                       tcg_constant_ptr(CPU_NB_REGS * sizeof(ZMMReg)));
-    tcg_temp_free_ptr(ptr);
 }
 
 static void gen_VZEROUPPER(DisasContext *s, CPUX86State *env, X86DecodedInsn *decode)

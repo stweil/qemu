@@ -125,7 +125,8 @@ static QGuestAllocator guest_malloc;
 static char *tmp_path[2];
 static char *debug_path;
 
-static QTestState * G_GNUC_PRINTF(1, 2) ide_test_start(const char *cmdline_fmt, ...)
+G_GNUC_PRINTF(1, 2)
+static QTestState *ide_test_start(const char *cmdline_fmt, ...)
 {
     QTestState *qts;
     g_autofree char *full_fmt = g_strdup_printf("-machine pc %s", cmdline_fmt);
