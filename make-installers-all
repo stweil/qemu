@@ -8,6 +8,7 @@ WEBDIR=/var/www/html
 
 targets="i686-w64-mingw32 x86_64-w64-mingw32"
 
+if false; then
 (
   echo Building i686-w64-mingw32...
   mkdir -p /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32
@@ -17,14 +18,18 @@ targets="i686-w64-mingw32 x86_64-w64-mingw32"
   make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32 installer SIGNCODE=signcode
   mv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32/qemu-setup-*.exe $WEBDIR/w32/qemu-w32-setup-$date.exe
 )
+fi
+
 (
-  echo Building x86_64-w64-mingw32...
-  mkdir -p /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32
-  cd /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32 && rm -rf *
-  ../../../configure --cross-prefix=x86_64-w64-mingw32- --disable-guest-agent-msi --disable-werror --enable-strip --extra-cflags="-I/mingw64/include" --extra-ldflags="-L/mingw64/lib"
+  target=x86_64-w64-mingw32
+  echo Building $target...
+  rm -rf /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
+  mkdir -p /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
+  cd /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
+  ../../../configure --cross-prefix=${target}- --disable-guest-agent-msi --disable-werror --enable-strip --extra-cflags="-I/mingw64/include" --extra-ldflags="-L/mingw64/lib"
   make -O -j4
-  make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32 installer SIGNCODE=signcode
-  mv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32/qemu-setup-*.exe $WEBDIR/w64/qemu-w64-setup-$date.exe
+  make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target installer SIGNCODE=signcode
+  mv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target/qemu-setup-*.exe $WEBDIR/w64/qemu-w64-setup-$date.exe
 )
 
 echo Calculate SHA-512 checksums...
@@ -33,6 +38,6 @@ for exe in $WEBDIR/w*/qemu-w*-setup-$date.exe; do
 done
 
 echo Update documentation...
-cp -auv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/i686-w64-mingw32/docs/manual/* /var/www/html/doc/latest/
+cp -auv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32/docs/manual/* /var/www/html/doc/latest/
 
 echo Done.
