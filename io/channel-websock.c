@@ -1263,6 +1263,7 @@ qio_channel_websock_source_dispatch(GSource *source,
                                     GSourceFunc callback,
                                     gpointer user_data)
 {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
     QIOChannelWebsockSource *wsource = (QIOChannelWebsockSource *)source;
 

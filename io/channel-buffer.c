@@ -181,6 +181,7 @@ qio_channel_buffer_source_dispatch(GSource *source,
                                    GSourceFunc callback,
                                    gpointer user_data)
 {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
     QIOChannelBufferSource *bsource = (QIOChannelBufferSource *)source;
 

@@ -69,6 +69,7 @@ STDAPI requester_init(void)
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     pCreateVssBackupComponents = (t_CreateVssBackupComponents)
         GetProcAddress(hLib,
 #ifdef _WIN64 /* 64bit environment */

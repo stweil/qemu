@@ -89,6 +89,7 @@ GSource *io_add_watch_poll(Chardev *chr,
     iwp->fd_can_read = fd_can_read;
     iwp->opaque = user_data;
     iwp->ioc = ioc;
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     iwp->fd_read = (GSourceFunc) fd_read;
     iwp->src = NULL;
 

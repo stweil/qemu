@@ -158,6 +158,7 @@ qio_channel_null_source_dispatch(GSource *source,
                                  GSourceFunc callback,
                                  gpointer user_data)
 {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
     QIOChannelNullSource *ssource = (QIOChannelNullSource *)source;
 

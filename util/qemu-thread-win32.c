@@ -31,6 +31,7 @@ static bool load_set_thread_description(void)
     if (g_once_init_enter(&_init_once)) {
         kernel32_module = LoadLibrary("kernel32.dll");
         if (kernel32_module) {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
             SetThreadDescriptionFunc =
                 (pSetThreadDescription)GetProcAddress(kernel32_module,
                                                       "SetThreadDescription");

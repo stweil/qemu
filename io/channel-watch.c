@@ -78,6 +78,7 @@ qio_channel_fd_source_dispatch(GSource *source,
                                GSourceFunc callback,
                                gpointer user_data)
 {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
     QIOChannelFDSource *ssource = (QIOChannelFDSource *)source;
 
@@ -158,6 +159,7 @@ qio_channel_socket_source_dispatch(GSource *source,
                                    GSourceFunc callback,
                                    gpointer user_data)
 {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
     QIOChannelSocketSource *ssource = (QIOChannelSocketSource *)source;
 
