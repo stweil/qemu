@@ -58,6 +58,9 @@
 
 static bool is_modern_os = true;
 
+/* Suppress compiler warnings from macros which call GetProcAddress. */
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+
 static const WHV_REGISTER_NAME whpx_register_names[] = {
 
     /* X64 General purpose registers */
