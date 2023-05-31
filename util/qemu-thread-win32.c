@@ -38,12 +38,15 @@ static bool load_thread_description(void)
     if (g_once_init_enter(&_init_once)) {
         kernel32_module = LoadLibrary("kernel32.dll");
         if (kernel32_module) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
             SetThreadDescriptionFunc =
                 (pSetThreadDescription)GetProcAddress(kernel32_module,
                                                       "SetThreadDescription");
             GetThreadDescriptionFunc =
                 (pGetThreadDescription)GetProcAddress(kernel32_module,
                                                       "GetThreadDescription");
+#pragma GCC diagnostic pop
             if (!SetThreadDescriptionFunc || !GetThreadDescriptionFunc) {
                 FreeLibrary(kernel32_module);
             }
