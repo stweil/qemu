@@ -48,6 +48,7 @@
 /* for kernel-irqchip=off */
 #define HV_X64_MSR_APIC_FREQUENCY       0x40000023
 
+/* Suppress compiler warnings from macros which call GetProcAddress. */
 #pragma GCC diagnostic ignored "-Wcast-function-type"
 
 static const WHV_REGISTER_NAME whpx_register_names[] = {
