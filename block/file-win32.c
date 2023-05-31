@@ -561,13 +561,15 @@ static int64_t coroutine_fn raw_co_get_allocated_file_size(BlockDriverState *bs)
 {
     typedef DWORD (WINAPI * get_compressed_t)(const char *filename,
                                               DWORD * high);
-    get_compressed_t get_compressed;
     struct _stati64 st;
     const char *filename = bs->filename;
     /* WinNT support GetCompressedFileSize to determine allocate size */
-    get_compressed =
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
+    get_compressed_t get_compressed =
         (get_compressed_t) GetProcAddress(GetModuleHandle("kernel32"),
                                             "GetCompressedFileSizeA");
+#pragma GCC diagnostic pop
     if (get_compressed) {
         DWORD high, low;
         low = get_compressed(filename, &high);

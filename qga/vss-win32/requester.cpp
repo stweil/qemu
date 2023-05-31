@@ -74,6 +74,8 @@ STDAPI requester_init(void)
         return HRESULT_FROM_WIN32(GetLastError());
     }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     pCreateVssBackupComponents = (t_CreateVssBackupComponents)
         GetProcAddress(hLib,
 #ifdef _WIN64 /* 64bit environment */
@@ -89,6 +91,7 @@ STDAPI requester_init(void)
 
     pVssFreeSnapshotProperties = (t_VssFreeSnapshotProperties)
         GetProcAddress(hLib, "VssFreeSnapshotProperties");
+#pragma GCC diagnostic pop
     if (!pVssFreeSnapshotProperties) {
         qga_debug("failed to get proc address from VSSAPI.DLL");
         return HRESULT_FROM_WIN32(GetLastError());
