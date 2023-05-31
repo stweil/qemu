@@ -597,9 +597,11 @@ static void update_ioc_handlers(SocketChardev *s)
 
     remove_hup_source(s);
     s->hup_source = qio_channel_create_watch(s->ioc, G_IO_HUP);
+#pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-function-type"
     g_source_set_callback(s->hup_source, (GSourceFunc)tcp_chr_hup,
                           chr, NULL);
+#pragma GCC diagnostic pop
     g_source_attach(s->hup_source, chr->gcontext);
 }
 
