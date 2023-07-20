@@ -369,7 +369,10 @@ guint qemu_chr_fe_add_watch(CharBackend *be, GIOCondition cond,
         return 0;
     }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     g_source_set_callback(src, (GSourceFunc)func, user_data, NULL);
+#pragma GCC diagnostic pop
     tag = g_source_attach(src, s->gcontext);
     g_source_unref(src);
 

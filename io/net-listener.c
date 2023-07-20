@@ -230,11 +230,13 @@ QIOChannelSocket *qio_net_listener_wait_client(QIONetListener *listener)
     for (i = 0; i < listener->nsioc; i++) {
         sources[i] = qio_channel_create_watch(QIO_CHANNEL(listener->sioc[i]),
                                               G_IO_IN);
-
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
         g_source_set_callback(sources[i],
                               (GSourceFunc)qio_net_listener_wait_client_func,
                               &data,
                               NULL);
+#pragma GCC diagnostic pop
         g_source_attach(sources[i], ctxt);
     }
 

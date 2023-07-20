@@ -626,8 +626,11 @@ static void update_ioc_handlers(SocketChardev *s)
      * FD
      */
     g_source_set_priority(s->hup_source, G_PRIORITY_DEFAULT + 1);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     g_source_set_callback(s->hup_source, (GSourceFunc)tcp_chr_hup,
                           chr, NULL);
+#pragma GCC diagnostic pop
     g_source_attach(s->hup_source, chr->gcontext);
 }
 

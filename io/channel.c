@@ -418,7 +418,10 @@ guint qio_channel_add_watch_full(QIOChannel *ioc,
 
     source = qio_channel_create_watch(ioc, condition);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     g_source_set_callback(source, (GSourceFunc)func, user_data, notify);
+#pragma GCC diagnostic pop
 
     id = g_source_attach(source, context);
     g_source_unref(source);
@@ -757,10 +760,13 @@ void qio_channel_wait(QIOChannel *ioc,
 
     source = qio_channel_create_watch(ioc, condition);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     g_source_set_callback(source,
                           (GSourceFunc)qio_channel_wait_complete,
                           loop,
                           NULL);
+#pragma GCC diagnostic pop
 
     g_source_attach(source, ctxt);
 
