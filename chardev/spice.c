@@ -154,7 +154,10 @@ static gboolean spice_char_source_dispatch(GSource *source,
 {
     SpiceCharSource *src = (SpiceCharSource *)source;
     Chardev *chr = CHARDEV(src->scd);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     GIOFunc func = (GIOFunc)callback;
+#pragma GCC diagnostic pop
     GIOCondition cond = chr->be_open ? G_IO_OUT : G_IO_HUP;
 
     return func(NULL, cond, user_data);
