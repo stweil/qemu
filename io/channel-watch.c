@@ -78,7 +78,10 @@ qio_channel_fd_source_dispatch(GSource *source,
                                GSourceFunc callback,
                                gpointer user_data)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
+#pragma GCC diagnostic pop
     QIOChannelFDSource *ssource = (QIOChannelFDSource *)source;
 
     return (*func)(ssource->ioc,
@@ -158,7 +161,10 @@ qio_channel_socket_source_dispatch(GSource *source,
                                    GSourceFunc callback,
                                    gpointer user_data)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
+#pragma GCC diagnostic pop
     QIOChannelSocketSource *ssource = (QIOChannelSocketSource *)source;
 
     return (*func)(ssource->ioc, ssource->revents, user_data);
@@ -209,7 +215,10 @@ qio_channel_fd_pair_source_dispatch(GSource *source,
                                     GSourceFunc callback,
                                     gpointer user_data)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
+#pragma GCC diagnostic pop
     QIOChannelFDPairSource *ssource = (QIOChannelFDPairSource *)source;
     GIOCondition poll_condition = ssource->fdread.revents |
         ssource->fdwrite.revents;
