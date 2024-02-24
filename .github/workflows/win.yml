@@ -24,12 +24,12 @@ jobs:
     if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '32-bit') }}
     runs-on: [ubuntu-22.04]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Get pacman package manager
       run: .github/workflows/pacman.sh i686
     - name: Build QEMU installer (32 bit)
       run: .github/workflows/build.sh i686
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: QEMU Installer Windows 32 bit
         path: dist
@@ -38,12 +38,12 @@ jobs:
     if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '64-bit') }}
     runs-on: [ubuntu-22.04]
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - name: Get pacman package manager
       run: .github/workflows/pacman.sh x86_64
     - name: Build QEMU installer (64 bit)
       run: .github/workflows/build.sh x86_64
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       with:
         name: QEMU Installer Windows 64 bit
         path: dist
