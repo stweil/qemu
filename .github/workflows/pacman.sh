@@ -51,3 +51,6 @@ sudo pacman -S --noconfirm mingw-w64-$ARCH-SDL2 mingw-w64-$ARCH-SDL2_image mingw
 
 sudo mkdir -p /usr/local/$ARCH-w64-mingw32/lib
 sudo ln -s /$MINGW/lib/pkgconfig /usr/local/$ARCH-w64-mingw32/lib
+
+# Use the native gdbus-codegen instead of failing with the wrong one.
+sudo rm -fv /$MINGW/bin/gdbus-codegen.exe
