@@ -20,7 +20,7 @@ def signcode(path):
 
 def find_deps(exe_or_dll, search_path, analyzed_deps):
     deps = [exe_or_dll]
-    output = subprocess.check_output(["objdump", "-p", exe_or_dll], text=True)
+    output = subprocess.check_output(["x86_64-w64-mingw32-objdump", "-p", exe_or_dll], text=True)
     output = output.split("\n")
     for line in output:
         if not line.startswith("\tDLL Name: "):
