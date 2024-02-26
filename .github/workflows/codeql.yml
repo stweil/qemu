@@ -52,17 +52,17 @@ jobs:
            df -h
            echo "Listing 100 largest packages"
            dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -n | tail -n 100
-           echo "Removing large directories"
-           # deleting 15 GB
+           echo "Removing Homebrew deleting 15 GB"
            sudo rm -rf /home/linuxbrew # will release Homebrew
            df -h /
+           echo "Removing large directories"
            sudo rm -rf /opt/ghc
            sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
            sudo rm -rf /usr/local/lib/android # will release about 10 GB if you don't need Android
            sudo rm -rf /usr/local/share/boost
            df -h /
            echo "Removing large packages"
-           sudo apt-get purge -y '^ghc-8.*'
+           sudo apt-get purge -y '^ghc-.*' || true
            sudo apt-get purge -y '^dotnet-.*'
            sudo apt-get purge -y '^llvm-.*'
            sudo apt-get purge -y 'php.*'
