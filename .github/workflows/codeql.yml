@@ -63,13 +63,16 @@ jobs:
            # sudo apt-get purge -y '^dotnet-.*'
            sudo apt-get purge -y '^llvm-.*' # release about 1 GB
            # sudo apt-get purge -y 'php.*' # release about 56 MB
+           # release about 3 GB
            sudo apt-get purge -y azure-cli google-cloud-cli google-chrome-stable microsoft-edge-stable firefox powershell mono-devel
-           sudo apt-get autopurge -y
+           sudo apt-get autopurge -y # release about 500 MB
            sudo apt-get clean
            echo "Listing 10 largest packages"
            dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -n | tail -n 10
            df -h /
-           ls -l /mnt
+           ls -la /mnt
+           echo "/mnt/DATALOSS_WARNING_README.txt"
+           cat /mnt/DATALOSS_WARNING_README.txt
 
     - name: Checkout repository
       uses: actions/checkout@v4
