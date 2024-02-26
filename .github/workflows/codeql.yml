@@ -55,11 +55,24 @@ jobs:
            echo "Removing large directories"
            # deleting 15 GB
            sudo rm -rf /home/linuxbrew # will release Homebrew
+           df -h /
            sudo rm -rf /opt/ghc
            sudo rm -rf /usr/share/dotnet # will release about 20GB if you don't need .NET
            sudo rm -rf /usr/local/lib/android # will release about 10 GB if you don't need Android
            sudo rm -rf /usr/local/share/boost
-           df -h
+           df -h /
+           echo "Removing large packages"
+           sudo apt-get purge -y '^ghc-8.*'
+           sudo apt-get purge -y '^dotnet-.*'
+           sudo apt-get purge -y '^llvm-.*'
+           sudo apt-get purge -y 'php.*'
+           sudo apt-get purge -y azure-cli google-cloud-sdk hhvm google-chrome-stable firefox powershell mono-devel
+           sudo apt-get autopurge -y
+           sudo apt-get clean
+           echo "Listing 10 largest packages"
+           dpkg-query -Wf '${Installed-Size}\t${Package}\n' | sort -n | tail -n 10
+           df -h /
+           ls -l /mnt
 
     - name: Checkout repository
       uses: actions/checkout@v4
