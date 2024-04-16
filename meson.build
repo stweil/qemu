@@ -1,5 +1,5 @@
 project('qemu', ['c'], meson_version: '>=1.1.0',
-        default_options: ['warning_level=1', 'c_std=gnu11', 'cpp_std=gnu++11', 'b_colorout=auto',
+        default_options: ['warning_level=2', 'c_std=gnu11', 'cpp_std=gnu++11', 'b_colorout=auto',
                           'b_staticpic=false', 'stdsplit=false', 'optimization=2', 'b_pie=true'],
         version: files('VERSION'))
 
@@ -643,14 +643,19 @@ warn_flags = [
   '-Wwrite-strings',
 
   # Then disable some undesirable warnings
+  '-Wno-enum-conversion',
   '-Wno-gnu-variable-sized-type-not-at-end',
   '-Wno-initializer-overrides',
+  '-Wno-missing-field-initializers',
   '-Wno-missing-include-dirs',
   '-Wno-psabi',
   '-Wno-shift-negative-value',
+  '-Wno-sign-compare',
   '-Wno-string-plus-int',
   '-Wno-tautological-type-limit-compare',
   '-Wno-typedef-redefinition',
+  '-Wno-override-init',
+  '-Wno-unused-parameter',
 ]
 
 if host_os != 'darwin'
