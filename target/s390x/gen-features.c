@@ -906,7 +906,7 @@ static void print_feature_defs(void)
     uint64_t base_feat[S390_FEAT_MAX / 64 + 1] = {};
     uint64_t default_feat[S390_FEAT_MAX / 64 + 1] = {};
     uint64_t full_feat[S390_FEAT_MAX / 64 + 1] = {};
-    int i, j;
+    size_t i, j;
 
     printf("\n/* CPU model feature list data */\n");
 
@@ -958,7 +958,7 @@ static void print_feature_defs(void)
 static void print_qemu_feature_defs(void)
 {
     uint64_t feat[S390_FEAT_MAX / 64 + 1] = {};
-    int i, j;
+    size_t i, j;
 
     printf("\n/* QEMU (CPU model) feature list data */\n");
 
@@ -980,7 +980,7 @@ static void print_qemu_feature_defs(void)
 
 static void print_feature_group_defs(void)
 {
-    int i, j;
+    size_t i, j;
 
     printf("\n/* CPU feature group list data */\n");
 
@@ -1002,7 +1002,7 @@ static void print_feature_group_defs(void)
 
 static void print_feature_group_enum_type(void)
 {
-    int i;
+    size_t i;
 
     printf("\n/* CPU feature group enum type */\n"
            "typedef enum {\n");
@@ -1013,7 +1013,7 @@ static void print_feature_group_enum_type(void)
            "} S390FeatGroup;\n");
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
     printf("/*\n"
            " * AUTOMATICALLY GENERATED, DO NOT MODIFY HERE, EDIT\n"
