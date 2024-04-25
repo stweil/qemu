@@ -54,7 +54,8 @@
     - cd build
     - ../configure --enable-werror --disable-docs $QEMU_CONFIGURE_OPTS
         --disable-tools --enable-${ACCEL:-kvm} $EXTRA_CONFIGURE_OPTS
-    - make -j$(expr $(nproc) + 1) all check-build $MAKE_CHECK_ARGS
+    - time make -j$(expr $(nproc) + 1) all $MAKE_CHECK_ARGS
+    - time make -j$(expr $(nproc) + 1) check-build $MAKE_CHECK_ARGS
 
 .cross_user_build_job:
   extends: .base_job_template
@@ -75,7 +76,8 @@
           alpha-linux-user cris-linux-user m68k-linux-user microblazeel-linux-user
           or1k-linux-user ppc-linux-user sparc-linux-user
           xtensa-linux-user $CROSS_SKIP_TARGETS"
-    - make -j$(expr $(nproc) + 1) all check-build $MAKE_CHECK_ARGS
+    - time make -j$(expr $(nproc) + 1) all $MAKE_CHECK_ARGS
+    - time make -j$(expr $(nproc) + 1) check-build $MAKE_CHECK_ARGS
 
 # We can still run some tests on some of our cross build jobs. They can add this
 # template to their extends to save the build logs and test results
