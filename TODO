@@ -1,0 +1,1 @@
+git push gitlab -o ci.variable=QEMU_CI=2
