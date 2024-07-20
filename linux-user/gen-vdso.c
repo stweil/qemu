@@ -122,7 +122,7 @@ int main(int argc, char **argv)
     }
 
     errno = 0;
-    if (fread(buf, 1, total_len, inf) != total_len) {
+    if (fread(buf, 1, total_len, inf) != (size_t)total_len) {
         if (errno) {
             goto perror_inf;
         }
