@@ -149,8 +149,11 @@ q_tree_new(GCompareFunc key_compare_func)
 {
     g_return_val_if_fail(key_compare_func != NULL, NULL);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     return q_tree_new_full((GCompareDataFunc) key_compare_func, NULL,
                            NULL, NULL);
+#pragma GCC diagnostic pop
 }
 
 /**
