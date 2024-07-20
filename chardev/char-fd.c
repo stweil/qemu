@@ -112,7 +112,10 @@ fd_source_dispatch(GSource *source, GSourceFunc callback,
                    gpointer user_data)
 {
     FDSource *src = (FDSource *)source;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     FEWatchFunc func = (FEWatchFunc)callback;
+#pragma GCC diagnostic pop
     gboolean ret = G_SOURCE_CONTINUE;
 
     if (src->cond) {
@@ -153,12 +156,18 @@ static GSource *fd_chr_add_watch(Chardev *chr, GIOCondition cond)
 
     if (s->ioc_out) {
         g_autoptr(GSource) child = qio_channel_create_watch(s->ioc_out, cond & ~G_IO_IN);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
         g_source_set_callback(child, (GSourceFunc)child_func, source, NULL);
+#pragma GCC diagnostic pop
         g_source_add_child_source(source, child);
     }
     if (s->ioc_in) {
         g_autoptr(GSource) child = qio_channel_create_watch(s->ioc_in, cond & ~G_IO_OUT);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
         g_source_set_callback(child, (GSourceFunc)child_func, source, NULL);
+#pragma GCC diagnostic pop
         g_source_add_child_source(source, child);
     }
 
