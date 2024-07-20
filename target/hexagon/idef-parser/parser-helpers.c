@@ -1681,7 +1681,7 @@ void gen_inst_init_args(Context *c, YYLTYPE *locp)
     c->inst.init_list = NULL;
 }
 
-void gen_inst_code(Context *c, YYLTYPE *locp)
+void gen_inst_code(Context *c, YYLTYPE * /*locp*/)
 {
     if (c->inst.error_count != 0) {
         fprintf(stderr,
