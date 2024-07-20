@@ -788,6 +788,8 @@ static void dbus_gfx_update_sub(DBusDisplayListener *ddl,
         }
     }
 #endif
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     v_data = g_variant_new_from_data(
         G_VARIANT_TYPE("ay"),
         pixman_image_get_data(img),
@@ -795,6 +797,7 @@ static void dbus_gfx_update_sub(DBusDisplayListener *ddl,
         TRUE,
         (GDestroyNotify)pixman_image_unref,
         img);
+#pragma GCC diagnostic pop
     qemu_dbus_display1_listener_call_update(ddl->proxy,
         x, y, w, h, pixman_image_get_stride(img), pixman_image_get_format(img),
         v_data,
@@ -806,10 +809,13 @@ static void ddl_scanout(DBusDisplayListener *ddl)
 {
     GVariant *v_data;
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     v_data = g_variant_new_from_data(
         G_VARIANT_TYPE("ay"), surface_data(ddl->ds),
         surface_stride(ddl->ds) * surface_height(ddl->ds), TRUE,
         (GDestroyNotify)pixman_image_unref, pixman_image_ref(ddl->ds->image));
+#pragma GCC diagnostic pop
 
     ddl_discard_display_messages(ddl);
 

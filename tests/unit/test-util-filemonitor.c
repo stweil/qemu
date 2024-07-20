@@ -678,8 +678,11 @@ test_file_monitor_events(void)
     g_timer_destroy(timer);
 
     qemu_file_monitor_free(mon);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     g_list_foreach(data.records,
                    (GFunc)qemu_file_monitor_test_record_free, NULL);
+#pragma GCC diagnostic pop
     g_list_free(data.records);
     qemu_mutex_destroy(&data.lock);
     if (dir) {
