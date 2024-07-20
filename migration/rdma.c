@@ -3017,7 +3017,10 @@ qio_channel_rdma_source_dispatch(GSource *source,
                                  GSourceFunc callback,
                                  gpointer user_data)
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     QIOChannelFunc func = (QIOChannelFunc)callback;
+#pragma GCC diagnostic pop
     QIOChannelRDMASource *rsource = (QIOChannelRDMASource *)source;
     RDMAContext *rdma;
     GIOCondition cond = 0;
