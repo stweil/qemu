@@ -665,7 +665,10 @@ static void baum_chr_open(Chardev *chr,
 
     baum->cellCount_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, baum_cellCount_timer_cb, baum);
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wint-conversion"
     qemu_set_fd_handler(baum->brlapi_fd, baum_chr_read, NULL, baum);
+#pragma GCC diagnostic pop
 }
 
 static void char_braille_class_init(ObjectClass *oc, void *data)

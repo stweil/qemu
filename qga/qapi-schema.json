@@ -422,8 +422,9 @@
 # Returns: GuestFsfreezeStatus ("thawed", "frozen", etc., as defined
 #     below)
 #
-# Note: This may fail to properly report the current state as a result
-#     of some other guest processes having issued an fs freeze/thaw.
+# .. note:: This may fail to properly report the current state as a
+#    result of some other guest processes having issued an fs
+#    freeze/thaw.
 #
 # Since: 0.15.0
 ##
@@ -443,9 +444,9 @@
 #
 # Returns: Number of file systems currently frozen.
 #
-# Note: On Windows, the command is implemented with the help of a
-#     Volume Shadow-copy Service DLL helper.  The frozen state is
-#     limited for up to 10 seconds by VSS.
+# .. note:: On Windows, the command is implemented with the help of a
+#    Volume Shadow-copy Service DLL helper.  The frozen state is limited
+#    for up to 10 seconds by VSS.
 #
 # Since: 0.15.0
 ##
@@ -479,10 +480,10 @@
 #
 # Returns: Number of file systems thawed by this call
 #
-# Note: if return value does not match the previous call to
-#     guest-fsfreeze-freeze, this likely means some freezable
-#     filesystems were unfrozen before this call, and that the
-#     filesystem state may have changed before issuing this command.
+# .. note:: If the return value does not match the previous call to
+#    guest-fsfreeze-freeze, this likely means some freezable filesystems
+#    were unfrozen before this call, and that the filesystem state may
+#    have changed before issuing this command.
 #
 # Since: 0.15.0
 ##
@@ -560,8 +561,8 @@
 # Errors:
 #     - If suspend to disk is not supported, Unsupported
 #
-# Notes: It's strongly recommended to issue the guest-sync command
-#     before sending commands when the guest resumes
+# .. note:: It's strongly recommended to issue the guest-sync command
+#    before sending commands when the guest resumes.
 #
 # Since: 1.1
 ##
@@ -596,8 +597,8 @@
 # Errors:
 #     - If suspend to ram is not supported, Unsupported
 #
-# Notes: It's strongly recommended to issue the guest-sync command
-#     before sending commands when the guest resumes
+# .. note:: It's strongly recommended to issue the guest-sync command
+#    before sending commands when the guest resumes.
 #
 # Since: 1.1
 ##
@@ -631,8 +632,8 @@
 # Errors:
 #     - If hybrid suspend is not supported, Unsupported
 #
-# Notes: It's strongly recommended to issue the guest-sync command
-#     before sending commands when the guest resumes
+# .. note:: It's strongly recommended to issue the guest-sync command
+#    before sending commands when the guest resumes.
 #
 # Since: 1.1
 ##
@@ -1026,7 +1027,10 @@
 #
 # @used-bytes: file system used bytes (since 3.0)
 #
-# @total-bytes: non-root file system total bytes (since 3.0)
+# @total-bytes: filesystem capacity in bytes for unprivileged users (since 3.0)
+#
+# @total-bytes-privileged: filesystem capacity in bytes for privileged users
+#     (since 9.1)
 #
 # @disk: an array of disk hardware information that the volume lies
 #     on, which may be empty if the disk type is not supported
@@ -1036,7 +1040,7 @@
 { 'struct': 'GuestFilesystemInfo',
   'data': {'name': 'str', 'mountpoint': 'str', 'type': 'str',
            '*used-bytes': 'uint64', '*total-bytes': 'uint64',
-           'disk': ['GuestDiskAddress']} }
+           '*total-bytes-privileged': 'uint64', 'disk': ['GuestDiskAddress']} }
 
 ##
 # @guest-get-fsinfo:
@@ -1458,16 +1462,15 @@
 #     * POSIX: as defined by os-release(5)
 #     * Windows: contains string "server" or "client"
 #
-# Notes: On POSIX systems the fields @id, @name, @pretty-name,
-#     @version, @version-id, @variant and @variant-id follow the
-#     definition specified in os-release(5). Refer to the manual page
-#     for exact description of the fields.  Their values are taken
-#     from the os-release file.  If the file is not present in the
-#     system, or the values are not present in the file, the fields
-#     are not included.
+# .. note:: On POSIX systems the fields @id, @name, @pretty-name,
+#    @version, @version-id, @variant and @variant-id follow the
+#    definition specified in os-release(5). Refer to the manual page for
+#    exact description of the fields.  Their values are taken from the
+#    os-release file.  If the file is not present in the system, or the
+#    values are not present in the file, the fields are not included.
 #
-#     On Windows the values are filled from information gathered from
-#     the system.
+#    On Windows the values are filled from information gathered from
+#    the system.
 #
 # Since: 2.10
 ##
@@ -1567,9 +1570,8 @@
 { 'struct': 'GuestAuthorizedKeys',
   'data': {
       'keys': ['str']
-  },
-  'if': 'CONFIG_POSIX' }
-
+  }
+}
 
 ##
 # @guest-ssh-get-authorized-keys:
@@ -1585,8 +1587,8 @@
 ##
 { 'command': 'guest-ssh-get-authorized-keys',
   'data': { 'username': 'str' },
-  'returns': 'GuestAuthorizedKeys',
-  'if': 'CONFIG_POSIX' }
+  'returns': 'GuestAuthorizedKeys'
+}
 
 ##
 # @guest-ssh-add-authorized-keys:
@@ -1604,8 +1606,8 @@
 # Since: 5.2
 ##
 { 'command': 'guest-ssh-add-authorized-keys',
-  'data': { 'username': 'str', 'keys': ['str'], '*reset': 'bool' },
-  'if': 'CONFIG_POSIX' }
+  'data': { 'username': 'str', 'keys': ['str'], '*reset': 'bool' }
+}
 
 ##
 # @guest-ssh-remove-authorized-keys:
@@ -1622,8 +1624,8 @@
 # Since: 5.2
 ##
 { 'command': 'guest-ssh-remove-authorized-keys',
-  'data': { 'username': 'str', 'keys': ['str'] },
-  'if': 'CONFIG_POSIX' }
+  'data': { 'username': 'str', 'keys': ['str'] }
+}
 
 ##
 # @GuestDiskStats:

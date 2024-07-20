@@ -45,7 +45,6 @@
 #include "qemu/job.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
-#include "qemu/plugin.h"
 #include "qemu/sockets.h"
 #include "qemu/timer.h"
 #include "qemu/thread.h"
@@ -501,7 +500,20 @@ void qemu_system_reset(ShutdownCause reason)
     default:
         qapi_event_send_reset(shutdown_caused_by_guest(reason), reason);
     }
-    cpu_synchronize_all_post_reset();
+
+    /*
+     * Some boards use the machine reset callback to point CPUs to the firmware
+     * entry point.  Assume that this is not the case for boards that support
+     * non-resettable CPUs (currently used only for confidential guests), in
+     * which case cpu_synchronize_all_post_init() is enough because
+     * it does _more_  than cpu_synchronize_all_post_reset().
+     */
+    if (cpus_are_resettable()) {
+        cpu_synchronize_all_post_reset();
+    } else {
+        assert(runstate_check(RUN_STATE_PRELAUNCH));
+    }
+
     vm_set_suspended(false);
 }
 
@@ -570,6 +582,12 @@ void qemu_system_guest_crashloaded(GuestPanicInformation *info)
     qemu_log_mask(LOG_GUEST_ERROR, "Guest crash loaded");
     qapi_event_send_guest_crashloaded(GUEST_PANIC_ACTION_RUN, info);
     qapi_free_GuestPanicInformation(info);
+}
+
+void qemu_system_guest_pvshutdown(void)
+{
+    qapi_event_send_guest_pvshutdown();
+    qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_SHUTDOWN);
 }
 
 void qemu_system_reset_request(ShutdownCause reason)

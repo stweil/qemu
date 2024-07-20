@@ -25,11 +25,11 @@
 #include "tcg_s390x.h"
 #include "exec/helper-proto.h"
 #include "exec/exec-all.h"
+#include "exec/page-protection.h"
 #include "exec/cpu_ldst.h"
 #include "hw/core/tcg-cpu-ops.h"
 #include "qemu/int128.h"
 #include "qemu/atomic128.h"
-#include "trace.h"
 
 #if !defined(CONFIG_USER_ONLY)
 #include "hw/s390x/storage-keys.h"
@@ -2092,9 +2092,8 @@ uint64_t HELPER(iske)(CPUS390XState *env, uint64_t r2)
         }
     }
 
-    rc = skeyclass->get_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
+    rc = s390_skeys_get(ss, addr / TARGET_PAGE_SIZE, 1, &key);
     if (rc) {
-        trace_get_skeys_nonzero(rc);
         return 0;
     }
     return key;
@@ -2107,7 +2106,6 @@ void HELPER(sske)(CPUS390XState *env, uint64_t r1, uint64_t r2)
     static S390SKeysClass *skeyclass;
     uint64_t addr = wrap_address(env, r2);
     uint8_t key;
-    int rc;
 
     addr = mmu_real2abs(env, addr);
     if (!mmu_absolute_addr_valid(addr, false)) {
@@ -2123,10 +2121,7 @@ void HELPER(sske)(CPUS390XState *env, uint64_t r1, uint64_t r2)
     }
 
     key = r1 & 0xfe;
-    rc = skeyclass->set_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
-    if (rc) {
-        trace_set_skeys_nonzero(rc);
-    }
+    s390_skeys_set(ss, addr / TARGET_PAGE_SIZE, 1, &key);
    /*
     * As we can only flush by virtual address and not all the entries
     * that point to a physical address we have to flush the whole TLB.
@@ -2156,18 +2151,16 @@ uint32_t HELPER(rrbe)(CPUS390XState *env, uint64_t r2)
         }
     }
 
-    rc = skeyclass->get_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
+    rc = s390_skeys_get(ss, addr / TARGET_PAGE_SIZE, 1, &key);
     if (rc) {
-        trace_get_skeys_nonzero(rc);
         return 0;
     }
 
     re = key & (SK_R | SK_C);
     key &= ~SK_R;
 
-    rc = skeyclass->set_skeys(ss, addr / TARGET_PAGE_SIZE, 1, &key);
+    rc = s390_skeys_set(ss, addr / TARGET_PAGE_SIZE, 1, &key);
     if (rc) {
-        trace_set_skeys_nonzero(rc);
         return 0;
     }
    /*
