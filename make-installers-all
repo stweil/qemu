@@ -22,6 +22,11 @@ if false; then
 fi
 
 (
+  if grep -q exe /mingw64/lib/pkgconfig/gio-2.0.pc; then
+    echo Please patch /mingw64/lib/pkgconfig/gio-2.0.pc
+    exit 1
+  fi
+
   target=x86_64-w64-mingw32
 
   echo Building $target...
