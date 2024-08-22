@@ -83,7 +83,7 @@ msys2-64bit:
       mingw-w64-x86_64-binutils
       mingw-w64-x86_64-capstone
       mingw-w64-x86_64-ccache
-      mingw-w64-x86_64-curl
+      mingw-w64-x86_64-curl-winssl
       mingw-w64-x86_64-cyrus-sasl
       mingw-w64-x86_64-dtc
       mingw-w64-x86_64-gcc
