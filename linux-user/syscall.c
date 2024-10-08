@@ -759,10 +759,8 @@ safe_syscall6(ssize_t, copy_file_range, int, infd, loff_t *, pinoff,
  * the libc function.
  */
 #define safe_ioctl(...) safe_syscall(__NR_ioctl, __VA_ARGS__)
-/* Similarly for fcntl. Note that callers must always:
- *  pass the F_GETLK64 etc constants rather than the unsuffixed F_GETLK
- *  use the flock64 struct rather than unsuffixed flock
- * This will then work and use a 64-bit offset for both 32-bit and 64-bit hosts.
+/* Similarly for fcntl. Since we always build with LFS enabled,
+ * we should be using the 64-bit structures automatically.
  */
 #ifdef __NR_fcntl64
 #define safe_fcntl(...) safe_syscall(__NR_fcntl64, __VA_ARGS__)
@@ -6721,13 +6719,13 @@ static int target_to_host_fcntl_cmd(int cmd)
         ret = cmd;
         break;
     case TARGET_F_GETLK:
-        ret = F_GETLK64;
+        ret = F_GETLK;
         break;
     case TARGET_F_SETLK:
-        ret = F_SETLK64;
+        ret = F_SETLK;
         break;
     case TARGET_F_SETLKW:
-        ret = F_SETLKW64;
+        ret = F_SETLKW;
         break;
     case TARGET_F_GETOWN:
         ret = F_GETOWN;
@@ -6743,13 +6741,13 @@ static int target_to_host_fcntl_cmd(int cmd)
         break;
 #if TARGET_ABI_BITS == 32
     case TARGET_F_GETLK64:
-        ret = F_GETLK64;
+        ret = F_GETLK;
         break;
     case TARGET_F_SETLK64:
-        ret = F_SETLK64;
+        ret = F_SETLK;
         break;
     case TARGET_F_SETLKW64:
-        ret = F_SETLKW64;
+        ret = F_SETLKW;
         break;
 #endif
     case TARGET_F_SETLEASE:
@@ -6803,8 +6801,8 @@ static int target_to_host_fcntl_cmd(int cmd)
      * them to 5, 6 and 7 before making the syscall(). Since we make the
      * syscall directly, adjust to what is supported by the kernel.
      */
-    if (ret >= F_GETLK64 && ret <= F_SETLKW64) {
-        ret -= F_GETLK64 - 5;
+    if (ret >= F_GETLK && ret <= F_SETLKW) {
+        ret -= F_GETLK - 5;
     }
 #endif
 
@@ -6837,7 +6835,7 @@ static int host_to_target_flock(int type)
     return type;
 }
 
-static inline abi_long copy_from_user_flock(struct flock64 *fl,
+static inline abi_long copy_from_user_flock(struct flock *fl,
                                             abi_ulong target_flock_addr)
 {
     struct target_flock *target_fl;
@@ -6862,7 +6860,7 @@ static inline abi_long copy_from_user_flock(struct flock64 *fl,
 }
 
 static inline abi_long copy_to_user_flock(abi_ulong target_flock_addr,
-                                          const struct flock64 *fl)
+                                          const struct flock *fl)
 {
     struct target_flock *target_fl;
     short l_type;
@@ -6881,8 +6879,8 @@ static inline abi_long copy_to_user_flock(abi_ulong target_flock_addr,
     return 0;
 }
 
-typedef abi_long from_flock64_fn(struct flock64 *fl, abi_ulong target_addr);
-typedef abi_long to_flock64_fn(abi_ulong target_addr, const struct flock64 *fl);
+typedef abi_long from_flock64_fn(struct flock *fl, abi_ulong target_addr);
+typedef abi_long to_flock64_fn(abi_ulong target_addr, const struct flock *fl);
 
 #if defined(TARGET_ARM) && TARGET_ABI_BITS == 32
 struct target_oabi_flock64 {
@@ -6893,7 +6891,7 @@ struct target_oabi_flock64 {
     abi_int   l_pid;
 } QEMU_PACKED;
 
-static inline abi_long copy_from_user_oabi_flock64(struct flock64 *fl,
+static inline abi_long copy_from_user_oabi_flock64(struct flock *fl,
                                                    abi_ulong target_flock_addr)
 {
     struct target_oabi_flock64 *target_fl;
@@ -6918,7 +6916,7 @@ static inline abi_long copy_from_user_oabi_flock64(struct flock64 *fl,
 }
 
 static inline abi_long copy_to_user_oabi_flock64(abi_ulong target_flock_addr,
-                                                 const struct flock64 *fl)
+                                                 const struct flock *fl)
 {
     struct target_oabi_flock64 *target_fl;
     short l_type;
@@ -6938,7 +6936,7 @@ static inline abi_long copy_to_user_oabi_flock64(abi_ulong target_flock_addr,
 }
 #endif
 
-static inline abi_long copy_from_user_flock64(struct flock64 *fl,
+static inline abi_long copy_from_user_flock64(struct flock *fl,
                                               abi_ulong target_flock_addr)
 {
     struct target_flock64 *target_fl;
@@ -6963,7 +6961,7 @@ static inline abi_long copy_from_user_flock64(struct flock64 *fl,
 }
 
 static inline abi_long copy_to_user_flock64(abi_ulong target_flock_addr,
-                                            const struct flock64 *fl)
+                                            const struct flock *fl)
 {
     struct target_flock64 *target_fl;
     short l_type;
@@ -6984,7 +6982,7 @@ static inline abi_long copy_to_user_flock64(abi_ulong target_flock_addr,
 
 static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
 {
-    struct flock64 fl64;
+    struct flock fl;
 #ifdef F_GETOWN_EX
     struct f_owner_ex fox;
     struct target_f_owner_ex *target_fox;
@@ -6997,45 +6995,45 @@ static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
 
     switch(cmd) {
     case TARGET_F_GETLK:
-        ret = copy_from_user_flock(&fl64, arg);
+        ret = copy_from_user_flock(&fl, arg);
         if (ret) {
             return ret;
         }
-        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl));
         if (ret == 0) {
-            ret = copy_to_user_flock(arg, &fl64);
+            ret = copy_to_user_flock(arg, &fl);
         }
         break;
 
     case TARGET_F_SETLK:
     case TARGET_F_SETLKW:
-        ret = copy_from_user_flock(&fl64, arg);
+        ret = copy_from_user_flock(&fl, arg);
         if (ret) {
             return ret;
         }
-        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl));
         break;
 
     case TARGET_F_GETLK64:
     case TARGET_F_OFD_GETLK:
-        ret = copy_from_user_flock64(&fl64, arg);
+        ret = copy_from_user_flock64(&fl, arg);
         if (ret) {
             return ret;
         }
-        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl));
         if (ret == 0) {
-            ret = copy_to_user_flock64(arg, &fl64);
+            ret = copy_to_user_flock64(arg, &fl);
         }
         break;
     case TARGET_F_SETLK64:
     case TARGET_F_SETLKW64:
     case TARGET_F_OFD_SETLK:
     case TARGET_F_OFD_SETLKW:
-        ret = copy_from_user_flock64(&fl64, arg);
+        ret = copy_from_user_flock64(&fl, arg);
         if (ret) {
             return ret;
         }
-        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl));
         break;
 
     case TARGET_F_GETFL:
@@ -7266,7 +7264,7 @@ static inline abi_long target_truncate64(CPUArchState *cpu_env, const char *arg1
         arg2 = arg3;
         arg3 = arg4;
     }
-    return get_errno(truncate64(arg1, target_offset64(arg2, arg3)));
+    return get_errno(truncate(arg1, target_offset64(arg2, arg3)));
 }
 #endif
 
@@ -7280,7 +7278,7 @@ static inline abi_long target_ftruncate64(CPUArchState *cpu_env, abi_long arg1,
         arg2 = arg3;
         arg3 = arg4;
     }
-    return get_errno(ftruncate64(arg1, target_offset64(arg2, arg3)));
+    return get_errno(ftruncate(arg1, target_offset64(arg2, arg3)));
 }
 #endif
 
@@ -8665,7 +8663,7 @@ static int do_getdents(abi_long dirfd, abi_long arg2, abi_long count)
     void *tdirp;
     int hlen, hoff, toff;
     int hreclen, treclen;
-    off64_t prev_diroff = 0;
+    off_t prev_diroff = 0;
 
     hdirp = g_try_malloc(count);
     if (!hdirp) {
@@ -8718,7 +8716,7 @@ static int do_getdents(abi_long dirfd, abi_long arg2, abi_long count)
              * Return what we have, resetting the file pointer to the
              * location of the first record not returned.
              */
-            lseek64(dirfd, prev_diroff, SEEK_SET);
+            lseek(dirfd, prev_diroff, SEEK_SET);
             break;
         }
 
@@ -8752,7 +8750,7 @@ static int do_getdents64(abi_long dirfd, abi_long arg2, abi_long count)
     void *tdirp;
     int hlen, hoff, toff;
     int hreclen, treclen;
-    off64_t prev_diroff = 0;
+    off_t prev_diroff = 0;
 
     hdirp = g_try_malloc(count);
     if (!hdirp) {
@@ -8794,7 +8792,7 @@ static int do_getdents64(abi_long dirfd, abi_long arg2, abi_long count)
              * Return what we have, resetting the file pointer to the
              * location of the first record not returned.
              */
-            lseek64(dirfd, prev_diroff, SEEK_SET);
+            lseek(dirfd, prev_diroff, SEEK_SET);
             break;
         }
 
@@ -10483,7 +10481,7 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
     case TARGET_NR_mmap:
 #if (defined(TARGET_I386) && defined(TARGET_ABI32)) || \
     (defined(TARGET_ARM) && defined(TARGET_ABI32)) || \
-    defined(TARGET_M68K) || defined(TARGET_CRIS) || defined(TARGET_MICROBLAZE) \
+    defined(TARGET_M68K) || defined(TARGET_MICROBLAZE) \
     || defined(TARGET_S390X)
         {
             abi_ulong *v;
@@ -11525,7 +11523,7 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
                 return -TARGET_EFAULT;
             }
         }
-        ret = get_errno(pread64(arg1, p, arg3, target_offset64(arg4, arg5)));
+        ret = get_errno(pread(arg1, p, arg3, target_offset64(arg4, arg5)));
         unlock_user(p, arg2, ret);
         return ret;
     case TARGET_NR_pwrite64:
@@ -11542,7 +11540,7 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
                 return -TARGET_EFAULT;
             }
         }
-        ret = get_errno(pwrite64(arg1, p, arg3, target_offset64(arg4, arg5)));
+        ret = get_errno(pwrite(arg1, p, arg3, target_offset64(arg4, arg5)));
         unlock_user(p, arg2, 0);
         return ret;
 #endif
@@ -12402,7 +12400,7 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
     case TARGET_NR_fcntl64:
     {
         int cmd;
-        struct flock64 fl;
+        struct flock fl;
         from_flock64_fn *copyfrom = copy_from_user_flock64;
         to_flock64_fn *copyto = copy_to_user_flock64;
 
@@ -12637,14 +12635,6 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
 #if defined(TARGET_MIPS)
       cpu_env->active_tc.CP0_UserLocal = arg1;
       return 0;
-#elif defined(TARGET_CRIS)
-      if (arg1 & 0xff)
-          ret = -TARGET_EINVAL;
-      else {
-          cpu_env->pregs[PR_PID] = arg1;
-          ret = 0;
-      }
-      return ret;
 #elif defined(TARGET_I386) && defined(TARGET_ABI32)
       return do_set_thread_area(cpu_env, arg1);
 #elif defined(TARGET_M68K)

@@ -23,7 +23,15 @@
 
 #include "qapi/qapi-types-crypto.h"
 
-/* See also "QCryptoHashAlgorithm" defined in qapi/crypto.json */
+#define QCRYPTO_HASH_DIGEST_LEN_MD5       16
+#define QCRYPTO_HASH_DIGEST_LEN_SHA1      20
+#define QCRYPTO_HASH_DIGEST_LEN_SHA224    28
+#define QCRYPTO_HASH_DIGEST_LEN_SHA256    32
+#define QCRYPTO_HASH_DIGEST_LEN_SHA384    48
+#define QCRYPTO_HASH_DIGEST_LEN_SHA512    64
+#define QCRYPTO_HASH_DIGEST_LEN_RIPEMD160 20
+
+/* See also "QCryptoHashAlgo" defined in qapi/crypto.json */
 
 /**
  * qcrypto_hash_supports:
@@ -34,7 +42,7 @@
  *
  * Returns: true if the algorithm is supported, false otherwise
  */
-gboolean qcrypto_hash_supports(QCryptoHashAlgorithm alg);
+gboolean qcrypto_hash_supports(QCryptoHashAlgo alg);
 
 
 /**
@@ -45,7 +53,7 @@ gboolean qcrypto_hash_supports(QCryptoHashAlgorithm alg);
  *
  * Returns: the digest length in bytes
  */
-size_t qcrypto_hash_digest_len(QCryptoHashAlgorithm alg);
+size_t qcrypto_hash_digest_len(QCryptoHashAlgo alg);
 
 /**
  * qcrypto_hash_bytesv:
@@ -65,7 +73,7 @@ size_t qcrypto_hash_digest_len(QCryptoHashAlgorithm alg);
  *
  * Returns: 0 on success, -1 on error
  */
-int qcrypto_hash_bytesv(QCryptoHashAlgorithm alg,
+int qcrypto_hash_bytesv(QCryptoHashAlgo alg,
                         const struct iovec *iov,
                         size_t niov,
                         uint8_t **result,
@@ -90,7 +98,7 @@ int qcrypto_hash_bytesv(QCryptoHashAlgorithm alg,
  *
  * Returns: 0 on success, -1 on error
  */
-int qcrypto_hash_bytes(QCryptoHashAlgorithm alg,
+int qcrypto_hash_bytes(QCryptoHashAlgo alg,
                        const char *buf,
                        size_t len,
                        uint8_t **result,
@@ -114,7 +122,7 @@ int qcrypto_hash_bytes(QCryptoHashAlgorithm alg,
  *
  * Returns: 0 on success, -1 on error
  */
-int qcrypto_hash_digestv(QCryptoHashAlgorithm alg,
+int qcrypto_hash_digestv(QCryptoHashAlgo alg,
                          const struct iovec *iov,
                          size_t niov,
                          char **digest,
@@ -137,7 +145,7 @@ int qcrypto_hash_digestv(QCryptoHashAlgorithm alg,
  *
  * Returns: 0 on success, -1 on error
  */
-int qcrypto_hash_digest(QCryptoHashAlgorithm alg,
+int qcrypto_hash_digest(QCryptoHashAlgo alg,
                         const char *buf,
                         size_t len,
                         char **digest,
@@ -160,7 +168,7 @@ int qcrypto_hash_digest(QCryptoHashAlgorithm alg,
  *
  * Returns: 0 on success, -1 on error
  */
-int qcrypto_hash_base64v(QCryptoHashAlgorithm alg,
+int qcrypto_hash_base64v(QCryptoHashAlgo alg,
                          const struct iovec *iov,
                          size_t niov,
                          char **base64,
@@ -183,7 +191,7 @@ int qcrypto_hash_base64v(QCryptoHashAlgorithm alg,
  *
  * Returns: 0 on success, -1 on error
  */
-int qcrypto_hash_base64(QCryptoHashAlgorithm alg,
+int qcrypto_hash_base64(QCryptoHashAlgo alg,
                         const char *buf,
                         size_t len,
                         char **base64,

@@ -521,6 +521,25 @@ case "$cpu" in
     ;;
 esac
 
+# Now we have our CPU_CFLAGS we can check if we are targeting a 32 or
+# 64 bit host.
+
+check_64bit_host() {
+cat > $TMPC <<EOF
+#if __SIZEOF_POINTER__ != 8
+#error not 64 bit system
+#endif
+int main(void) { return 0; }
+EOF
+  compile_object "$1"
+}
+
+if check_64bit_host "$CPU_CFLAGS"; then
+    host_bits=64
+else
+    host_bits=32
+fi
+
 if test -n "$host_arch" && {
     ! test -d "$source_path/linux-user/include/host/$host_arch" ||
     ! test -d "$source_path/common-user/host/$host_arch"; }; then
@@ -614,6 +633,9 @@ meson_option_parse() {
     echo "Try '$0 --help' for more information"
     exit 1
   fi
+}
+has_meson_option() {
+    test "${meson_options#*"$1"}" != "$meson_options"
 }
 
 meson_add_machine_file() {
@@ -1033,9 +1055,13 @@ if test "$static" = "yes" ; then
   fi
   plugins="no"
 fi
-if test "$plugins" != "no"; then
-  plugins=yes
-  subdirs="$subdirs contrib/plugins"
+if test "$plugins" != "no" && test $host_bits -eq 64; then
+    if has_meson_option "-Dtcg_interpreter=true"; then
+        plugins="no"
+    else
+        plugins=yes
+        subdirs="$subdirs contrib/plugins"
+    fi
 fi
 
 cat > $TMPC << EOF
@@ -1255,7 +1281,6 @@ probe_target_compiler() {
     aarch64) container_hosts="x86_64 aarch64" ;;
     alpha) container_hosts=x86_64 ;;
     arm) container_hosts="x86_64 aarch64" ;;
-    cris) container_hosts=x86_64 ;;
     hexagon) container_hosts=x86_64 ;;
     hppa) container_hosts=x86_64 ;;
     i386) container_hosts=x86_64 ;;
@@ -1314,9 +1339,6 @@ probe_target_compiler() {
         container_image=debian-armhf-cross
         container_cross_prefix=arm-linux-gnueabihf-
         ;;
-      cris)
-        container_image=fedora-cris-cross
-        ;;
       hexagon)
         container_cross_prefix=hexagon-unknown-linux-musl-
         container_cross_cc=${container_cross_prefix}clang
@@ -1333,7 +1355,7 @@ probe_target_compiler() {
         container_cross_prefix=microblaze-linux-musl-
         ;;
       mips64el)
-        container_image=debian-mips64el-cross
+        container_image=debian-all-test-cross
         container_cross_prefix=mips64el-linux-gnuabi64-
         ;;
       tricore)
@@ -1682,6 +1704,11 @@ for target in $target_list; do
 
       if test "${gdb_arches#*aarch64}" != "$gdb_arches" && version_ge $gdb_version 15.1; then
           echo "GDB_HAS_MTE=y" >> $config_target_mak
+      fi
+
+      if test "${gdb_arches#*aarch64}" != "$gdb_arches" && version_ge $gdb_version 16.0; then
+          # GDB has to support MTE in baremetal to allow debugging MTE in QEMU system mode
+          echo "GDB_SUPPORTS_MTE_IN_BAREMETAL=y" >> $config_target_mak
       fi
 
       echo "run-tcg-tests-$target: $qemu\$(EXESUF)" >> Makefile.prereqs
