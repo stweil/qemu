@@ -44,7 +44,7 @@ const GUID CLSID_WbemLocator = { 0x4590f811, 0x1d3a, 0x11d0,
 const GUID IID_IWbemLocator = { 0xdc12a687, 0x737f, 0x11cf,
     {0x88, 0x4d, 0x00, 0xaa, 0x00, 0x4b, 0x2e, 0x24} };
 
-void errmsg(DWORD err, const char *text)
+static void errmsg(DWORD err, const char *text)
 {
     /*
      * `text' contains function call statement when errmsg is called via chk().
@@ -247,6 +247,7 @@ out:
 }
 
 /* Unregister this module from COM+ Applications Catalog */
+STDAPI COMUnregister(void);
 STDAPI COMUnregister(void)
 {
     qga_debug_begin;
@@ -261,6 +262,7 @@ out:
 }
 
 /* Register this module to COM+ Applications Catalog */
+STDAPI COMRegister(void);
 STDAPI COMRegister(void)
 {
     qga_debug_begin;
@@ -385,11 +387,13 @@ out:
     return hr;
 }
 
+STDAPI_(void) CALLBACK DLLCOMRegister(HWND, HINSTANCE, LPSTR, int);
 STDAPI_(void) CALLBACK DLLCOMRegister(HWND, HINSTANCE, LPSTR, int)
 {
     COMRegister();
 }
 
+STDAPI_(void) CALLBACK DLLCOMUnregister(HWND, HINSTANCE, LPSTR, int);
 STDAPI_(void) CALLBACK DLLCOMUnregister(HWND, HINSTANCE, LPSTR, int)
 {
     COMUnregister();

@@ -10,15 +10,23 @@
  * See the COPYING file in the top-level directory.
  */
 
+#define __USE_MINGW_ANSI_STDIO 2
+
 #include "qemu/osdep.h"
 #include "monitor/monitor.h"
 #include "qemu/qemu-print.h"
+
+#define __MINGW_GNU_PRINTF(a, b)
+
+int qemu_vfprintf(FILE *stream, const char *fmt, va_list ap)
+    __attribute__((__format__ (gnu_printf, 2, 0)));
+int vprintf(const char *fmt, va_list ap);
 
 /*
  * Print like vprintf().
  * Print to current monitor if we have one, else to stdout.
  */
-int qemu_vprintf(const char *fmt, va_list ap)
+G_GNUC_PRINTF(2, 0) int qemu_vprintf(const char *fmt, va_list ap)
 {
     Monitor *cur_mon = monitor_cur();
     if (cur_mon) {
