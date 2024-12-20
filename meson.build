@@ -315,8 +315,8 @@ foreach lang : all_languages
     # ok
   elif compiler.get_id() == 'clang' and compiler.compiles('''
       #ifdef __apple_build_version__
-      # if __clang_major__ < 12 || (__clang_major__ == 12 && __clang_minor__ < 0)
-      #  error You need at least XCode Clang v12.0 to compile QEMU
+      # if __clang_major__ < 15 || (__clang_major__ == 15 && __clang_minor__ < 0)
+      #  error You need at least XCode Clang v15.0 to compile QEMU
       # endif
       #else
       # if __clang_major__ < 10 || (__clang_major__ == 10 && __clang_minor__ < 0)
@@ -325,7 +325,7 @@ foreach lang : all_languages
       #endif''')
     # ok
   else
-    error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v12.0) to compile QEMU')
+    error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')
   endif
 endforeach
 
@@ -4246,14 +4246,14 @@ foreach target : target_dirs
       'name': 'qemu-system-' + target_name,
       'win_subsystem': 'console',
       'sources': files('system/main.c'),
-      'dependencies': []
+      'dependencies': [sdl]
     }]
     if host_os == 'windows' and (sdl.found() or gtk.found())
       execs += [{
         'name': 'qemu-system-' + target_name + 'w',
         'win_subsystem': 'windows',
         'sources': files('system/main.c'),
-        'dependencies': []
+        'dependencies': [sdl]
       }]
     endif
     if get_option('fuzzing')
