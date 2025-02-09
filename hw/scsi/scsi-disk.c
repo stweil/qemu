@@ -32,14 +32,14 @@
 #include "migration/vmstate.h"
 #include "hw/scsi/emulation.h"
 #include "scsi/constants.h"
-#include "sysemu/arch_init.h"
-#include "sysemu/block-backend.h"
-#include "sysemu/blockdev.h"
+#include "system/arch_init.h"
+#include "system/block-backend.h"
+#include "system/blockdev.h"
 #include "hw/block/block.h"
 #include "hw/qdev-properties.h"
 #include "hw/qdev-properties-system.h"
-#include "sysemu/dma.h"
-#include "sysemu/sysemu.h"
+#include "system/dma.h"
+#include "system/system.h"
 #include "qemu/cutils.h"
 #include "trace.h"
 #include "qom/object.h"
@@ -3207,7 +3207,7 @@ static const TypeInfo scsi_disk_base_info = {
     DEFINE_PROP_BOOL("migrate-emulated-scsi-request", SCSIDiskState, migrate_emulated_scsi_request, true)
 
 
-static Property scsi_hd_properties[] = {
+static const Property scsi_hd_properties[] = {
     DEFINE_SCSI_DISK_PROPERTIES(),
     DEFINE_PROP_BIT("removable", SCSIDiskState, features,
                     SCSI_DISK_F_REMOVABLE, false),
@@ -3227,7 +3227,6 @@ static Property scsi_hd_properties[] = {
                     quirks, SCSI_DISK_QUIRK_MODE_PAGE_VENDOR_SPECIFIC_APPLE,
                     0),
     DEFINE_BLOCK_CHS_PROPERTIES(SCSIDiskState, qdev.conf),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static const VMStateDescription vmstate_scsi_disk_state = {
@@ -3267,7 +3266,7 @@ static const TypeInfo scsi_hd_info = {
     .class_init    = scsi_hd_class_initfn,
 };
 
-static Property scsi_cd_properties[] = {
+static const Property scsi_cd_properties[] = {
     DEFINE_SCSI_DISK_PROPERTIES(),
     DEFINE_PROP_UINT64("wwn", SCSIDiskState, qdev.wwn, 0),
     DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, qdev.port_wwn, 0),
@@ -3285,7 +3284,6 @@ static Property scsi_cd_properties[] = {
                     0),
     DEFINE_PROP_BIT("quirk_mode_page_truncated", SCSIDiskState, quirks,
                     SCSI_DISK_QUIRK_MODE_PAGE_TRUNCATED, 0),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void scsi_cd_class_initfn(ObjectClass *klass, void *data)
@@ -3310,7 +3308,7 @@ static const TypeInfo scsi_cd_info = {
 };
 
 #ifdef __linux__
-static Property scsi_block_properties[] = {
+static const Property scsi_block_properties[] = {
     DEFINE_BLOCK_ERROR_PROPERTIES(SCSIDiskState, qdev.conf),
     DEFINE_PROP_DRIVE("drive", SCSIDiskState, qdev.conf.blk),
     DEFINE_PROP_BOOL("share-rw", SCSIDiskState, qdev.conf.share_rw, false),
@@ -3323,7 +3321,6 @@ static Property scsi_block_properties[] = {
                       -1),
     DEFINE_PROP_UINT32("io_timeout", SCSIDiskState, qdev.io_timeout,
                        DEFAULT_IO_TIMEOUT),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void scsi_block_class_initfn(ObjectClass *klass, void *data)

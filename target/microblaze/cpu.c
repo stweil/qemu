@@ -30,6 +30,7 @@
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "exec/gdbstub.h"
+#include "exec/translation-block.h"
 #include "fpu/softfloat-helpers.h"
 #include "tcg/tcg.h"
 
@@ -207,6 +208,8 @@ static void mb_cpu_reset_hold(Object *obj, ResetType type)
      * this architecture.
      */
     set_float_2nan_prop_rule(float_2nan_prop_x87, &env->fp_status);
+    /* Default NaN: sign bit set, most significant frac bit set */
+    set_float_default_nan_pattern(0b11000000, &env->fp_status);
 
 #if defined(CONFIG_USER_ONLY)
     /* start in user mode with interrupts enabled.  */
@@ -337,7 +340,7 @@ static void mb_cpu_initfn(Object *obj)
     object_property_add_alias(obj, "little-endian", obj, "endianness");
 }
 
-static Property mb_properties[] = {
+static const Property mb_properties[] = {
     /*
      * Following properties are used by Xilinx DTS conversion tool
      * do not rename them.
@@ -401,7 +404,6 @@ static Property mb_properties[] = {
     /*
      * End of properties reserved by Xilinx DTS conversion tool.
      */
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static ObjectClass *mb_cpu_class_by_name(const char *cpu_model)
@@ -421,6 +423,7 @@ static const struct SysemuCPUOps mb_sysemu_ops = {
 
 static const TCGCPUOps mb_tcg_ops = {
     .initialize = mb_tcg_init,
+    .translate_code = mb_translate_code,
     .synchronize_from_tb = mb_cpu_synchronize_from_tb,
     .restore_state_to_opc = mb_restore_state_to_opc,
 

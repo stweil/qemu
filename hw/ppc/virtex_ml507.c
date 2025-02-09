@@ -30,10 +30,10 @@
 #include "hw/sysbus.h"
 #include "hw/char/serial-mm.h"
 #include "hw/block/flash.h"
-#include "sysemu/sysemu.h"
-#include "sysemu/reset.h"
+#include "system/system.h"
+#include "system/reset.h"
 #include "hw/boards.h"
-#include "sysemu/device_tree.h"
+#include "system/device_tree.h"
 #include "hw/loader.h"
 #include "elf.h"
 #include "qapi/error.h"
@@ -242,8 +242,8 @@ static void virtex_init(MachineState *machine)
 
         /* Boots a kernel elf binary.  */
         kernel_size = load_elf(kernel_filename, NULL, NULL, NULL,
-                               &entry, NULL, &high, NULL, 1, PPC_ELF_MACHINE,
-                               0, 0);
+                               &entry, NULL, &high, NULL,
+                               ELFDATA2MSB, PPC_ELF_MACHINE, 0, 0);
         boot_info.bootstrap_pc = entry & 0x00ffffff;
 
         if (kernel_size < 0) {

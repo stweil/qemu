@@ -64,8 +64,16 @@ struct RISCVIOMMUContext {
     uint64_t msiptp;            /* MSI redirection page table pointer */
 };
 
+typedef enum RISCVIOMMUTransTag {
+    RISCV_IOMMU_TRANS_TAG_BY,  /* Bypass */
+    RISCV_IOMMU_TRANS_TAG_SS,  /* Single Stage */
+    RISCV_IOMMU_TRANS_TAG_VG,  /* G-stage only */
+    RISCV_IOMMU_TRANS_TAG_VN,  /* Nested translation */
+} RISCVIOMMUTransTag;
+
 /* Address translation cache entry */
 struct RISCVIOMMUEntry {
+    RISCVIOMMUTransTag tag;     /* Translation Tag */
     uint64_t iova:44;           /* IOVA Page Number */
     uint64_t pscid:20;          /* Process Soft-Context identifier */
     uint64_t phys:44;           /* Physical Page Number */
@@ -94,10 +102,9 @@ static uint8_t riscv_iommu_get_icvec_vector(uint32_t icvec, uint32_t vec_type)
 
 static void riscv_iommu_notify(RISCVIOMMUState *s, int vec_type)
 {
-    const uint32_t fctl = riscv_iommu_reg_get32(s, RISCV_IOMMU_REG_FCTL);
     uint32_t ipsr, icvec, vector;
 
-    if (fctl & RISCV_IOMMU_FCTL_WSI || !s->notify) {
+    if (!s->notify) {
         return;
     }
 
@@ -392,9 +399,26 @@ static int riscv_iommu_spa_fetch(RISCVIOMMUState *s, RISCVIOMMUContext *ctx,
 
         /* Address range check before first level lookup */
         if (!sc[pass].step) {
-            const uint64_t va_mask = (1ULL << (va_skip + va_bits)) - 1;
-            if ((addr & va_mask) != addr) {
-                return RISCV_IOMMU_FQ_CAUSE_DMA_DISABLED;
+            const uint64_t va_len = va_skip + va_bits;
+            const uint64_t va_mask = (1ULL << va_len) - 1;
+
+            if (pass == S_STAGE && va_len > 32) {
+                target_ulong mask, masked_msbs;
+
+                mask = (1L << (TARGET_LONG_BITS - (va_len - 1))) - 1;
+                masked_msbs = (addr >> (va_len - 1)) & mask;
+
+                if (masked_msbs != 0 && masked_msbs != mask) {
+                    return (iotlb->perm & IOMMU_WO) ?
+                                RISCV_IOMMU_FQ_CAUSE_WR_FAULT_S :
+                                RISCV_IOMMU_FQ_CAUSE_RD_FAULT_S;
+                }
+            } else {
+                if ((addr & va_mask) != addr) {
+                    return (iotlb->perm & IOMMU_WO) ?
+                                RISCV_IOMMU_FQ_CAUSE_WR_FAULT_VS :
+                                RISCV_IOMMU_FQ_CAUSE_RD_FAULT_VS;
+                }
             }
         }
 
@@ -1211,7 +1235,7 @@ static gboolean riscv_iommu_iot_equal(gconstpointer v1, gconstpointer v2)
     RISCVIOMMUEntry *t1 = (RISCVIOMMUEntry *) v1;
     RISCVIOMMUEntry *t2 = (RISCVIOMMUEntry *) v2;
     return t1->gscid == t2->gscid && t1->pscid == t2->pscid &&
-           t1->iova == t2->iova;
+           t1->iova == t2->iova && t1->tag == t2->tag;
 }
 
 static guint riscv_iommu_iot_hash(gconstpointer v)
@@ -1220,67 +1244,115 @@ static guint riscv_iommu_iot_hash(gconstpointer v)
     return (guint)t->iova;
 }
 
-/* GV: 1 PSCV: 1 AV: 1 */
+/* GV: 0 AV: 0 PSCV: 0 GVMA: 0 */
+/* GV: 0 AV: 0 GVMA: 1 */
+static
+void riscv_iommu_iot_inval_all(gpointer key, gpointer value, gpointer data)
+{
+    RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
+    RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
+    if (iot->tag == arg->tag) {
+        iot->perm = IOMMU_NONE;
+    }
+}
+
+/* GV: 0 AV: 0 PSCV: 1 GVMA: 0 */
+static
+void riscv_iommu_iot_inval_pscid(gpointer key, gpointer value, gpointer data)
+{
+    RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
+    RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
+    if (iot->tag == arg->tag &&
+        iot->pscid == arg->pscid) {
+        iot->perm = IOMMU_NONE;
+    }
+}
+
+/* GV: 0 AV: 1 PSCV: 0 GVMA: 0 */
+static
+void riscv_iommu_iot_inval_iova(gpointer key, gpointer value, gpointer data)
+{
+    RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
+    RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
+    if (iot->tag == arg->tag &&
+        iot->iova == arg->iova) {
+        iot->perm = IOMMU_NONE;
+    }
+}
+
+/* GV: 0 AV: 1 PSCV: 1 GVMA: 0 */
 static void riscv_iommu_iot_inval_pscid_iova(gpointer key, gpointer value,
                                              gpointer data)
 {
     RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
     RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
-    if (iot->gscid == arg->gscid &&
+    if (iot->tag == arg->tag &&
         iot->pscid == arg->pscid &&
         iot->iova == arg->iova) {
         iot->perm = IOMMU_NONE;
     }
 }
 
-/* GV: 1 PSCV: 1 AV: 0 */
-static void riscv_iommu_iot_inval_pscid(gpointer key, gpointer value,
-                                        gpointer data)
+/* GV: 1 AV: 0 PSCV: 0 GVMA: 0 */
+/* GV: 1 AV: 0 GVMA: 1 */
+static
+void riscv_iommu_iot_inval_gscid(gpointer key, gpointer value, gpointer data)
 {
     RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
     RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
-    if (iot->gscid == arg->gscid &&
+    if (iot->tag == arg->tag &&
+        iot->gscid == arg->gscid) {
+        iot->perm = IOMMU_NONE;
+    }
+}
+
+/* GV: 1 AV: 0 PSCV: 1 GVMA: 0 */
+static void riscv_iommu_iot_inval_gscid_pscid(gpointer key, gpointer value,
+                                              gpointer data)
+{
+    RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
+    RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
+    if (iot->tag == arg->tag &&
+        iot->gscid == arg->gscid &&
         iot->pscid == arg->pscid) {
         iot->perm = IOMMU_NONE;
     }
 }
 
-/* GV: 1 GVMA: 1 */
-static void riscv_iommu_iot_inval_gscid_gpa(gpointer key, gpointer value,
-                                            gpointer data)
+/* GV: 1 AV: 1 PSCV: 0 GVMA: 0 */
+/* GV: 1 AV: 1 GVMA: 1 */
+static void riscv_iommu_iot_inval_gscid_iova(gpointer key, gpointer value,
+                                             gpointer data)
 {
     RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
     RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
-    if (iot->gscid == arg->gscid) {
-        /* simplified cache, no GPA matching */
+    if (iot->tag == arg->tag &&
+        iot->gscid == arg->gscid &&
+        iot->iova == arg->iova) {
         iot->perm = IOMMU_NONE;
     }
 }
 
-/* GV: 1 GVMA: 0 */
-static void riscv_iommu_iot_inval_gscid(gpointer key, gpointer value,
-                                        gpointer data)
+/* GV: 1 AV: 1 PSCV: 1 GVMA: 0 */
+static void riscv_iommu_iot_inval_gscid_pscid_iova(gpointer key, gpointer value,
+                                                   gpointer data)
 {
     RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
     RISCVIOMMUEntry *arg = (RISCVIOMMUEntry *) data;
-    if (iot->gscid == arg->gscid) {
+    if (iot->tag == arg->tag &&
+        iot->gscid == arg->gscid &&
+        iot->pscid == arg->pscid &&
+        iot->iova == arg->iova) {
         iot->perm = IOMMU_NONE;
     }
-}
-
-/* GV: 0 */
-static void riscv_iommu_iot_inval_all(gpointer key, gpointer value,
-                                      gpointer data)
-{
-    RISCVIOMMUEntry *iot = (RISCVIOMMUEntry *) value;
-    iot->perm = IOMMU_NONE;
 }
 
 /* caller should keep ref-count for iot_cache object */
 static RISCVIOMMUEntry *riscv_iommu_iot_lookup(RISCVIOMMUContext *ctx,
-    GHashTable *iot_cache, hwaddr iova)
+    GHashTable *iot_cache, hwaddr iova, RISCVIOMMUTransTag transtag)
 {
     RISCVIOMMUEntry key = {
+        .tag   = transtag,
         .gscid = get_field(ctx->gatp, RISCV_IOMMU_DC_IOHGATP_GSCID),
         .pscid = get_field(ctx->ta, RISCV_IOMMU_DC_TA_PSCID),
         .iova  = PPN_DOWN(iova),
@@ -1306,10 +1378,11 @@ static void riscv_iommu_iot_update(RISCVIOMMUState *s,
 }
 
 static void riscv_iommu_iot_inval(RISCVIOMMUState *s, GHFunc func,
-    uint32_t gscid, uint32_t pscid, hwaddr iova)
+    uint32_t gscid, uint32_t pscid, hwaddr iova, RISCVIOMMUTransTag transtag)
 {
     GHashTable *iot_cache;
     RISCVIOMMUEntry key = {
+        .tag = transtag,
         .gscid = gscid,
         .pscid = pscid,
         .iova  = PPN_DOWN(iova),
@@ -1320,9 +1393,24 @@ static void riscv_iommu_iot_inval(RISCVIOMMUState *s, GHFunc func,
     g_hash_table_unref(iot_cache);
 }
 
+static RISCVIOMMUTransTag riscv_iommu_get_transtag(RISCVIOMMUContext *ctx)
+{
+    uint64_t satp = get_field(ctx->satp, RISCV_IOMMU_ATP_MODE_FIELD);
+    uint64_t gatp = get_field(ctx->gatp, RISCV_IOMMU_ATP_MODE_FIELD);
+
+    if (satp == RISCV_IOMMU_DC_FSC_MODE_BARE) {
+        return (gatp == RISCV_IOMMU_DC_IOHGATP_MODE_BARE) ?
+            RISCV_IOMMU_TRANS_TAG_BY : RISCV_IOMMU_TRANS_TAG_VG;
+    } else {
+        return (gatp == RISCV_IOMMU_DC_IOHGATP_MODE_BARE) ?
+            RISCV_IOMMU_TRANS_TAG_SS : RISCV_IOMMU_TRANS_TAG_VN;
+    }
+}
+
 static int riscv_iommu_translate(RISCVIOMMUState *s, RISCVIOMMUContext *ctx,
     IOMMUTLBEntry *iotlb, bool enable_cache)
 {
+    RISCVIOMMUTransTag transtag = riscv_iommu_get_transtag(ctx);
     RISCVIOMMUEntry *iot;
     IOMMUAccessFlags perm;
     bool enable_pid;
@@ -1348,7 +1436,7 @@ static int riscv_iommu_translate(RISCVIOMMUState *s, RISCVIOMMUContext *ctx,
         }
     }
 
-    iot = riscv_iommu_iot_lookup(ctx, iot_cache, iotlb->iova);
+    iot = riscv_iommu_iot_lookup(ctx, iot_cache, iotlb->iova, transtag);
     perm = iot ? iot->perm : IOMMU_NONE;
     if (perm != IOMMU_NONE) {
         iotlb->translated_addr = PPN_PHYS(iot->phys);
@@ -1379,6 +1467,7 @@ static int riscv_iommu_translate(RISCVIOMMUState *s, RISCVIOMMUContext *ctx,
         iot->gscid = get_field(ctx->gatp, RISCV_IOMMU_DC_IOHGATP_GSCID);
         iot->pscid = get_field(ctx->ta, RISCV_IOMMU_DC_TA_PSCID);
         iot->perm = iotlb->perm;
+        iot->tag = transtag;
         riscv_iommu_iot_update(s, iot_cache, iot);
     }
 
@@ -1586,44 +1675,72 @@ static void riscv_iommu_process_cq_tail(RISCVIOMMUState *s)
 
         case RISCV_IOMMU_CMD(RISCV_IOMMU_CMD_IOTINVAL_FUNC_GVMA,
                              RISCV_IOMMU_CMD_IOTINVAL_OPCODE):
-            if (cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_PSCV) {
+        {
+            bool gv = !!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_GV);
+            bool av = !!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_AV);
+            bool pscv = !!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_PSCV);
+            uint32_t gscid = get_field(cmd.dword0,
+                                       RISCV_IOMMU_CMD_IOTINVAL_GSCID);
+            uint32_t pscid = get_field(cmd.dword0,
+                                       RISCV_IOMMU_CMD_IOTINVAL_PSCID);
+            hwaddr iova = (cmd.dword1 << 2) & TARGET_PAGE_MASK;
+
+            if (pscv) {
                 /* illegal command arguments IOTINVAL.GVMA & PSCV == 1 */
                 goto cmd_ill;
-            } else if (!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_GV)) {
-                /* invalidate all cache mappings */
-                func = riscv_iommu_iot_inval_all;
-            } else if (!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_AV)) {
-                /* invalidate cache matching GSCID */
-                func = riscv_iommu_iot_inval_gscid;
-            } else {
-                /* invalidate cache matching GSCID and ADDR (GPA) */
-                func = riscv_iommu_iot_inval_gscid_gpa;
             }
-            riscv_iommu_iot_inval(s, func,
-                get_field(cmd.dword0, RISCV_IOMMU_CMD_IOTINVAL_GSCID), 0,
-                cmd.dword1 << 2 & TARGET_PAGE_MASK);
+
+            func = riscv_iommu_iot_inval_all;
+
+            if (gv) {
+                func = (av) ? riscv_iommu_iot_inval_gscid_iova :
+                              riscv_iommu_iot_inval_gscid;
+            }
+
+            riscv_iommu_iot_inval(
+                s, func, gscid, pscid, iova, RISCV_IOMMU_TRANS_TAG_VG);
+
+            riscv_iommu_iot_inval(
+                s, func, gscid, pscid, iova, RISCV_IOMMU_TRANS_TAG_VN);
             break;
+        }
 
         case RISCV_IOMMU_CMD(RISCV_IOMMU_CMD_IOTINVAL_FUNC_VMA,
                              RISCV_IOMMU_CMD_IOTINVAL_OPCODE):
-            if (!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_GV)) {
-                /* invalidate all cache mappings, simplified model */
-                func = riscv_iommu_iot_inval_all;
-            } else if (!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_PSCV)) {
-                /* invalidate cache matching GSCID, simplified model */
-                func = riscv_iommu_iot_inval_gscid;
-            } else if (!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_AV)) {
-                /* invalidate cache matching GSCID and PSCID */
-                func = riscv_iommu_iot_inval_pscid;
+        {
+            bool gv = !!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_GV);
+            bool av = !!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_AV);
+            bool pscv = !!(cmd.dword0 & RISCV_IOMMU_CMD_IOTINVAL_PSCV);
+            uint32_t gscid = get_field(cmd.dword0,
+                                       RISCV_IOMMU_CMD_IOTINVAL_GSCID);
+            uint32_t pscid = get_field(cmd.dword0,
+                                       RISCV_IOMMU_CMD_IOTINVAL_PSCID);
+            hwaddr iova = (cmd.dword1 << 2) & TARGET_PAGE_MASK;
+            RISCVIOMMUTransTag transtag;
+
+            if (gv) {
+                transtag = RISCV_IOMMU_TRANS_TAG_VN;
+                if (pscv) {
+                    func = (av) ? riscv_iommu_iot_inval_gscid_pscid_iova :
+                                  riscv_iommu_iot_inval_gscid_pscid;
+                } else {
+                    func = (av) ? riscv_iommu_iot_inval_gscid_iova :
+                                  riscv_iommu_iot_inval_gscid;
+                }
             } else {
-                /* invalidate cache matching GSCID and PSCID and ADDR (IOVA) */
-                func = riscv_iommu_iot_inval_pscid_iova;
+                transtag = RISCV_IOMMU_TRANS_TAG_SS;
+                if (pscv) {
+                    func = (av) ? riscv_iommu_iot_inval_pscid_iova :
+                                  riscv_iommu_iot_inval_pscid;
+                } else {
+                    func = (av) ? riscv_iommu_iot_inval_iova :
+                                  riscv_iommu_iot_inval_all;
+                }
             }
-            riscv_iommu_iot_inval(s, func,
-                get_field(cmd.dword0, RISCV_IOMMU_CMD_IOTINVAL_GSCID),
-                get_field(cmd.dword0, RISCV_IOMMU_CMD_IOTINVAL_PSCID),
-                cmd.dword1 << 2 & TARGET_PAGE_MASK);
+
+            riscv_iommu_iot_inval(s, func, gscid, pscid, iova, transtag);
             break;
+        }
 
         case RISCV_IOMMU_CMD(RISCV_IOMMU_CMD_IODIR_FUNC_INVAL_DDT,
                              RISCV_IOMMU_CMD_IODIR_OPCODE):
@@ -2113,11 +2230,53 @@ static const MemoryRegionOps riscv_iommu_trap_ops = {
     }
 };
 
+void riscv_iommu_set_cap_igs(RISCVIOMMUState *s, riscv_iommu_igs_mode mode)
+{
+    s->cap = set_field(s->cap, RISCV_IOMMU_CAP_IGS, mode);
+}
+
+static void riscv_iommu_instance_init(Object *obj)
+{
+    RISCVIOMMUState *s = RISCV_IOMMU(obj);
+
+    /* Enable translation debug interface */
+    s->cap = RISCV_IOMMU_CAP_DBG;
+
+    /* Report QEMU target physical address space limits */
+    s->cap = set_field(s->cap, RISCV_IOMMU_CAP_PAS,
+                       TARGET_PHYS_ADDR_SPACE_BITS);
+
+    /* TODO: method to report supported PID bits */
+    s->pid_bits = 8; /* restricted to size of MemTxAttrs.pid */
+    s->cap |= RISCV_IOMMU_CAP_PD8;
+
+    /* register storage */
+    s->regs_rw = g_new0(uint8_t, RISCV_IOMMU_REG_SIZE);
+    s->regs_ro = g_new0(uint8_t, RISCV_IOMMU_REG_SIZE);
+    s->regs_wc = g_new0(uint8_t, RISCV_IOMMU_REG_SIZE);
+
+     /* Mark all registers read-only */
+    memset(s->regs_ro, 0xff, RISCV_IOMMU_REG_SIZE);
+
+    /* Device translation context cache */
+    s->ctx_cache = g_hash_table_new_full(riscv_iommu_ctx_hash,
+                                         riscv_iommu_ctx_equal,
+                                         g_free, NULL);
+
+    s->iot_cache = g_hash_table_new_full(riscv_iommu_iot_hash,
+                                         riscv_iommu_iot_equal,
+                                         g_free, NULL);
+
+    s->iommus.le_next = NULL;
+    s->iommus.le_prev = NULL;
+    QLIST_INIT(&s->spaces);
+}
+
 static void riscv_iommu_realize(DeviceState *dev, Error **errp)
 {
     RISCVIOMMUState *s = RISCV_IOMMU(dev);
 
-    s->cap = s->version & RISCV_IOMMU_CAP_VERSION;
+    s->cap |= s->version & RISCV_IOMMU_CAP_VERSION;
     if (s->enable_msi) {
         s->cap |= RISCV_IOMMU_CAP_MSI_FLAT | RISCV_IOMMU_CAP_MSI_MRIF;
     }
@@ -2132,28 +2291,10 @@ static void riscv_iommu_realize(DeviceState *dev, Error **errp)
         s->cap |= RISCV_IOMMU_CAP_SV32X4 | RISCV_IOMMU_CAP_SV39X4 |
                   RISCV_IOMMU_CAP_SV48X4 | RISCV_IOMMU_CAP_SV57X4;
     }
-    /* Enable translation debug interface */
-    s->cap |= RISCV_IOMMU_CAP_DBG;
-
-    /* Report QEMU target physical address space limits */
-    s->cap = set_field(s->cap, RISCV_IOMMU_CAP_PAS,
-                       TARGET_PHYS_ADDR_SPACE_BITS);
-
-    /* TODO: method to report supported PID bits */
-    s->pid_bits = 8; /* restricted to size of MemTxAttrs.pid */
-    s->cap |= RISCV_IOMMU_CAP_PD8;
 
     /* Out-of-reset translation mode: OFF (DMA disabled) BARE (passthrough) */
     s->ddtp = set_field(0, RISCV_IOMMU_DDTP_MODE, s->enable_off ?
                         RISCV_IOMMU_DDTP_MODE_OFF : RISCV_IOMMU_DDTP_MODE_BARE);
-
-    /* register storage */
-    s->regs_rw = g_new0(uint8_t, RISCV_IOMMU_REG_SIZE);
-    s->regs_ro = g_new0(uint8_t, RISCV_IOMMU_REG_SIZE);
-    s->regs_wc = g_new0(uint8_t, RISCV_IOMMU_REG_SIZE);
-
-     /* Mark all registers read-only */
-    memset(s->regs_ro, 0xff, RISCV_IOMMU_REG_SIZE);
 
     /*
      * Register complete MMIO space, including MSI/PBA registers.
@@ -2212,19 +2353,6 @@ static void riscv_iommu_realize(DeviceState *dev, Error **errp)
     memory_region_init_io(&s->trap_mr, OBJECT(dev), &riscv_iommu_trap_ops, s,
             "riscv-iommu-trap", ~0ULL);
     address_space_init(&s->trap_as, &s->trap_mr, "riscv-iommu-trap-as");
-
-    /* Device translation context cache */
-    s->ctx_cache = g_hash_table_new_full(riscv_iommu_ctx_hash,
-                                         riscv_iommu_ctx_equal,
-                                         g_free, NULL);
-
-    s->iot_cache = g_hash_table_new_full(riscv_iommu_iot_hash,
-                                         riscv_iommu_iot_equal,
-                                         g_free, NULL);
-
-    s->iommus.le_next = NULL;
-    s->iommus.le_prev = NULL;
-    QLIST_INIT(&s->spaces);
 }
 
 static void riscv_iommu_unrealize(DeviceState *dev)
@@ -2235,7 +2363,42 @@ static void riscv_iommu_unrealize(DeviceState *dev)
     g_hash_table_unref(s->ctx_cache);
 }
 
-static Property riscv_iommu_properties[] = {
+void riscv_iommu_reset(RISCVIOMMUState *s)
+{
+    uint32_t reg_clr;
+    int ddtp_mode;
+
+    /*
+     * Clear DDTP while setting DDTP_mode back to user
+     * initial setting.
+     */
+    ddtp_mode = s->enable_off ?
+                RISCV_IOMMU_DDTP_MODE_OFF : RISCV_IOMMU_DDTP_MODE_BARE;
+    s->ddtp = set_field(0, RISCV_IOMMU_DDTP_MODE, ddtp_mode);
+    riscv_iommu_reg_set64(s, RISCV_IOMMU_REG_DDTP, s->ddtp);
+
+    reg_clr = RISCV_IOMMU_CQCSR_CQEN | RISCV_IOMMU_CQCSR_CIE |
+              RISCV_IOMMU_CQCSR_CQON | RISCV_IOMMU_CQCSR_BUSY;
+    riscv_iommu_reg_mod32(s, RISCV_IOMMU_REG_CQCSR, 0, reg_clr);
+
+    reg_clr = RISCV_IOMMU_FQCSR_FQEN | RISCV_IOMMU_FQCSR_FIE |
+              RISCV_IOMMU_FQCSR_FQON | RISCV_IOMMU_FQCSR_BUSY;
+    riscv_iommu_reg_mod32(s, RISCV_IOMMU_REG_FQCSR, 0, reg_clr);
+
+    reg_clr = RISCV_IOMMU_PQCSR_PQEN | RISCV_IOMMU_PQCSR_PIE |
+              RISCV_IOMMU_PQCSR_PQON | RISCV_IOMMU_PQCSR_BUSY;
+    riscv_iommu_reg_mod32(s, RISCV_IOMMU_REG_PQCSR, 0, reg_clr);
+
+    riscv_iommu_reg_mod64(s, RISCV_IOMMU_REG_TR_REQ_CTL, 0,
+                          RISCV_IOMMU_TR_REQ_CTL_GO_BUSY);
+
+    riscv_iommu_reg_set32(s, RISCV_IOMMU_REG_IPSR, 0);
+
+    g_hash_table_remove_all(s->ctx_cache);
+    g_hash_table_remove_all(s->iot_cache);
+}
+
+static const Property riscv_iommu_properties[] = {
     DEFINE_PROP_UINT32("version", RISCVIOMMUState, version,
         RISCV_IOMMU_SPEC_DOT_VER),
     DEFINE_PROP_UINT32("bus", RISCVIOMMUState, bus, 0x0),
@@ -2248,7 +2411,6 @@ static Property riscv_iommu_properties[] = {
     DEFINE_PROP_BOOL("g-stage", RISCVIOMMUState, enable_g_stage, TRUE),
     DEFINE_PROP_LINK("downstream-mr", RISCVIOMMUState, target_mr,
         TYPE_MEMORY_REGION, MemoryRegion *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void riscv_iommu_class_init(ObjectClass *klass, void* data)
@@ -2266,6 +2428,7 @@ static const TypeInfo riscv_iommu_info = {
     .name = TYPE_RISCV_IOMMU,
     .parent = TYPE_DEVICE,
     .instance_size = sizeof(RISCVIOMMUState),
+    .instance_init = riscv_iommu_instance_init,
     .class_init = riscv_iommu_class_init,
 };
 

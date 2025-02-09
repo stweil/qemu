@@ -18,8 +18,8 @@
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "qemu/bitops.h"
-#include "sysemu/sysemu.h"
-#include "sysemu/block-backend.h"
+#include "system/system.h"
+#include "system/block-backend.h"
 
 #include "nvme.h"
 #include "trace.h"
@@ -799,7 +799,7 @@ static void nvme_ns_realize(DeviceState *dev, Error **errp)
     nvme_attach_ns(n, ns);
 }
 
-static Property nvme_ns_props[] = {
+static const Property nvme_ns_props[] = {
     DEFINE_BLOCK_PROPERTIES(NvmeNamespace, blkconf),
     DEFINE_PROP_BOOL("detached", NvmeNamespace, params.detached, false),
     DEFINE_PROP_BOOL("shared", NvmeNamespace, params.shared, true),
@@ -834,7 +834,6 @@ static Property nvme_ns_props[] = {
     DEFINE_PROP_BOOL("eui64-default", NvmeNamespace, params.eui64_default,
                      false),
     DEFINE_PROP_STRING("fdp.ruhs", NvmeNamespace, params.fdp.ruhs),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void nvme_ns_class_init(ObjectClass *oc, void *data)

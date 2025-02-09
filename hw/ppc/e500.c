@@ -26,13 +26,13 @@
 #include "hw/block/flash.h"
 #include "hw/char/serial-mm.h"
 #include "hw/pci/pci.h"
-#include "sysemu/block-backend-io.h"
-#include "sysemu/sysemu.h"
-#include "sysemu/kvm.h"
-#include "sysemu/reset.h"
-#include "sysemu/runstate.h"
+#include "system/block-backend-io.h"
+#include "system/system.h"
+#include "system/kvm.h"
+#include "system/reset.h"
+#include "system/runstate.h"
 #include "kvm_ppc.h"
-#include "sysemu/device_tree.h"
+#include "system/device_tree.h"
 #include "hw/ppc/openpic.h"
 #include "hw/ppc/openpic_kvm.h"
 #include "hw/ppc/ppc.h"
@@ -1194,7 +1194,7 @@ void ppce500_init(MachineState *machine)
 
     payload_size = load_elf(filename, NULL, NULL, NULL,
                             &bios_entry, &loadaddr, NULL, NULL,
-                            1, PPC_ELF_MACHINE, 0, 0);
+                            ELFDATA2MSB, PPC_ELF_MACHINE, 0, 0);
     if (payload_size < 0) {
         /*
          * Hrm. No ELF image? Try a uImage, maybe someone is giving us an

@@ -493,7 +493,7 @@ static void gen_add_CC(TCGv_i32 dest, TCGv_i32 t0, TCGv_i32 t1)
 static void gen_adc_CC(TCGv_i32 dest, TCGv_i32 t0, TCGv_i32 t1)
 {
     TCGv_i32 tmp = tcg_temp_new_i32();
-    if (TCG_TARGET_HAS_add2_i32) {
+    if (tcg_op_supported(INDEX_op_add2_i32, TCG_TYPE_I32, 0)) {
         tcg_gen_movi_i32(tmp, 0);
         tcg_gen_add2_i32(cpu_NF, cpu_CF, t0, tmp, cpu_CF, tmp);
         tcg_gen_add2_i32(cpu_NF, cpu_CF, cpu_NF, cpu_CF, t1, tmp);
@@ -8093,9 +8093,8 @@ static const TranslatorOps thumb_translator_ops = {
     .tb_stop            = arm_tr_tb_stop,
 };
 
-/* generate intermediate code for basic block 'tb'.  */
-void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int *max_insns,
-                           vaddr pc, void *host_pc)
+void arm_translate_code(CPUState *cpu, TranslationBlock *tb,
+                        int *max_insns, vaddr pc, void *host_pc)
 {
     DisasContext dc = { };
     const TranslatorOps *ops = &arm_translator_ops;

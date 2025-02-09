@@ -25,7 +25,7 @@
 #include "net/announce.h"
 #include "qom/object.h"
 #include "postcopy-ram.h"
-#include "sysemu/runstate.h"
+#include "system/runstate.h"
 #include "migration/misc.h"
 
 #define  MIGRATION_THREAD_SNAPSHOT          "mig/snapshot"
@@ -370,9 +370,6 @@ struct MigrationState {
     /* Flag set once the migration thread is running (and needs joining) */
     bool migration_thread_running;
 
-    /* Flag set once the migration thread called bdrv_inactivate_all */
-    bool block_inactive;
-
     /* Migration is waiting for guest to unplug device */
     QemuSemaphore wait_unplug_sem;
 
@@ -471,6 +468,8 @@ struct MigrationState {
     bool switchover_acked;
     /* Is this a rdma migration */
     bool rdma_migration;
+
+    GSource *hup_source;
 };
 
 void migrate_set_state(MigrationStatus *state, MigrationStatus old_state,
@@ -522,8 +521,6 @@ bool check_dirty_bitmap_mig_alias_map(const BitmapMigrationNodeAliasList *bbm,
                                       Error **errp);
 
 void migrate_add_address(SocketAddress *address);
-bool migrate_uri_parse(const char *uri, MigrationChannel **channel,
-                       Error **errp);
 int foreach_not_ignored_block(RAMBlockIterFunc func, void *opaque);
 
 #define qemu_ram_foreach_block \
@@ -555,5 +552,9 @@ void migration_bitmap_sync_precopy(bool last_stage);
 
 /* migration/block-dirty-bitmap.c */
 void dirty_bitmap_mig_init(void);
+bool should_send_vmdesc(void);
+
+/* migration/block-active.c */
+void migration_block_active_setup(bool active);
 
 #endif

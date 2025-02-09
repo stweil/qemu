@@ -633,8 +633,10 @@ typedef struct CPUArchState {
 
         /* There are a number of distinct float control structures:
          *
-         *  fp_status: is the "normal" fp status.
-         *  fp_status_fp16: used for half-precision calculations
+         *  fp_status_a32: is the "normal" fp status for AArch32 insns
+         *  fp_status_a64: is the "normal" fp status for AArch64 insns
+         *  fp_status_fp16_a32: used for AArch32 half-precision calculations
+         *  fp_status_fp16_a64: used for AArch64 half-precision calculations
          *  standard_fp_status : the ARM "Standard FPSCR Value"
          *  standard_fp_status_fp16 : used for half-precision
          *       calculations with the ARM "Standard FPSCR Value"
@@ -658,8 +660,10 @@ typedef struct CPUArchState {
          * only thing which needs to read the exception flags being
          * an explicit FPSCR read.
          */
-        float_status fp_status;
-        float_status fp_status_f16;
+        float_status fp_status_a32;
+        float_status fp_status_a64;
+        float_status fp_status_f16_a32;
+        float_status fp_status_f16_a64;
         float_status standard_fp_status;
         float_status standard_fp_status_f16;
 
@@ -972,6 +976,9 @@ struct ArchCPU {
     /* QOM property to indicate we should use the back-compat CNTFRQ default */
     bool backcompat_cntfrq;
 
+    /* QOM property to indicate we should use the back-compat QARMA5 default */
+    bool backcompat_pauth_default_use_qarma5;
+
     /* Specify the number of cores in this CPU cluster. Used for the L2CTLR
      * register.
      */
@@ -1062,6 +1069,7 @@ struct ArchCPU {
     bool prop_pauth;
     bool prop_pauth_impdef;
     bool prop_pauth_qarma3;
+    bool prop_pauth_qarma5;
     bool prop_lpa2;
 
     /* DCZ blocksize, in log_2(words), ie low 4 bits of DCZID_EL0 */
@@ -3377,8 +3385,8 @@ extern const uint64_t pred_esz_masks[5];
 #define TAG_GRANULE      (1 << LOG2_TAG_GRANULE)
 
 #ifdef CONFIG_USER_ONLY
+
 #define TARGET_PAGE_DATA_SIZE (TARGET_PAGE_SIZE >> (LOG2_TAG_GRANULE + 1))
-#endif
 
 #ifdef TARGET_TAGGED_ADDRESSES
 /**
@@ -3404,6 +3412,7 @@ static inline target_ulong cpu_untagged_addr(CPUState *cs, target_ulong x)
     }
     return x;
 }
-#endif
+#endif /* TARGET_TAGGED_ADDRESSES */
+#endif /* CONFIG_USER_ONLY */
 
 #endif

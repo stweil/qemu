@@ -35,7 +35,7 @@
 #include "s3c2410x.h"
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/dma.h"         /* QEMUSGList (in ide/internal.h) */
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 
 #define BIOS_FILENAME "able.bin"
 

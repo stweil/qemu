@@ -1652,25 +1652,17 @@ static void amdvi_sysbus_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion_overlap(&s->mr_sys, AMDVI_INT_ADDR_FIRST,
                                         &s->mr_ir, 1);
 
-    /* AMD IOMMU with x2APIC mode requires xtsup=on */
-    if (x86ms->apic_id_limit > 255 && !s->xtsup) {
-        error_report("AMD IOMMU with x2APIC confguration requires xtsup=on");
+    if (kvm_enabled() && x86ms->apic_id_limit > 255 && !s->xtsup) {
+        error_report("AMD IOMMU with x2APIC configuration requires xtsup=on");
         exit(EXIT_FAILURE);
-    }
-    if (s->xtsup) {
-        if (kvm_irqchip_is_split() && !kvm_enable_x2apic()) {
-            error_report("AMD IOMMU xtsup=on requires support on the KVM side");
-            exit(EXIT_FAILURE);
-        }
     }
 
     pci_setup_iommu(bus, &amdvi_iommu_ops, s);
     amdvi_init(s);
 }
 
-static Property amdvi_properties[] = {
+static const Property amdvi_properties[] = {
     DEFINE_PROP_BOOL("xtsup", AMDVIState, xtsup, false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static const VMStateDescription vmstate_amdvi_sysbus = {

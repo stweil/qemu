@@ -32,7 +32,7 @@
 #include "hw/sysbus.h"
 #include "net/net.h"
 #include "hw/block/flash.h"
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 #include "hw/boards.h"
 #include "hw/char/serial-mm.h"
 #include "hw/qdev-properties.h"
@@ -204,7 +204,7 @@ petalogix_ml605_init(MachineState *machine)
     cpu->cfg.pvr_regs[5] = 0xc56be000;
     cpu->cfg.pvr_regs[10] = 0x0e000000; /* virtex 6 */
 
-    microblaze_load_kernel(cpu, MEMORY_BASEADDR, ram_size,
+    microblaze_load_kernel(cpu, true, MEMORY_BASEADDR, ram_size,
                            machine->initrd_filename,
                            BINARY_DEVICE_TREE_FILE,
                            NULL);

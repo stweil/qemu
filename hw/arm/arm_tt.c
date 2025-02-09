@@ -25,7 +25,7 @@
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "net/net.h"
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 #include "qemu/timer.h"
 #include "block/block.h"
 #include "chardev/char.h"        /* qemu_chr_new */

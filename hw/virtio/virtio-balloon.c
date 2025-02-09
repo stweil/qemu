@@ -22,7 +22,7 @@
 #include "hw/mem/pc-dimm.h"
 #include "hw/qdev-properties.h"
 #include "hw/boards.h"
-#include "sysemu/balloon.h"
+#include "system/balloon.h"
 #include "hw/virtio/virtio-balloon.h"
 #include "exec/address-spaces.h"
 #include "qapi/error.h"
@@ -1015,7 +1015,7 @@ static const VMStateDescription vmstate_virtio_balloon = {
     },
 };
 
-static Property virtio_balloon_properties[] = {
+static const Property virtio_balloon_properties[] = {
     DEFINE_PROP_BIT("deflate-on-oom", VirtIOBalloon, host_features,
                     VIRTIO_BALLOON_F_DEFLATE_ON_OOM, false),
     DEFINE_PROP_BIT("free-page-hint", VirtIOBalloon, host_features,
@@ -1032,7 +1032,6 @@ static Property virtio_balloon_properties[] = {
                      qemu_4_0_config_size, false),
     DEFINE_PROP_LINK("iothread", VirtIOBalloon, iothread, TYPE_IOTHREAD,
                      IOThread *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void virtio_balloon_class_init(ObjectClass *klass, void *data)

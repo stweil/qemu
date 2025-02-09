@@ -23,7 +23,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/units.h"
-#include "sysemu/block-backend.h"
+#include "system/block-backend.h"
 #include "hw/block/block.h"
 #include "hw/block/flash.h"
 #include "hw/qdev-properties.h"
@@ -1720,7 +1720,7 @@ static int m25p80_pre_save(void *opaque)
     return 0;
 }
 
-static Property m25p80_properties[] = {
+static const Property m25p80_properties[] = {
     /* This is default value for Micron flash */
     DEFINE_PROP_BOOL("write-enable", Flash, write_enable, false),
     DEFINE_PROP_UINT32("nonvolatile-cfg", Flash, nonvolatile_cfg, 0x8FFF),
@@ -1729,7 +1729,6 @@ static Property m25p80_properties[] = {
     DEFINE_PROP_UINT8("spansion-cr3nv", Flash, spansion_cr3nv, 0x2),
     DEFINE_PROP_UINT8("spansion-cr4nv", Flash, spansion_cr4nv, 0x10),
     DEFINE_PROP_DRIVE("drive", Flash, blk),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static int m25p80_pre_load(void *opaque)
@@ -1894,7 +1893,7 @@ static void m25p80_register_types(void)
             .class_init = m25p80_class_init,
             .class_data = (void *)&known_devices[i],
         };
-        type_register(&ti);
+        type_register_static(&ti);
     }
 }
 

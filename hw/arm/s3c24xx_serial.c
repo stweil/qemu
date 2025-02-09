@@ -15,7 +15,7 @@
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "hw/hw.h"
 #include "hw/irq.h"              /* qemu_set_irq */
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 
 #include "s3c24xx.h"
 

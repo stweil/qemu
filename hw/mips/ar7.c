@@ -66,7 +66,7 @@
 #include "hw/pci/pci.h"
 
 #include "chardev/char.h"        /* qemu_chr_fe_printf */
-#include "sysemu/sysemu.h"      /* serial_hd */
+#include "system/system.h"      /* serial_hd */
 #include "qemu/timer.h"         /* QEMU_CLOCK_VIRTUAL */
 
 #include "sysemu/block-backend.h" /* blk_getlength */

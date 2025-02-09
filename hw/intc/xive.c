@@ -12,9 +12,9 @@
 #include "qemu/module.h"
 #include "qapi/error.h"
 #include "target/ppc/cpu.h"
-#include "sysemu/cpus.h"
-#include "sysemu/dma.h"
-#include "sysemu/reset.h"
+#include "system/cpus.h"
+#include "system/dma.h"
+#include "system/reset.h"
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "hw/irq.h"
@@ -927,11 +927,10 @@ static const VMStateDescription vmstate_xive_tctx = {
     },
 };
 
-static Property xive_tctx_properties[] = {
+static const Property xive_tctx_properties[] = {
     DEFINE_PROP_LINK("cpu", XiveTCTX, cs, TYPE_CPU, CPUState *),
     DEFINE_PROP_LINK("presenter", XiveTCTX, xptr, TYPE_XIVE_PRESENTER,
                      XivePresenter *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void xive_tctx_class_init(ObjectClass *klass, void *data)
@@ -1403,7 +1402,7 @@ static const VMStateDescription vmstate_xive_source = {
  * The default XIVE interrupt source setting for the ESB MMIOs is two
  * 64k pages without Store EOI, to be in sync with KVM.
  */
-static Property xive_source_properties[] = {
+static const Property xive_source_properties[] = {
     DEFINE_PROP_UINT64("flags", XiveSource, esb_flags, 0),
     DEFINE_PROP_UINT32("nr-irqs", XiveSource, nr_irqs, 0),
     DEFINE_PROP_UINT32("shift", XiveSource, esb_shift, XIVE_ESB_64K_2PAGE),
@@ -1414,7 +1413,6 @@ static Property xive_source_properties[] = {
     DEFINE_PROP_UINT8("reset-pq", XiveSource, reset_pq, XIVE_ESB_OFF),
     DEFINE_PROP_LINK("xive", XiveSource, xive, TYPE_XIVE_NOTIFIER,
                      XiveNotifier *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void xive_source_class_init(ObjectClass *klass, void *data)
@@ -2002,10 +2000,9 @@ void xive_router_notify(XiveNotifier *xn, uint32_t lisn, bool pq_checked)
     xive_router_end_notify_handler(xrtr, &eas);
 }
 
-static Property xive_router_properties[] = {
+static const Property xive_router_properties[] = {
     DEFINE_PROP_LINK("xive-fabric", XiveRouter, xfb,
                      TYPE_XIVE_FABRIC, XiveFabric *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void xive_router_class_init(ObjectClass *klass, void *data)
@@ -2170,12 +2167,11 @@ static void xive_end_source_realize(DeviceState *dev, Error **errp)
                           (1ull << (xsrc->esb_shift + 1)) * xsrc->nr_ends);
 }
 
-static Property xive_end_source_properties[] = {
+static const Property xive_end_source_properties[] = {
     DEFINE_PROP_UINT32("nr-ends", XiveENDSource, nr_ends, 0),
     DEFINE_PROP_UINT32("shift", XiveENDSource, esb_shift, XIVE_ESB_64K),
     DEFINE_PROP_LINK("xive", XiveENDSource, xrtr, TYPE_XIVE_ROUTER,
                      XiveRouter *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void xive_end_source_class_init(ObjectClass *klass, void *data)

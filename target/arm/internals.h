@@ -357,6 +357,8 @@ void init_cpreg_list(ARMCPU *cpu);
 
 void arm_cpu_register_gdb_regs_for_features(ARMCPU *cpu);
 void arm_translate_init(void);
+void arm_translate_code(CPUState *cs, TranslationBlock *tb,
+                        int *max_insns, vaddr pc, void *host_pc);
 
 void arm_cpu_register_gdb_commands(ARMCPU *cpu);
 void aarch64_cpu_register_gdb_commands(ARMCPU *cpu, GString *,
@@ -1727,6 +1729,9 @@ static inline uint64_t pauth_ptr_mask(ARMVAParameters param)
 /* Add the cpreg definitions for debug related system registers */
 void define_debug_regs(ARMCPU *cpu);
 
+/* Add the cpreg definitions for TLBI instructions */
+void define_tlb_insn_regs(ARMCPU *cpu);
+
 /* Effective value of MDCR_EL2 */
 static inline uint64_t arm_mdcr_el2_eff(CPUARMState *env)
 {
@@ -1817,4 +1822,10 @@ uint64_t gt_get_countervalue(CPUARMState *env);
  * and CNTVCT_EL0 (this will be either 0 or the value of CNTVOFF_EL2).
  */
 uint64_t gt_virt_cnt_offset(CPUARMState *env);
+
+/*
+ * Return mask of ARMMMUIdxBit values corresponding to an "invalidate
+ * all EL1" scope; this covers stage 1 and stage 2.
+ */
+int alle1_tlbmask(CPUARMState *env);
 #endif

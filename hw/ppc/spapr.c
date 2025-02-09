@@ -32,20 +32,20 @@
 #include "qapi/qapi-events-machine.h"
 #include "qapi/qapi-events-qdev.h"
 #include "qapi/visitor.h"
-#include "sysemu/sysemu.h"
-#include "sysemu/hostmem.h"
-#include "sysemu/numa.h"
-#include "sysemu/tcg.h"
-#include "sysemu/qtest.h"
-#include "sysemu/reset.h"
-#include "sysemu/runstate.h"
+#include "system/system.h"
+#include "system/hostmem.h"
+#include "system/numa.h"
+#include "system/tcg.h"
+#include "system/qtest.h"
+#include "system/reset.h"
+#include "system/runstate.h"
 #include "qemu/log.h"
 #include "hw/fw-path-provider.h"
 #include "elf.h"
 #include "net/net.h"
-#include "sysemu/device_tree.h"
-#include "sysemu/cpus.h"
-#include "sysemu/hw_accel.h"
+#include "system/device_tree.h"
+#include "system/cpus.h"
+#include "system/hw_accel.h"
 #include "kvm_ppc.h"
 #include "migration/misc.h"
 #include "migration/qemu-file-types.h"
@@ -75,7 +75,7 @@
 #include "hw/virtio/vhost-scsi-common.h"
 
 #include "exec/ram_addr.h"
-#include "exec/confidential-guest-support.h"
+#include "system/confidential-guest-support.h"
 #include "hw/usb.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
@@ -3022,13 +3022,13 @@ static void spapr_machine_init(MachineState *machine)
 
         spapr->kernel_size = load_elf(kernel_filename, NULL,
                                       translate_kernel_address, spapr,
-                                      NULL, &loaded_addr, NULL, NULL, 1,
-                                      PPC_ELF_MACHINE, 0, 0);
+                                      NULL, &loaded_addr, NULL, NULL,
+                                      ELFDATA2MSB, PPC_ELF_MACHINE, 0, 0);
         if (spapr->kernel_size == ELF_LOAD_WRONG_ENDIAN) {
             spapr->kernel_size = load_elf(kernel_filename, NULL,
                                           translate_kernel_address, spapr,
-                                          NULL, &loaded_addr, NULL, NULL, 0,
-                                          PPC_ELF_MACHINE, 0, 0);
+                                          NULL, &loaded_addr, NULL, NULL,
+                                          ELFDATA2LSB, PPC_ELF_MACHINE, 0, 0);
             spapr->kernel_le = spapr->kernel_size > 0;
         }
         if (spapr->kernel_size < 0) {
@@ -4723,7 +4723,7 @@ static void spapr_machine_latest_class_options(MachineClass *mc)
     static void MACHINE_VER_SYM(register, spapr, __VA_ARGS__)(void)  \
     {                                                                \
         MACHINE_VER_DELETION(__VA_ARGS__);                           \
-        type_register(&MACHINE_VER_SYM(info, spapr, __VA_ARGS__));   \
+        type_register_static(&MACHINE_VER_SYM(info, spapr, __VA_ARGS__));   \
     }                                                                \
     type_init(MACHINE_VER_SYM(register, spapr, __VA_ARGS__))
 
@@ -4733,14 +4733,25 @@ static void spapr_machine_latest_class_options(MachineClass *mc)
     DEFINE_SPAPR_MACHINE_IMPL(false, major, minor)
 
 /*
- * pseries-9.2
+ * pseries-10.0
  */
-static void spapr_machine_9_2_class_options(MachineClass *mc)
+static void spapr_machine_10_0_class_options(MachineClass *mc)
 {
     /* Defaults for the latest behaviour inherited from the base class */
 }
 
-DEFINE_SPAPR_MACHINE_AS_LATEST(9, 2);
+DEFINE_SPAPR_MACHINE_AS_LATEST(10, 0);
+
+/*
+ * pseries-9.2
+ */
+static void spapr_machine_9_2_class_options(MachineClass *mc)
+{
+    spapr_machine_10_0_class_options(mc);
+    compat_props_add(mc->compat_props, hw_compat_9_2, hw_compat_9_2_len);
+}
+
+DEFINE_SPAPR_MACHINE(9, 2);
 
 /*
  * pseries-9.1

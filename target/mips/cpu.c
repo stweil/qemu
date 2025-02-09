@@ -27,8 +27,8 @@
 #include "internal.h"
 #include "kvm_mips.h"
 #include "qemu/module.h"
-#include "sysemu/kvm.h"
-#include "sysemu/qtest.h"
+#include "system/kvm.h"
+#include "system/qtest.h"
 #include "exec/exec-all.h"
 #include "hw/qdev-properties.h"
 #include "hw/qdev-clock.h"
@@ -539,19 +539,15 @@ static const struct SysemuCPUOps mips_sysemu_ops = {
 };
 #endif
 
-static Property mips_cpu_properties[] = {
+static const Property mips_cpu_properties[] = {
     DEFINE_PROP_BOOL("big-endian", MIPSCPU, is_big_endian, TARGET_BIG_ENDIAN),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 #ifdef CONFIG_TCG
 #include "hw/core/tcg-cpu-ops.h"
-/*
- * NB: cannot be const, as some elements are changed for specific
- * mips hardware (see hw/mips/jazz.c).
- */
 static const TCGCPUOps mips_tcg_ops = {
     .initialize = mips_tcg_init,
+    .translate_code = mips_translate_code,
     .synchronize_from_tb = mips_cpu_synchronize_from_tb,
     .restore_state_to_opc = mips_restore_state_to_opc,
 
@@ -626,7 +622,7 @@ static void mips_register_cpudef_type(const struct mips_def_t *def)
         .class_data = (void *)def,
     };
 
-    type_register(&ti);
+    type_register_static(&ti);
     g_free(typename);
 }
 
@@ -648,7 +644,7 @@ MIPSCPU *mips_cpu_create_with_clock(const char *cpu_type, Clock *cpu_refclk,
 {
     DeviceState *cpu;
 
-    cpu = DEVICE(object_new(cpu_type));
+    cpu = qdev_new(cpu_type);
     qdev_connect_clock_in(cpu, "clk-in", cpu_refclk);
     object_property_set_bool(OBJECT(cpu), "big-endian", is_big_endian,
                              &error_abort);

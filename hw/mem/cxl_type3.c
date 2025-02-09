@@ -25,8 +25,8 @@
 #include "qemu/range.h"
 #include "qemu/rcu.h"
 #include "qemu/guest-random.h"
-#include "sysemu/hostmem.h"
-#include "sysemu/numa.h"
+#include "system/hostmem.h"
+#include "system/numa.h"
 #include "hw/cxl/cxl.h"
 #include "hw/pci/msix.h"
 
@@ -843,7 +843,7 @@ static void ct3_realize(PCIDevice *pci_dev, Error **errp)
     ComponentRegisters *regs = &cxl_cstate->crb;
     MemoryRegion *mr = &regs->component_registers;
     uint8_t *pci_conf = pci_dev->config;
-    unsigned short msix_num = 6;
+    unsigned short msix_num = 10;
     int i, rc;
     uint16_t count;
 
@@ -1216,7 +1216,7 @@ static void ct3d_reset(DeviceState *dev)
 
 }
 
-static Property ct3_props[] = {
+static const Property ct3_props[] = {
     DEFINE_PROP_LINK("memdev", CXLType3Dev, hostmem, TYPE_MEMORY_BACKEND,
                      HostMemoryBackend *), /* for backward compatibility */
     DEFINE_PROP_LINK("persistent-memdev", CXLType3Dev, hostpmem,
@@ -1234,7 +1234,6 @@ static Property ct3_props[] = {
                                 speed, PCIE_LINK_SPEED_32),
     DEFINE_PROP_PCIE_LINK_WIDTH("x-width", CXLType3Dev,
                                 width, PCIE_LINK_WIDTH_16),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static uint64_t get_lsa_size(CXLType3Dev *ct3d)

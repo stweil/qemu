@@ -33,12 +33,12 @@
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "hw/loader.h"
-#include "sysemu/kvm.h"
+#include "system/kvm.h"
 #include "hw/virtio/virtio-pci.h"
 #include "qemu/range.h"
 #include "hw/virtio/virtio-bus.h"
 #include "qapi/visitor.h"
-#include "sysemu/replay.h"
+#include "system/replay.h"
 #include "trace.h"
 
 #define VIRTIO_PCI_REGION_SIZE(dev)     VIRTIO_PCI_CONFIG_OFF(msix_present(dev))
@@ -2349,7 +2349,7 @@ static void virtio_pci_bus_reset_hold(Object *obj, ResetType type)
     }
 }
 
-static Property virtio_pci_properties[] = {
+static const Property virtio_pci_properties[] = {
     DEFINE_PROP_BIT("virtio-pci-bus-master-bug-migration", VirtIOPCIProxy, flags,
                     VIRTIO_PCI_FLAG_BUS_MASTER_BUG_MIGRATION_BIT, false),
     DEFINE_PROP_BIT("migrate-extra", VirtIOPCIProxy, flags,
@@ -2378,7 +2378,6 @@ static Property virtio_pci_properties[] = {
                     VIRTIO_PCI_FLAG_INIT_FLR_BIT, true),
     DEFINE_PROP_BIT("aer", VirtIOPCIProxy, flags,
                     VIRTIO_PCI_FLAG_AER_BIT, false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void virtio_pci_dc_realize(DeviceState *qdev, Error **errp)
@@ -2431,11 +2430,10 @@ static const TypeInfo virtio_pci_info = {
     .abstract      = true,
 };
 
-static Property virtio_pci_generic_properties[] = {
+static const Property virtio_pci_generic_properties[] = {
     DEFINE_PROP_ON_OFF_AUTO("disable-legacy", VirtIOPCIProxy, disable_legacy,
                             ON_OFF_AUTO_AUTO),
     DEFINE_PROP_BOOL("disable-modern", VirtIOPCIProxy, disable_modern, false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void virtio_pci_base_class_init(ObjectClass *klass, void *data)
@@ -2511,9 +2509,9 @@ void virtio_pci_types_register(const VirtioPCIDeviceTypeInfo *t)
         base_type_info.class_data = (void *)t;
     }
 
-    type_register(&base_type_info);
+    type_register_static(&base_type_info);
     if (generic_type_info.name) {
-        type_register(&generic_type_info);
+        type_register_static(&generic_type_info);
     }
 
     if (t->non_transitional_name) {
@@ -2527,7 +2525,7 @@ void virtio_pci_types_register(const VirtioPCIDeviceTypeInfo *t)
                 { }
             },
         };
-        type_register(&non_transitional_type_info);
+        type_register_static(&non_transitional_type_info);
     }
 
     if (t->transitional_name) {
@@ -2544,7 +2542,7 @@ void virtio_pci_types_register(const VirtioPCIDeviceTypeInfo *t)
                 { }
             },
         };
-        type_register(&transitional_type_info);
+        type_register_static(&transitional_type_info);
     }
     g_free(base_name);
 }

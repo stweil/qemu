@@ -18,7 +18,7 @@
 #include "hw/i2c/i2c.h"         /* i2c_create_slave */
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "sysemu/blockdev.h"    /* drive_get */
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 #include "net/net.h"
 
 #define BIOS_FILENAME "smdk2410.bin"

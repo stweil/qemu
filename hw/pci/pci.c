@@ -35,9 +35,9 @@
 #include "migration/qemu-file-types.h"
 #include "migration/vmstate.h"
 #include "net/net.h"
-#include "sysemu/numa.h"
-#include "sysemu/runstate.h"
-#include "sysemu/sysemu.h"
+#include "system/numa.h"
+#include "system/runstate.h"
+#include "system/system.h"
 #include "hw/loader.h"
 #include "qemu/error-report.h"
 #include "qemu/range.h"
@@ -46,6 +46,7 @@
 #include "hw/pci/msix.h"
 #include "hw/hotplug.h"
 #include "hw/boards.h"
+#include "hw/nvram/fw_cfg.h"
 #include "qapi/error.h"
 #include "qemu/cutils.h"
 #include "pci-internal.h"
@@ -80,11 +81,11 @@ static const PropertyInfo prop_pci_busnr = {
     .get = prop_pci_busnr_get,
 };
 
-static Property pci_props[] = {
+static const Property pci_props[] = {
     DEFINE_PROP_PCI_DEVFN("addr", PCIDevice, devfn, -1),
     DEFINE_PROP_STRING("romfile", PCIDevice, romfile),
     DEFINE_PROP_UINT32("romsize", PCIDevice, romsize, UINT32_MAX),
-    DEFINE_PROP_UINT32("rombar",  PCIDevice, rom_bar, 1),
+    DEFINE_PROP_INT32("rombar",  PCIDevice, rom_bar, -1),
     DEFINE_PROP_BIT("multifunction", PCIDevice, cap_present,
                     QEMU_PCI_CAP_MULTIFUNCTION_BITNR, false),
     DEFINE_PROP_BIT("x-pcie-lnksta-dllla", PCIDevice, cap_present,
@@ -103,7 +104,6 @@ static Property pci_props[] = {
     DEFINE_PROP_BIT("x-pcie-ext-tag", PCIDevice, cap_present,
                     QEMU_PCIE_EXT_TAG_BITNR, true),
     { .name = "busnr", .info = &prop_pci_busnr },
-    DEFINE_PROP_END_OF_LIST()
 };
 
 static const VMStateDescription vmstate_pcibus = {
@@ -216,11 +216,57 @@ static uint16_t pcibus_numa_node(PCIBus *bus)
     return NUMA_NODE_UNASSIGNED;
 }
 
+bool pci_bus_add_fw_cfg_extra_pci_roots(FWCfgState *fw_cfg,
+                                        PCIBus *bus,
+                                        Error **errp)
+{
+    Object *obj;
+
+    if (!bus) {
+        return true;
+    }
+    obj = OBJECT(bus);
+
+    return fw_cfg_add_file_from_generator(fw_cfg, obj->parent,
+                                          object_get_canonical_path_component(obj),
+                                          "etc/extra-pci-roots", errp);
+}
+
+static GByteArray *pci_bus_fw_cfg_gen_data(Object *obj, Error **errp)
+{
+    PCIBus *bus = PCI_BUS(obj);
+    GByteArray *byte_array;
+    uint64_t extra_hosts = 0;
+
+    if (!bus) {
+        return NULL;
+    }
+
+    QLIST_FOREACH(bus, &bus->child, sibling) {
+        /* look for expander root buses */
+        if (pci_bus_is_root(bus)) {
+            extra_hosts++;
+        }
+    }
+
+    if (!extra_hosts) {
+        return NULL;
+    }
+    extra_hosts = cpu_to_le64(extra_hosts);
+
+    byte_array = g_byte_array_new();
+    g_byte_array_append(byte_array,
+                        (const void *)&extra_hosts, sizeof(extra_hosts));
+
+    return byte_array;
+}
+
 static void pci_bus_class_init(ObjectClass *klass, void *data)
 {
     BusClass *k = BUS_CLASS(klass);
     PCIBusClass *pbc = PCI_BUS_CLASS(klass);
     ResettableClass *rc = RESETTABLE_CLASS(klass);
+    FWCfgDataGeneratorClass *fwgc = FW_CFG_DATA_GENERATOR_CLASS(klass);
 
     k->print_dev = pcibus_dev_print;
     k->get_dev_path = pcibus_get_dev_path;
@@ -232,6 +278,8 @@ static void pci_bus_class_init(ObjectClass *klass, void *data)
 
     pbc->bus_num = pcibus_num;
     pbc->numa_node = pcibus_numa_node;
+
+    fwgc->get_data = pci_bus_fw_cfg_gen_data;
 }
 
 static const TypeInfo pci_bus_info = {
@@ -240,6 +288,10 @@ static const TypeInfo pci_bus_info = {
     .instance_size = sizeof(PCIBus),
     .class_size = sizeof(PCIBusClass),
     .class_init = pci_bus_class_init,
+    .interfaces = (InterfaceInfo[]) {
+        { TYPE_FW_CFG_DATA_GENERATOR_INTERFACE },
+        { }
+    }
 };
 
 static const TypeInfo cxl_interface_info = {
@@ -1546,7 +1598,7 @@ static void pci_update_mappings(PCIDevice *d)
             continue;
 
         new_addr = pci_bar_address(d, i, r->type, r->size);
-        if (!d->has_power) {
+        if (!d->enabled) {
             new_addr = PCI_BAR_UNMAPPED;
         }
 
@@ -1634,7 +1686,7 @@ void pci_default_write_config(PCIDevice *d, uint32_t addr, uint32_t val_in, int 
         pci_update_irq_disabled(d, was_irq_disabled);
         memory_region_set_enabled(&d->bus_master_enable_region,
                                   (pci_get_word(d->config + PCI_COMMAND)
-                                   & PCI_COMMAND_MASTER) && d->has_power);
+                                   & PCI_COMMAND_MASTER) && d->enabled);
     }
 
     msi_write_config(d, addr, val_in, l);
@@ -2911,16 +2963,21 @@ MSIMessage pci_get_msi_message(PCIDevice *dev, int vector)
 
 void pci_set_power(PCIDevice *d, bool state)
 {
-    if (d->has_power == state) {
+    pci_set_enabled(d, state);
+}
+
+void pci_set_enabled(PCIDevice *d, bool state)
+{
+    if (d->enabled == state) {
         return;
     }
 
-    d->has_power = state;
+    d->enabled = state;
     pci_update_mappings(d);
     memory_region_set_enabled(&d->bus_master_enable_region,
                               (pci_get_word(d->config + PCI_COMMAND)
-                               & PCI_COMMAND_MASTER) && d->has_power);
-    if (!d->has_power) {
+                               & PCI_COMMAND_MASTER) && d->enabled);
+    if (!d->enabled) {
         pci_device_reset(d);
     }
 }

@@ -1,7 +1,13 @@
-_qemu_api_cfg = ['--cfg', 'MESON']
+_qemu_api_cfg = run_command(rustc_args,
+  '--config-headers', config_host_h, '--features', files('Cargo.toml'),
+  capture: true, check: true).stdout().strip().splitlines()
+
 # _qemu_api_cfg += ['--cfg', 'feature="allocator"']
 if rustc.version().version_compare('>=1.77.0')
   _qemu_api_cfg += ['--cfg', 'has_offset_of']
+endif
+if get_option('debug_mutex')
+  _qemu_api_cfg += ['--cfg', 'feature="debug_cell"']
 endif
 
 _qemu_api_rs = static_library(
@@ -9,10 +15,19 @@ _qemu_api_rs = static_library(
   structured_sources(
     [
       'src/lib.rs',
+      'src/assertions.rs',
+      'src/bindings.rs',
+      'src/bitops.rs',
+      'src/callbacks.rs',
+      'src/cell.rs',
       'src/c_str.rs',
-      'src/definitions.rs',
-      'src/device_class.rs',
+      'src/irq.rs',
+      'src/module.rs',
       'src/offset_of.rs',
+      'src/prelude.rs',
+      'src/qdev.rs',
+      'src/qom.rs',
+      'src/sysbus.rs',
       'src/vmstate.rs',
       'src/zeroable.rs',
     ],
@@ -47,7 +62,7 @@ test('rust-qemu-api-integration',
         dependencies: [qemu_api, qemu_api_macros],
         link_whole: [rust_qemu_api_objs, libqemuutil]),
     args: [
-        '--test',
+        '--test', '--test-threads', '1',
         '--format', 'pretty',
     ],
     protocol: 'rust',

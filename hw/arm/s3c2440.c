@@ -15,7 +15,7 @@
 #include "hw/sysbus.h"
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "qapi/error.h"          /* error_abort */
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 #include "exec/address-spaces.h" /* get_system_memory */
 
 #include "s3c2440.h"

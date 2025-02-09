@@ -3,6 +3,8 @@ project('qemu', ['c'], meson_version: '>=1.5.0',
                           'b_staticpic=false', 'stdsplit=false', 'optimization=2', 'b_pie=true'],
         version: files('VERSION'))
 
+meson.add_devenv({ 'MESON_BUILD_ROOT' : meson.project_build_root() })
+
 add_test_setup('quick', exclude_suites: ['slow', 'thorough'], is_default: true)
 add_test_setup('slow', exclude_suites: ['thorough'], env: ['G_TEST_SLOW=1', 'SPEED=slow'])
 add_test_setup('thorough', env: ['G_TEST_SLOW=1', 'SPEED=thorough'])
@@ -118,7 +120,28 @@ if have_rust
 endif
 
 if have_rust
+  rustc_args = [find_program('scripts/rust/rustc_args.py'),
+    '--rustc-version', rustc.version(),
+    '--workspace', meson.project_source_root() / 'rust']
+  if get_option('strict_rust_lints')
+    rustc_args += ['--strict-lints']
+  endif
+
   rustfmt = find_program('rustfmt', required: false)
+
+  rustc_lint_args = run_command(rustc_args, '--lints',
+     capture: true, check: true).stdout().strip().splitlines()
+
+  # Apart from procedural macros, our Rust executables will often link
+  # with C code, so include all the libraries that C code needs.  This
+  # is safe; https://github.com/rust-lang/rust/pull/54675 says that
+  # passing -nodefaultlibs to the linker "was more ideological to
+  # start with than anything".
+  add_project_arguments(rustc_lint_args +
+      ['--cfg', 'MESON', '-C', 'default-linker-libraries'],
+      native: false, language: 'rust')
+  add_project_arguments(rustc_lint_args + ['--cfg', 'MESON'],
+      native: true, language: 'rust')
 endif
 
 dtrace = not_found
@@ -355,9 +378,9 @@ elif host_os == 'sunos'
 elif host_os == 'haiku'
   qemu_common_flags += ['-DB_USE_POSITIVE_POSIX_ERRORS', '-D_BSD_SOURCE', '-fPIC']
 elif host_os == 'windows'
-  if not compiler.compiles('struct x { int y; } __attribute__((gcc_struct));',
-                           args: '-Werror')
-    error('Your compiler does not support __attribute__((gcc_struct)) - please use GCC instead of Clang')
+  # plugins use delaylib, and clang needs to be used with lld to make it work.
+  if compiler.get_id() == 'clang' and compiler.get_linker_id() != 'ld.lld'
+    error('On windows, you need to use lld with clang - use msys2 clang64/clangarm64 env')
   endif
 endif
 
@@ -805,6 +828,8 @@ socket = []
 version_res = []
 coref = []
 iokit = []
+pvg = not_found
+metal = []
 emulator_link_args = []
 midl = not_found
 widl = not_found
@@ -826,6 +851,8 @@ elif host_os == 'darwin'
   coref = dependency('appleframeworks', modules: 'CoreFoundation')
   iokit = dependency('appleframeworks', modules: 'IOKit', required: false)
   host_dsosuf = '.dylib'
+  pvg = dependency('appleframeworks', modules: 'ParavirtualizedGraphics')
+  metal = dependency('appleframeworks', modules: 'Metal')
 elif host_os == 'sunos'
   socket = [cc.find_library('socket'),
             cc.find_library('nsl'),
@@ -1133,7 +1160,7 @@ endif
 
 libnfs = not_found
 if not get_option('libnfs').auto() or have_block
-  libnfs = dependency('libnfs', version: '>=1.9.3',
+  libnfs = dependency('libnfs', version: ['>=1.9.3', '<6.0.0'],
                       required: get_option('libnfs'),
                       method: 'pkg-config')
 endif
@@ -2630,6 +2657,7 @@ config_host_data.set('CONFIG_SETNS', cc.has_function('setns') and cc.has_functio
 config_host_data.set('CONFIG_SYNCFS', cc.has_function('syncfs'))
 config_host_data.set('CONFIG_SYNC_FILE_RANGE', cc.has_function('sync_file_range'))
 config_host_data.set('CONFIG_TIMERFD', cc.has_function('timerfd_create'))
+config_host_data.set('CONFIG_GETLOADAVG', cc.has_function('getloadavg'))
 config_host_data.set('HAVE_COPY_FILE_RANGE', cc.has_function('copy_file_range'))
 config_host_data.set('HAVE_GETIFADDRS', cc.has_function('getifaddrs'))
 config_host_data.set('HAVE_GLIB_WITH_SLICE_ALLOCATOR', glib_has_gslice)
@@ -3408,36 +3436,8 @@ endif
 # Generated sources #
 #####################
 
-genh += configure_file(output: 'config-host.h', configuration: config_host_data)
-
-if have_rust
-  rustc_args = run_command(
-    find_program('scripts/rust/rustc_args.py'),
-    '--config-headers', meson.project_build_root() / 'config-host.h',
-    capture : true,
-    check: true).stdout().strip().split()
-
-  # Prohibit code that is forbidden in Rust 2024
-  rustc_args += ['-D', 'unsafe_op_in_unsafe_fn']
-
-  # Occasionally, we may need to silence warnings and clippy lints that
-  # were only introduced in newer Rust compiler versions.  Do not croak
-  # in that case; a CI job with rust_strict_lints == true ensures that
-  # we do not have misspelled allow() attributes.
-  if not get_option('strict_rust_lints')
-    rustc_args += ['-A', 'unknown_lints']
-  endif
-
-  # Apart from procedural macros, our Rust executables will often link
-  # with C code, so include all the libraries that C code needs.  This
-  # is safe; https://github.com/rust-lang/rust/pull/54675 says that
-  # passing -nodefaultlibs to the linker "was more ideological to
-  # start with than anything".
-  add_project_arguments(rustc_args + ['-C', 'default-linker-libraries'],
-      native: false, language: 'rust')
-
-  add_project_arguments(rustc_args, native: true, language: 'rust')
-endif
+config_host_h = configure_file(output: 'config-host.h', configuration: config_host_data)
+genh += config_host_h
 
 hxtool = find_program('scripts/hxtool')
 shaderinclude = find_program('scripts/shaderinclude.py')
@@ -3707,9 +3707,13 @@ libqemuutil = static_library('qemuutil',
                              build_by_default: false,
                              sources: util_ss.sources() + stub_ss.sources() + genh,
                              dependencies: [util_ss.dependencies(), libm, threads, glib, socket, malloc])
+qemuutil_deps = [event_loop_base]
+if host_os != 'windows'
+  qemuutil_deps += [rt]
+endif
 qemuutil = declare_dependency(link_with: libqemuutil,
                               sources: genh + version_res,
-                              dependencies: [event_loop_base])
+                              dependencies: qemuutil_deps)
 
 if have_system or have_user
   decodetree = generator(find_program('scripts/decodetree.py'),
@@ -4061,6 +4065,9 @@ if have_rust
       bindgen_args += ['--formatter', 'none']
     endif
   endif
+  if bindgen.version().version_compare('>=0.66.0')
+    bindgen_args += ['--rust-target', '1.59']
+  endif
   if bindgen.version().version_compare('<0.61.0')
     # default in 0.61+
     bindgen_args += ['--size_t-is-usize']
@@ -4100,7 +4107,7 @@ if have_rust
   bindings_rs = rust.bindgen(
     input: 'rust/wrapper.h',
     dependencies: common_ss.all_dependencies(),
-    output: 'bindings.rs',
+    output: 'bindings.inc.rs',
     include_directories: include_directories('.', 'include'),
     bindgen_version: ['>=0.60.0'],
     args: bindgen_args,
@@ -4126,7 +4133,7 @@ foreach target : target_dirs
   arch_deps = []
   c_args = ['-DCOMPILING_PER_TARGET',
             '-DCONFIG_TARGET="@0@-config-target.h"'.format(target),
-            '-DCONFIG_DEVICES="@0@-config-devices.h"'.format(target)]
+  ]
   link_args = emulator_link_args
 
   target_inc = [include_directories('target' / config_target['TARGET_BASE_ARCH'])]
@@ -4146,6 +4153,7 @@ foreach target : target_dirs
       arch_deps += hw.dependencies()
     endif
 
+    c_args += ['-DCONFIG_DEVICES="@0@-config-devices.h"'.format(target)]
     arch_srcs += config_devices_h[target]
     link_args += ['@block.syms', '@qemu.syms']
   else
@@ -4367,7 +4375,7 @@ if have_tools
   subdir('contrib/elf2dmp')
 
   executable('qemu-edid', files('qemu-edid.c', 'hw/display/edid-generate.c'),
-             dependencies: qemuutil,
+             dependencies: [qemuutil, rt],
              install: true)
 
   if have_vhost_user

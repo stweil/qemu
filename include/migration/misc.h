@@ -53,8 +53,6 @@ void dump_vmstate_json_to_file(FILE *out_fp);
 void migration_object_init(void);
 void migration_shutdown(void);
 
-bool migration_is_active(void);
-bool migration_is_device(void);
 bool migration_is_running(void);
 bool migration_thread_is_self(void);
 
@@ -105,5 +103,16 @@ bool migration_incoming_postcopy_advised(void);
 
 /* True if background snapshot is active */
 bool migration_in_bg_snapshot(void);
+
+/* Wrapper for block active/inactive operations */
+bool migration_block_activate(Error **errp);
+bool migration_block_inactivate(void);
+
+/* True if @uri starts with a syntactically valid URI prefix */
+bool migrate_is_uri(const char *uri);
+
+/* Parse @uri and return @channel, returning true on success */
+bool migrate_uri_parse(const char *uri, MigrationChannel **channel,
+                       Error **errp);
 
 #endif

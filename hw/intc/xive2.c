@@ -12,8 +12,8 @@
 #include "qemu/module.h"
 #include "qapi/error.h"
 #include "target/ppc/cpu.h"
-#include "sysemu/cpus.h"
-#include "sysemu/dma.h"
+#include "system/cpus.h"
+#include "system/dma.h"
 #include "hw/qdev-properties.h"
 #include "hw/ppc/xive.h"
 #include "hw/ppc/xive2.h"
@@ -1028,10 +1028,9 @@ void xive2_router_notify(XiveNotifier *xn, uint32_t lisn, bool pq_checked)
                              xive_get_field64(EAS2_END_DATA,  eas.w));
 }
 
-static Property xive2_router_properties[] = {
+static const Property xive2_router_properties[] = {
     DEFINE_PROP_LINK("xive-fabric", Xive2Router, xfb,
                      TYPE_XIVE_FABRIC, XiveFabric *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void xive2_router_class_init(ObjectClass *klass, void *data)
@@ -1242,12 +1241,11 @@ static void xive2_end_source_realize(DeviceState *dev, Error **errp)
                           (1ull << (xsrc->esb_shift + 1)) * xsrc->nr_ends);
 }
 
-static Property xive2_end_source_properties[] = {
+static const Property xive2_end_source_properties[] = {
     DEFINE_PROP_UINT32("nr-ends", Xive2EndSource, nr_ends, 0),
     DEFINE_PROP_UINT32("shift", Xive2EndSource, esb_shift, XIVE_ESB_64K),
     DEFINE_PROP_LINK("xive", Xive2EndSource, xrtr, TYPE_XIVE2_ROUTER,
                      Xive2Router *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void xive2_end_source_class_init(ObjectClass *klass, void *data)

@@ -17,7 +17,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/timer.h"
-#include "sysemu.h"
+#include "system/system.h"
 
 struct QEMUBH {
     QEMUBHFunc *cb;

@@ -81,11 +81,10 @@ const PropertyInfo ccw_loadparm = {
     .set = ccw_device_set_loadparm,
 };
 
-static Property ccw_device_properties[] = {
+static const Property ccw_device_properties[] = {
     DEFINE_PROP_CSS_DEV_ID("devno", CcwDevice, devno),
     DEFINE_PROP_CSS_DEV_ID_RO("dev_id", CcwDevice, dev_id),
     DEFINE_PROP_CSS_DEV_ID_RO("subch_id", CcwDevice, subch_id),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void ccw_device_reset_hold(Object *obj, ResetType type)

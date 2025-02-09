@@ -28,7 +28,7 @@
 #include "net/net.h"
 #include "sysemu/blockdev.h"    /* drive_get */
 #include "sysemu/dma.h"         /* QEMUSGList (in ide/internal.h) */
-#include "sysemu/sysemu.h"
+#include "system/system.h"
 #include "chardev/char.h"        /* qemu_chr_new */
 #include "exec/address-spaces.h" /* get_system_memory */
 

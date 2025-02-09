@@ -33,7 +33,7 @@
 #include "qapi/error.h"
 #include "block/block_int.h"
 #include "block/qdict.h"
-#include "sysemu/block-backend.h"
+#include "system/block-backend.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
 #include "qapi/qmp/qdict.h"
@@ -1296,6 +1296,10 @@ static int parallels_open(BlockDriverState *bs, QDict *options, int flags,
     s->bat_size = le32_to_cpu(ph.bat_entries);
     if (s->bat_size > INT_MAX / sizeof(uint32_t)) {
         error_setg(errp, "Catalog too large");
+        return -EFBIG;
+    }
+    if (le64_to_cpu(ph.ext_off) >= (INT64_MAX >> BDRV_SECTOR_BITS)) {
+        error_setg(errp, "Invalid image: Too big offset");
         return -EFBIG;
     }
 

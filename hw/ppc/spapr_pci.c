@@ -45,10 +45,10 @@
 #include "hw/pci/pci_ids.h"
 #include "hw/ppc/spapr_drc.h"
 #include "hw/qdev-properties.h"
-#include "sysemu/device_tree.h"
-#include "sysemu/kvm.h"
-#include "sysemu/hostmem.h"
-#include "sysemu/numa.h"
+#include "system/device_tree.h"
+#include "system/kvm.h"
+#include "system/hostmem.h"
+#include "system/numa.h"
 #include "hw/ppc/spapr_numa.h"
 #include "qemu/log.h"
 
@@ -2033,7 +2033,7 @@ static void spapr_phb_reset(DeviceState *qdev)
     g_hash_table_remove_all(sphb->msi);
 }
 
-static Property spapr_phb_properties[] = {
+static const Property spapr_phb_properties[] = {
     DEFINE_PROP_UINT32("index", SpaprPhbState, index, -1),
     DEFINE_PROP_UINT64("mem_win_size", SpaprPhbState, mem_win_size,
                        SPAPR_PCI_MEM32_WIN_SIZE),
@@ -2055,7 +2055,6 @@ static Property spapr_phb_properties[] = {
                      pcie_ecs, true),
     DEFINE_PROP_BOOL("pre-5.1-associativity", SpaprPhbState,
                      pre_5_1_assoc, false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static const VMStateDescription vmstate_spapr_pci_lsi = {
