@@ -70,6 +70,7 @@ blobs = [
   's390-ccw.img',
   'slof.bin',
   'skiboot.lid',
+  'pnv-pnor.bin',
   'palcode-clipper',
   'u-boot.e500',
   'u-boot-sam460-20100605.bin',
@@ -80,6 +81,7 @@ blobs = [
   'opensbi-riscv32-generic-fw_dynamic.bin',
   'opensbi-riscv64-generic-fw_dynamic.bin',
   'npcm7xx_bootrom.bin',
+  'npcm8xx_bootrom.bin',
   'vof.bin',
   'vof-nvram.bin',
 ]

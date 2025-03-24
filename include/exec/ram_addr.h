@@ -23,6 +23,7 @@
 #include "cpu.h"
 #include "system/xen.h"
 #include "system/tcg.h"
+#include "exec/cputlb.h"
 #include "exec/ramlist.h"
 #include "exec/ramblock.h"
 #include "exec/exec-all.h"
@@ -100,9 +101,6 @@ static inline unsigned long int ramblock_recv_bitmap_offset(void *host_addr,
 }
 
 bool ramblock_is_pmem(RAMBlock *rb);
-
-long qemu_minrampagesize(void);
-long qemu_maxrampagesize(void);
 
 /**
  * qemu_ram_alloc_from_file,

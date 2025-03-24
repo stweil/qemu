@@ -75,6 +75,12 @@ static inline void set_floatx80_rounding_precision(FloatX80RoundPrec val,
     status->floatx80_rounding_precision = val;
 }
 
+static inline void set_floatx80_behaviour(FloatX80Behaviour b,
+                                          float_status *status)
+{
+    status->floatx80_behaviour = b;
+}
+
 static inline void set_float_2nan_prop_rule(Float2NaNPropRule rule,
                                             float_status *status)
 {
@@ -107,6 +113,12 @@ static inline void set_flush_to_zero(bool val, float_status *status)
 static inline void set_flush_inputs_to_zero(bool val, float_status *status)
 {
     status->flush_inputs_to_zero = val;
+}
+
+static inline void set_float_ftz_detection(FloatFTZDetection d,
+                                           float_status *status)
+{
+    status->ftz_detection = d;
 }
 
 static inline void set_default_nan_mode(bool val, float_status *status)
@@ -145,6 +157,12 @@ get_floatx80_rounding_precision(const float_status *status)
     return status->floatx80_rounding_precision;
 }
 
+static inline FloatX80Behaviour
+get_floatx80_behaviour(const float_status *status)
+{
+    return status->floatx80_behaviour;
+}
+
 static inline Float2NaNPropRule
 get_float_2nan_prop_rule(const float_status *status)
 {
@@ -181,6 +199,11 @@ static inline bool get_flush_inputs_to_zero(const float_status *status)
 static inline bool get_default_nan_mode(const float_status *status)
 {
     return status->default_nan_mode;
+}
+
+static inline FloatFTZDetection get_float_ftz_detection(const float_status *status)
+{
+    return status->ftz_detection;
 }
 
 #endif /* SOFTFLOAT_HELPERS_H */

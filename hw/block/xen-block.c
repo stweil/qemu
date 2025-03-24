@@ -16,8 +16,8 @@
 #include "qapi/qapi-visit-block-core.h"
 #include "qapi/qobject-input-visitor.h"
 #include "qapi/visitor.h"
-#include "qapi/qmp/qdict.h"
-#include "qapi/qmp/qstring.h"
+#include "qobject/qdict.h"
+#include "qobject/qstring.h"
 #include "qom/object_interfaces.h"
 #include "hw/block/xen_blkif.h"
 #include "hw/qdev-properties.h"
@@ -408,6 +408,8 @@ static void xen_block_realize(XenDevice *xendev, Error **errp)
     }
 
     xen_device_backend_printf(xendev, "info", "%u", blockdev->info);
+    xen_device_backend_printf(xendev, "mode",
+                              (blockdev->info & VDISK_READONLY) ? "r" : "w");
 
     xen_device_frontend_printf(xendev, "virtual-device", "%lu",
                                vdev->number);
@@ -661,8 +663,8 @@ invalid:
  * https://xenbits.xen.org/docs/unstable/man/xen-vbd-interface.7.html
  */
 static const PropertyInfo xen_block_prop_vdev = {
-    .name  = "str",
-    .description = "Virtual Disk specifier: d*p*/xvd*/hd*/sd*",
+    .type  = "str",
+    .description = "Virtual Disk specifier (d*p*/xvd*/hd*/sd*)",
     .get = xen_block_get_vdev,
     .set = xen_block_set_vdev,
 };

@@ -25,8 +25,6 @@ enum {
     QEMU_ARCH_LOONGARCH = (1 << 23),
 };
 
-extern const uint32_t arch_type;
-
-void qemu_init_arch_modules(void);
+bool qemu_arch_available(unsigned qemu_arch_mask);
 
 #endif

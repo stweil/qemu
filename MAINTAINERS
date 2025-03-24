@@ -152,10 +152,7 @@ Overall TCG CPUs
 M: Richard Henderson <richard.henderson@linaro.org>
 R: Paolo Bonzini <pbonzini@redhat.com>
 S: Maintained
-F: system/cpus.c
 F: system/watchpoint.c
-F: cpu-common.c
-F: cpu-target.c
 F: page-vary-target.c
 F: page-vary-common.c
 F: accel/tcg/
@@ -165,17 +162,13 @@ F: util/cacheflush.c
 F: scripts/decodetree.py
 F: docs/devel/decodetree.rst
 F: docs/devel/tcg*
-F: include/exec/cpu*.h
-F: include/exec/exec-all.h
 F: include/exec/tb-flush.h
-F: include/exec/target_long.h
 F: include/exec/helper*.h
 F: include/exec/helper*.h.inc
 F: include/exec/helper-info.c.inc
 F: include/exec/page-protection.h
-F: include/system/cpus.h
 F: include/system/tcg.h
-F: include/hw/core/tcg-cpu-ops.h
+F: include/accel/tcg/cpu-ops.h
 F: host/include/*/host/cpuinfo.h
 F: util/cpuinfo-*.c
 F: include/tcg/
@@ -319,7 +312,6 @@ F: tests/functional/test_ppc_74xx.py
 RISC-V TCG CPUs
 M: Palmer Dabbelt <palmer@dabbelt.com>
 M: Alistair Francis <alistair.francis@wdc.com>
-M: Bin Meng <bmeng.cn@gmail.com>
 R: Weiwei Li <liwei1518@gmail.com>
 R: Daniel Henrique Barboza <dbarboza@ventanamicro.com>
 R: Liu Zhiwei <zhiwei_liu@linux.alibaba.com>
@@ -498,12 +490,19 @@ Overall
 M: Richard Henderson <richard.henderson@linaro.org>
 R: Paolo Bonzini <pbonzini@redhat.com>
 S: Maintained
+F: include/exec/cpu*.h
+F: include/exec/exec-all.h
+F: include/exec/target_long.h
 F: include/qemu/accel.h
 F: include/system/accel-*.h
-F: include/hw/core/accel-cpu.h
+F: include/system/cpus.h
+F: include/accel/accel-cpu-target.h
 F: accel/accel-*.c
 F: accel/Makefile.objs
 F: accel/stubs/Makefile.objs
+F: cpu-common.c
+F: cpu-target.c
+F: system/cpus.c
 
 Apple Silicon HVF CPUs
 M: Alexander Graf <agraf@csgraf.de>
@@ -787,7 +786,7 @@ F: docs/system/arm/kzm.rst
 Integrator CP
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/arm/integratorcp.c
 F: hw/misc/arm_integrator_debug.c
 F: include/hw/misc/arm_integrator_debug.h
@@ -819,6 +818,21 @@ F: include/hw/misc/imx7_*.h
 F: hw/pci-host/designware.c
 F: include/hw/pci-host/designware.h
 F: docs/system/arm/mcimx7d-sabre.rst
+
+MCIMX8MP-EVK / i.MX8MP
+M: Bernhard Beschow <shentey@gmail.com>
+L: qemu-arm@nongnu.org
+S: Maintained
+F: hw/arm/imx8mp-evk.c
+F: hw/arm/fsl-imx8mp.c
+F: hw/misc/imx8mp_*.c
+F: hw/pci-host/fsl_imx8m_phy.c
+F: hw/rtc/rs5c372.c
+F: include/hw/arm/fsl-imx8mp.h
+F: include/hw/misc/imx8mp_*.h
+F: include/hw/pci-host/fsl_imx8m_phy.h
+F: docs/system/arm/imx8mp-evk.rst
+F: tests/qtest/rs5c372-test.c
 
 MPS2 / MPS3
 M: Peter Maydell <peter.maydell@linaro.org>
@@ -853,7 +867,7 @@ F: docs/system/arm/mps2.rst
 Musca
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/arm/musca.c
 F: docs/system/arm/musca.rst
 
@@ -878,6 +892,7 @@ F: include/hw/*/npcm*
 F: tests/qtest/npcm*
 F: tests/qtest/adm1266-test.c
 F: pc-bios/npcm7xx_bootrom.bin
+F: pc-bios/npcm8xx_bootrom.bin
 F: roms/vbootrom
 F: docs/system/arm/nuvoton.rst
 F: tests/functional/test_arm_quanta_gsj.py
@@ -900,7 +915,7 @@ F: tests/functional/test_aarch64_raspi4.py
 Real View
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/arm/realview*
 F: hw/cpu/realview_mpcore.c
 F: hw/intc/realview_gic.c
@@ -950,7 +965,7 @@ F: tests/functional/test_arm_collie.py
 Stellaris
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/*/stellaris*
 F: hw/display/ssd03*
 F: include/hw/input/gamepad.h
@@ -980,7 +995,7 @@ F: docs/system/arm/stm32.rst
 Versatile Express
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/arm/vexpress.c
 F: hw/display/sii9022.c
 F: docs/system/arm/vexpress.rst
@@ -989,7 +1004,7 @@ F: tests/functional/test_arm_vexpress.py
 Versatile PB
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/*/versatile*
 F: hw/i2c/arm_sbcon_i2c.c
 F: include/hw/i2c/arm_sbcon_i2c.h
@@ -1394,12 +1409,6 @@ F: hw/openrisc/openrisc_sim.c
 
 PowerPC Machines
 ----------------
-405 (ref405ep)
-L: qemu-ppc@nongnu.org
-S: Orphan
-F: hw/ppc/ppc405*
-F: tests/functional/test_ppc_405.py
-
 Bamboo
 L: qemu-ppc@nongnu.org
 S: Orphan
@@ -1530,6 +1539,7 @@ F: include/hw/ppc/pnv*
 F: include/hw/pci-host/pnv*
 F: include/hw/ssi/pnv_spi*
 F: pc-bios/skiboot.lid
+F: pc-bios/pnv-pnor.bin
 F: tests/qtest/pnv*
 F: tests/functional/test_ppc64_powernv.py
 
@@ -1562,6 +1572,7 @@ F: pc-bios/canyonlands.dt[sb]
 F: pc-bios/u-boot-sam460ex-20100605.bin
 F: roms/u-boot-sam460ex
 F: docs/system/ppc/amigang.rst
+F: tests/functional/test_ppc_sam460ex.py
 
 pegasos2
 M: BALATON Zoltan <balaton@eik.bme.hu>
@@ -1603,7 +1614,6 @@ F: include/hw/riscv/opentitan.h
 F: include/hw/*/ibex_*.h
 
 Microchip PolarFire SoC Icicle Kit
-M: Bin Meng <bmeng.cn@gmail.com>
 L: qemu-riscv@nongnu.org
 S: Supported
 F: docs/system/riscv/microchip-icicle-kit.rst
@@ -1630,7 +1640,6 @@ F: include/hw/char/shakti_uart.h
 
 SiFive Machines
 M: Alistair Francis <Alistair.Francis@wdc.com>
-M: Bin Meng <bmeng.cn@gmail.com>
 M: Palmer Dabbelt <palmer@dabbelt.com>
 L: qemu-riscv@nongnu.org
 S: Supported
@@ -1994,10 +2003,11 @@ F: include/hw/hyperv/vmbus*.h
 OMAP
 M: Peter Maydell <peter.maydell@linaro.org>
 L: qemu-arm@nongnu.org
-S: Maintained
+S: Odd Fixes
 F: hw/*/omap*
 F: include/hw/arm/omap.h
 F: docs/system/arm/sx1.rst
+F: tests/functional/test_arm_sx1.py
 
 IPack
 M: Alberto Garcia <berto@igalia.com>
@@ -2174,9 +2184,16 @@ M: Cédric Le Goater <clg@redhat.com>
 S: Supported
 F: hw/vfio/*
 F: include/hw/vfio/
-F: docs/igd-assign.txt
 F: docs/devel/migration/vfio.rst
 F: qapi/vfio.json
+
+vfio-igd
+M: Alex Williamson <alex.williamson@redhat.com>
+M: Cédric Le Goater <clg@redhat.com>
+M: Tomita Moeko <tomitamoeko@gmail.com>
+S: Supported
+F: hw/vfio/igd.c
+F: docs/igd-assign.txt
 
 vfio-ccw
 M: Eric Farman <farman@linux.ibm.com>
@@ -2219,12 +2236,16 @@ M: Michael S. Tsirkin <mst@redhat.com>
 R: Stefano Garzarella <sgarzare@redhat.com>
 S: Supported
 F: hw/*/*vhost*
-F: docs/interop/vhost-user.json
-F: docs/interop/vhost-user.rst
+F: docs/interop/vhost-user*
+F: docs/system/devices/vhost-user*
 F: contrib/vhost-user-*/
-F: backends/vhost-user.c
+F: backends/*vhost*
 F: include/system/vhost-user-backend.h
+F: include/hw/virtio/vhost*
+F: include/*/vhost*
 F: subprojects/libvhost-user/
+F: block/export/vhost-user*
+F: util/vhost-user-server.c
 
 vhost-shadow-virtqueue
 R: Eugenio Pérez <eperezma@redhat.com>
@@ -2253,6 +2274,7 @@ F: include/hw/virtio/virtio-balloon.h
 F: system/balloon.c
 F: include/system/balloon.h
 F: tests/qtest/virtio-balloon-test.c
+F: tests/functional/test_virtio_balloon.py
 
 virtio-9p
 M: Christian Schoenebeck <qemu_oss@crudebyte.com>
@@ -2275,6 +2297,7 @@ F: hw/block/virtio-blk.c
 F: hw/block/dataplane/*
 F: include/hw/virtio/virtio-blk-common.h
 F: tests/qtest/virtio-blk-test.c
+F: tests/functional/test_x86_64_hotplug_blk.py
 T: git https://github.com/stefanha/qemu.git block
 
 virtio-ccw
@@ -2521,8 +2544,7 @@ F: hw/i2c/i2c_mux_pca954x.c
 F: include/hw/i2c/i2c_mux_pca954x.h
 
 pcf8574
-M: Dmitrii Sharikhin <d.sharikhin@yadro.com>
-S: Maintained
+S: Orphaned
 F: hw/gpio/pcf8574.c
 F: include/gpio/pcf8574.h
 
@@ -2539,7 +2561,7 @@ M: Alex Bennée <alex.bennee@linaro.org>
 S: Maintained
 F: hw/core/guest-loader.c
 F: docs/system/guest-loader.rst
-F: tests/avocado/boot_xen.py
+F: tests/functional/test_aarch64_xen.py
 
 Intel Hexadecimal Object File Loader
 M: Su Hang <suhang16@mails.ucas.ac.cn>
@@ -2605,6 +2627,7 @@ F: hw/display/virtio-gpu*
 F: hw/display/virtio-vga.*
 F: include/hw/virtio/virtio-gpu.h
 F: docs/system/devices/virtio-gpu.rst
+F: tests/functional/test_aarch64_virt_gpu.py
 
 vhost-user-blk
 M: Raphael Norwitz <raphael@enfabrica.net>
@@ -2798,6 +2821,20 @@ S: Maintained
 F: hw/misc/ivshmem-flat.c
 F: include/hw/misc/ivshmem-flat.h
 F: docs/system/devices/ivshmem-flat.rst
+
+UEFI variable service
+M: Gerd Hoffmann <kraxel@redhat.com>
+S: Maintained
+F: hw/uefi/
+F: include/hw/uefi/
+
+VMapple
+M: Alexander Graf <agraf@csgraf.de>
+M: Phil Dennis-Jordan <phil@philjordan.eu>
+S: Maintained
+F: hw/vmapple/*
+F: include/hw/vmapple/*
+F: docs/system/arm/vmapple.rst
 
 Subsystems
 ----------
@@ -3235,8 +3272,6 @@ S: Supported
 F: qapi/
 X: qapi/*.json
 F: include/qapi/
-X: include/qapi/qmp/
-F: include/qapi/qmp/dispatch.h
 F: tests/qapi-schema/
 F: tests/unit/test-*-visitor.c
 F: tests/unit/test-qapi-*.c
@@ -3260,8 +3295,7 @@ QObject
 M: Markus Armbruster <armbru@redhat.com>
 S: Supported
 F: qobject/
-F: include/qapi/qmp/
-X: include/qapi/qmp/dispatch.h
+F: include/qobject/
 F: scripts/coccinelle/qobject.cocci
 F: tests/unit/check-qdict.c
 F: tests/unit/check-qjson.c
@@ -3386,6 +3420,7 @@ F: rust/rustfmt.toml
 
 Rust-related patches CC here
 L: qemu-rust@nongnu.org
+F: tests/docker/test-rust
 F: rust/
 
 SLIRP
@@ -3621,10 +3656,10 @@ F: net/filter-mirror.c
 F: tests/qtest/test-filter*
 
 Record/replay
-M: Pavel Dovgalyuk <pavel.dovgaluk@ispras.ru>
 R: Paolo Bonzini <pbonzini@redhat.com>
+R: Alex Bennée <alex.bennee@linaro.org>
 W: https://wiki.qemu.org/Features/record-replay
-S: Supported
+S: Odd Fixes
 F: replay/*
 F: block/blkreplay.c
 F: net/filter-replay.c
@@ -3728,7 +3763,7 @@ S: Orphan
 F: hw/i386/amd_iommu.?
 
 OpenSBI Firmware
-M: Bin Meng <bmeng.cn@gmail.com>
+L: qemu-riscv@nongnu.org
 S: Supported
 F: pc-bios/opensbi-*
 F: .gitlab-ci.d/opensbi.yml
@@ -3761,6 +3796,7 @@ Overall usermode emulation
 M: Riku Voipio <riku.voipio@iki.fi>
 S: Maintained
 F: accel/tcg/user-exec*.c
+F: hw/core/cpu-user.c
 F: include/user/
 F: common-user/
 
@@ -4198,6 +4234,7 @@ Functional testing framework
 M: Thomas Huth <thuth@redhat.com>
 R: Philippe Mathieu-Daudé <philmd@linaro.org>
 R: Daniel P. Berrange <berrange@redhat.com>
+F: docs/devel/testing/functional.rst
 F: tests/functional/qemu_test/
 
 Windows Hosted Continuous Integration
@@ -4285,6 +4322,7 @@ S: Orphan
 F: po/*.po
 
 Sphinx documentation configuration and build machinery
+M: John Snow <jsnow@redhat.com>
 M: Peter Maydell <peter.maydell@linaro.org>
 S: Maintained
 F: docs/conf.py

@@ -4,6 +4,7 @@ members = [
     "qemu-api-macros",
     "qemu-api",
     "hw/char/pl011",
+    "hw/timer/hpet",
 ]
 
 [workspace.lints.rust]
@@ -36,6 +37,8 @@ result_unit_err = "allow"
 should_implement_trait = "deny"
 # can be for a reason, e.g. in callbacks
 unused_self = "allow"
+# common in device crates
+upper_case_acronyms = "allow"
 
 # default-allow lints
 as_ptr_cast_mut = "deny"
@@ -52,7 +55,6 @@ empty_structs_with_brackets = "deny"
 ignored_unit_patterns = "deny"
 implicit_clone = "deny"
 macro_use_imports = "deny"
-missing_const_for_fn = "deny"
 missing_safety_doc = "deny"
 multiple_crate_versions = "deny"
 mut_mut = "deny"

@@ -137,7 +137,8 @@ void *apple_gfx_host_ptr_for_gpa_range(uint64_t guest_physical,
                                          MEMTXATTRS_UNSPECIFIED);
 
     if (!ram_region || ram_region_length < length ||
-        !memory_access_is_direct(ram_region, !read_only)) {
+        !memory_access_is_direct(ram_region, !read_only,
+				 MEMTXATTRS_UNSPECIFIED)) {
         return NULL;
     }
 
@@ -870,7 +871,7 @@ separator_error:
 }
 
 const PropertyInfo qdev_prop_apple_gfx_display_mode = {
-    .name  = "display_mode",
+    .type  = "display_mode",
     .description =
         "Display mode in pixels and Hertz, as <width>x<height>@<refresh-rate> "
         "Example: 3840x2160@60",

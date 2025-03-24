@@ -1964,6 +1964,11 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss)
     ram_addr_t offset = ((ram_addr_t)pss->page) << TARGET_PAGE_BITS;
     int res;
 
+    /* Hand over to RDMA first */
+    if (control_save_page(pss, offset, &res)) {
+        return res;
+    }
+
     if (!migrate_multifd()
         || migrate_zero_page_detection() == ZERO_PAGE_DETECTION_LEGACY) {
         if (save_zero_page(rs, pss, offset)) {
@@ -1974,10 +1979,6 @@ static int ram_save_target_page(RAMState *rs, PageSearchStatus *pss)
     if (migrate_multifd()) {
         RAMBlock *block = pss->block;
         return ram_save_multifd_page(block, offset);
-    }
-
-    if (control_save_page(pss, offset, &res)) {
-        return res;
     }
 
     return ram_save_page(rs, pss);
@@ -4465,8 +4466,10 @@ static void ram_mig_ram_block_resized(RAMBlockNotifier *n, void *host,
          * Abort and indicate a proper reason.
          */
         error_setg(&err, "RAM block '%s' resized during precopy.", rb->idstr);
-        migration_cancel(err);
+        migrate_set_error(migrate_get_current(), err);
         error_free(err);
+
+        migration_cancel();
     }
 
     switch (ps) {

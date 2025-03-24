@@ -25,7 +25,7 @@
 #include "qapi/qapi-commands-control.h"
 #include "qapi/qapi-commands-machine.h"
 #include "qapi/qapi-commands-misc.h"
-#include "qapi/qmp/qdict.h"
+#include "qobject/qdict.h"
 #include "qemu/cutils.h"
 #include "qemu/log.h"
 #include "system/system.h"
@@ -431,6 +431,6 @@ void hmp_dumpdtb(Monitor *mon, const QDict *qdict)
         return;
     }
 
-    monitor_printf(mon, "dtb dumped to %s", filename);
+    monitor_printf(mon, "DTB dumped to '%s'\n", filename);
 }
 #endif

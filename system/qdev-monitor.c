@@ -26,10 +26,10 @@
 #include "system/runstate.h"
 #include "qapi/error.h"
 #include "qapi/qapi-commands-qdev.h"
-#include "qapi/qmp/dispatch.h"
-#include "qapi/qmp/qdict.h"
+#include "qapi/qmp-registry.h"
+#include "qobject/qdict.h"
 #include "qapi/qmp/qerror.h"
-#include "qapi/qmp/qstring.h"
+#include "qobject/qstring.h"
 #include "qapi/qobject-input-visitor.h"
 #include "qemu/config-file.h"
 #include "qemu/error-report.h"
@@ -132,7 +132,7 @@ static const char *qdev_class_get_alias(DeviceClass *dc)
 
     for (i = 0; qdev_alias_table[i].typename; i++) {
         if (qdev_alias_table[i].arch_mask &&
-            !(qdev_alias_table[i].arch_mask & arch_type)) {
+            !qemu_arch_available(qdev_alias_table[i].arch_mask)) {
             continue;
         }
 
@@ -218,7 +218,7 @@ static const char *find_typename_by_alias(const char *alias)
 
     for (i = 0; qdev_alias_table[i].alias; i++) {
         if (qdev_alias_table[i].arch_mask &&
-            !(qdev_alias_table[i].arch_mask & arch_type)) {
+            !qemu_arch_available(qdev_alias_table[i].arch_mask)) {
             continue;
         }
 

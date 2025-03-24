@@ -328,20 +328,23 @@ typedef enum CPAccessResult {
      * Access fails due to a configurable trap or enable which would
      * result in a categorized exception syndrome giving information about
      * the failing instruction (ie syndrome category 0x3, 0x4, 0x5, 0x6,
-     * 0xc or 0x18).
+     * 0xc or 0x18). These traps are always to a specified target EL,
+     * never to the usual target EL.
      */
-    CP_ACCESS_TRAP = (1 << 2),
-    CP_ACCESS_TRAP_EL2 = CP_ACCESS_TRAP | 2,
-    CP_ACCESS_TRAP_EL3 = CP_ACCESS_TRAP | 3,
+    CP_ACCESS_TRAP_BIT = (1 << 2),
+    CP_ACCESS_TRAP_EL1 = CP_ACCESS_TRAP_BIT | 1,
+    CP_ACCESS_TRAP_EL2 = CP_ACCESS_TRAP_BIT | 2,
+    CP_ACCESS_TRAP_EL3 = CP_ACCESS_TRAP_BIT | 3,
 
     /*
-     * Access fails and results in an exception syndrome 0x0 ("uncategorized").
+     * Access fails with UNDEFINED, i.e. an exception syndrome 0x0
+     * ("uncategorized"), which is what an undefined insn produces.
      * Note that this is not a catch-all case -- the set of cases which may
      * result in this failure is specifically defined by the architecture.
      * This trap is always to the usual target EL, never directly to a
      * specified target EL.
      */
-    CP_ACCESS_TRAP_UNCATEGORIZED = (2 << 2),
+    CP_ACCESS_UNDEFINED = (2 << 2),
 } CPAccessResult;
 
 /* Indexes into fgt_read[] */
@@ -1153,5 +1156,33 @@ static inline bool arm_cpreg_traps_in_nv(const ARMCPRegInfo *ri)
      */
     return ri->opc1 == 4 || ri->opc1 == 5;
 }
+
+/* Macros for accessing a specified CP register bank */
+#define A32_BANKED_REG_GET(_env, _regname, _secure)                     \
+    ((_secure) ? (_env)->cp15._regname##_s : (_env)->cp15._regname##_ns)
+
+#define A32_BANKED_REG_SET(_env, _regname, _secure, _val)       \
+    do {                                                        \
+        if (_secure) {                                          \
+            (_env)->cp15._regname##_s = (_val);                 \
+        } else {                                                \
+            (_env)->cp15._regname##_ns = (_val);                \
+        }                                                       \
+    } while (0)
+
+/*
+ * Macros for automatically accessing a specific CP register bank depending on
+ * the current secure state of the system.  These macros are not intended for
+ * supporting instruction translation reads/writes as these are dependent
+ * solely on the SCR.NS bit and not the mode.
+ */
+#define A32_BANKED_CURRENT_REG_GET(_env, _regname)                          \
+    A32_BANKED_REG_GET((_env), _regname,                                    \
+                       (arm_is_secure(_env) && !arm_el_is_aa64((_env), 3)))
+
+#define A32_BANKED_CURRENT_REG_SET(_env, _regname, _val)                    \
+    A32_BANKED_REG_SET((_env), _regname,                                    \
+                       (arm_is_secure(_env) && !arm_el_is_aa64((_env), 3)), \
+                       (_val))
 
 #endif /* TARGET_ARM_CPREGS_H */
