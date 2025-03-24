@@ -33,7 +33,9 @@ fi
   rm -rf /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
   mkdir -p /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
   cd /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
-  ../../../configure --cross-prefix=${target}- --disable-guest-agent-msi --disable-werror --enable-strip --extra-cflags="-I/mingw64/include" --extra-ldflags="-L/mingw64/lib"
+  # -DNO_OLDNAMES geht nicht.
+  # -D_MSC_VER geht nicht.
+  ../../../configure --cross-prefix=${target}- --disable-guest-agent-msi --disable-werror --enable-strip --extra-cflags="-D_FORTIFY_SOURCE=2 -D__pragma(x)= -I/mingw64/include" --extra-ldflags="-L/mingw64/lib"
   make -O -j4
   make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target installer SIGNCODE=signcode
   instdir=$WEBDIR/w64/$year
