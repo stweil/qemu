@@ -105,6 +105,9 @@ QEMU_EXTERN_C int daemon(int, int);
 #define _WANT_SEMUN
 #endif
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnested-externs"
+#pragma GCC diagnostic ignored "-Wredundant-decls"
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -112,6 +115,7 @@ QEMU_EXTERN_C int daemon(int, int);
 #include <sys/types.h>
 #include <stdlib.h>
 #include <stdio.h>
+#pragma GCC diagnostic pop
 
 #include <string.h>
 #include <strings.h>

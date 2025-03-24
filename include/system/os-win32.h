@@ -26,9 +26,15 @@
 #ifndef QEMU_OS_WIN32_H
 #define QEMU_OS_WIN32_H
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+#pragma GCC diagnostic ignored "-Wstrict-prototypes"
+#pragma GCC diagnostic ignored "-Wundef"
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
+#pragma GCC diagnostic pop
 #include "qemu/typedefs.h"
 
 #ifdef HAVE_AFUNIX_H
