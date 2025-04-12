@@ -2,11 +2,13 @@
 
 # GitHub actions - Install packages for Windows cross builds
 
-# Author: Stefan Weil (2023-2024)
+# Author: Stefan Weil (2023-2025)
 
 ARCH=$1
 
-if test "$ARCH" = "i686"; then
+if test "$ARCH" = "clang-aarch64"; then
+  MINGW=clangarm64
+elif test "$ARCH" = "i686"; then
   MINGW=mingw32
 else
   ARCH=x86_64
