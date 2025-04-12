@@ -16,10 +16,25 @@ on:
         type: choice
         options:
           - 'any'
+          - 'arm'
           - '32-bit'
           - '64-bit'
 
 jobs:
+  buildarm:
+    if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == 'arm') }}
+    runs-on: [ubuntu-24.04-arm]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Get pacman package manager
+      run: .github/workflows/pacman.sh clang-aarch64
+    - name: Build QEMU installer (arm)
+      run: .github/workflows/build.sh clang-aarch64
+    - uses: actions/upload-artifact@v4
+      with:
+        name: QEMU Installer Windows on ARM
+        path: dist
+
   build32:
     if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '32-bit') }}
     runs-on: [ubuntu-22.04]
