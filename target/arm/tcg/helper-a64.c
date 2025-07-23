@@ -29,8 +29,11 @@
 #include "internals.h"
 #include "qemu/crc32c.h"
 #include "exec/cpu-common.h"
-#include "exec/exec-all.h"
-#include "exec/cpu_ldst.h"
+#include "accel/tcg/cpu-ldst.h"
+#include "accel/tcg/helper-retaddr.h"
+#include "accel/tcg/probe.h"
+#include "exec/target_page.h"
+#include "exec/tlb-flags.h"
 #include "qemu/int128.h"
 #include "qemu/atomic128.h"
 #include "fpu/softfloat.h"
@@ -399,6 +402,8 @@ AH_MINMAX_HELPER(vfp_ah_mind, float64, float64, min)
 AH_MINMAX_HELPER(vfp_ah_maxh, dh_ctype_f16, float16, max)
 AH_MINMAX_HELPER(vfp_ah_maxs, float32, float32, max)
 AH_MINMAX_HELPER(vfp_ah_maxd, float64, float64, max)
+AH_MINMAX_HELPER(sme2_ah_fmax_b16, bfloat16, bfloat16, max)
+AH_MINMAX_HELPER(sme2_ah_fmin_b16, bfloat16, bfloat16, min)
 
 /* 64-bit versions of the CRC helpers. Note that although the operation
  * (and the prototypes of crc32c() and crc32() mean that only the bottom
@@ -653,15 +658,6 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         spsr &= ~PSTATE_SS;
     }
 
-    /*
-     * FEAT_RME forbids return from EL3 with an invalid security state.
-     * We don't need an explicit check for FEAT_RME here because we enforce
-     * in scr_write() that you can't set the NSE bit without it.
-     */
-    if (cur_el == 3 && (env->cp15.scr_el3 & (SCR_NS | SCR_NSE)) == SCR_NSE) {
-        goto illegal_return;
-    }
-
     new_el = el_from_spsr(spsr);
     if (new_el == -1) {
         goto illegal_return;
@@ -670,6 +666,17 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         /* Disallow return to an EL which is unimplemented or higher
          * than the current one.
          */
+        goto illegal_return;
+    }
+
+    /*
+     * FEAT_RME forbids return from EL3 to a lower exception level
+     * with an invalid security state.
+     * We don't need an explicit check for FEAT_RME here because we enforce
+     * in scr_write() that you can't set the NSE bit without it.
+     */
+    if (cur_el == 3 && new_el < 3 &&
+        (env->cp15.scr_el3 & (SCR_NS | SCR_NSE)) == SCR_NSE) {
         goto illegal_return;
     }
 
@@ -1147,7 +1154,6 @@ static void do_setp(CPUARMState *env, uint32_t syndrome, uint32_t mtedesc,
     env->ZF = 1; /* our env->ZF encoding is inverted */
     env->CF = 0;
     env->VF = 0;
-    return;
 }
 
 void HELPER(setp)(CPUARMState *env, uint32_t syndrome, uint32_t mtedesc)
@@ -1547,7 +1553,6 @@ static void do_cpyp(CPUARMState *env, uint32_t syndrome, uint32_t wdesc,
     env->ZF = 1; /* our env->ZF encoding is inverted */
     env->CF = 0;
     env->VF = 0;
-    return;
 }
 
 void HELPER(cpyp)(CPUARMState *env, uint32_t syndrome, uint32_t wdesc,

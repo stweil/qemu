@@ -9,7 +9,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "exec/address-spaces.h"
+#include "system/address-spaces.h"
 #include "hw/arm/bsa.h"
 #include "hw/arm/fsl-imx8mp.h"
 #include "hw/intc/arm_gicv3.h"
@@ -356,6 +356,10 @@ static void fsl_imx8mp_realize(DeviceState *dev, Error **errp)
                                qdev_get_gpio_in(cpudev, ARM_CPU_IRQ));
             sysbus_connect_irq(gicsbd, i + ms->smp.cpus,
                                qdev_get_gpio_in(cpudev, ARM_CPU_FIQ));
+            sysbus_connect_irq(gicsbd, i + 2 * ms->smp.cpus,
+                               qdev_get_gpio_in(cpudev, ARM_CPU_VIRQ));
+            sysbus_connect_irq(gicsbd, i + 3 * ms->smp.cpus,
+                               qdev_get_gpio_in(cpudev, ARM_CPU_VFIQ));
         }
     }
 
@@ -689,7 +693,7 @@ static const Property fsl_imx8mp_properties[] = {
     DEFINE_PROP_BOOL("fec1-phy-connected", FslImx8mpState, phy_connected, true),
 };
 
-static void fsl_imx8mp_class_init(ObjectClass *oc, void *data)
+static void fsl_imx8mp_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
 

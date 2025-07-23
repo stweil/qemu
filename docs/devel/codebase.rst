@@ -116,7 +116,7 @@ yet, so sometimes the source code is all you have.
 * `monitor <https://gitlab.com/qemu-project/qemu/-/tree/master/monitor>`_:
   `Monitor <QEMU monitor>` implementation (HMP & QMP).
 * `nbd <https://gitlab.com/qemu-project/qemu/-/tree/master/nbd>`_:
-  QEMU `NBD (Network Block Device) <nbd>` server.
+  QEMU NBD (Network Block Device) server.
 * `net <https://gitlab.com/qemu-project/qemu/-/tree/master/net>`_:
   Network (host) support.
 * `pc-bios <https://gitlab.com/qemu-project/qemu/-/tree/master/pc-bios>`_:
@@ -175,11 +175,6 @@ yet, so sometimes the source code is all you have.
 * `tests <https://gitlab.com/qemu-project/qemu/-/tree/master/tests>`_:
   QEMU `test <testing>` suite
 
-  - `avocado <https://gitlab.com/qemu-project/qemu/-/tree/master/tests/avocado>`_:
-    Functional tests booting full VM using `Avocado framework <checkavocado-ref>`.
-    Those tests will be transformed and moved into
-    `tests/functional <https://gitlab.com/qemu-project/qemu/-/tree/master/tests/functional>`_
-    in the future.
   - `data <https://gitlab.com/qemu-project/qemu/-/tree/master/tests/data>`_:
     Data for various tests.
   - `decode <https://gitlab.com/qemu-project/qemu/-/tree/master/tests/decode>`_:

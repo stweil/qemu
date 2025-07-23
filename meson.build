@@ -50,9 +50,9 @@ genh = []
 qapi_trace_events = []
 
 bsd_oses = ['gnu/kfreebsd', 'freebsd', 'netbsd', 'openbsd', 'dragonfly', 'darwin']
-supported_oses = ['windows', 'freebsd', 'netbsd', 'openbsd', 'darwin', 'sunos', 'linux']
+supported_oses = ['windows', 'freebsd', 'netbsd', 'openbsd', 'darwin', 'sunos', 'linux', 'emscripten']
 supported_cpus = ['ppc', 'ppc64', 's390x', 'riscv32', 'riscv64', 'x86', 'x86_64',
-  'arm', 'aarch64', 'loongarch64', 'mips', 'mips64', 'sparc64']
+  'arm', 'aarch64', 'loongarch64', 'mips', 'mips64', 'sparc64', 'wasm32']
 
 cpu = host_machine.cpu_family()
 
@@ -94,18 +94,19 @@ have_rust = have_rust and add_languages('rust', native: true,
     required: get_option('rust').disable_auto_if(not have_system))
 if have_rust
   rustc = meson.get_compiler('rust')
-  if rustc.version().version_compare('<1.63.0')
+  if rustc.version().version_compare('<1.77.0')
     if get_option('rust').enabled()
-      error('rustc version ' + rustc.version() + ' is unsupported. Please upgrade to at least 1.63.0')
+      error('rustc version ' + rustc.version() + ' is unsupported. Please upgrade to at least 1.77.0')
     else
       warning('rustc version ' + rustc.version() + ' is unsupported, disabling Rust compilation.')
-      message('Please upgrade to at least 1.63.0 to use Rust.')
+      message('Please upgrade to at least 1.77.0 to use Rust.')
       have_rust = false
     endif
   endif
 endif
 
 if have_rust
+  rustdoc = find_program('rustdoc', required: get_option('rust'))
   bindgen = find_program('bindgen', required: get_option('rust'))
   if not bindgen.found() or bindgen.version().version_compare('<0.60.0')
     if get_option('rust').enabled()
@@ -247,6 +248,8 @@ have_vhost_net_vdpa = have_vhost_vdpa and get_option('vhost_net').allowed()
 have_vhost_net_kernel = have_vhost_kernel and get_option('vhost_net').allowed()
 have_vhost_net = have_vhost_net_kernel or have_vhost_net_user or have_vhost_net_vdpa
 
+have_tcg = get_option('tcg').allowed() and (have_system or have_user)
+
 have_tools = get_option('tools') \
   .disable_auto_if(not have_system) \
   .allowed()
@@ -352,6 +355,8 @@ foreach lang : all_languages
       #  error You need at least Clang v10.0 to compile QEMU
       # endif
       #endif''')
+    # ok
+  elif compiler.get_id() == 'emscripten'
     # ok
   else
     error('You either need GCC v7.4 or Clang v10.0 (or XCode Clang v15.0) to compile QEMU')
@@ -470,7 +475,10 @@ endif
 # instead, we can't add -no-pie because it overrides -shared: the linker then
 # tries to build an executable instead of a shared library and fails.  So
 # don't add -no-pie anywhere and cross fingers. :(
-if not get_option('b_pie')
+#
+# Emscripten doesn't support -no-pie but meson can't catch the compiler
+# warning. So explicitly omit the flag for Emscripten.
+if not get_option('b_pie') and host_os != 'emscripten'
   qemu_common_flags += cc.get_supported_arguments('-fno-pie', '-no-pie')
 endif
 
@@ -514,6 +522,8 @@ ucontext_probe = '''
 supported_backends = []
 if host_os == 'windows'
   supported_backends += ['windows']
+elif host_os == 'emscripten'
+  supported_backends += ['wasm']
 else
   if host_os != 'darwin' and cc.links(ucontext_probe)
     supported_backends += ['ucontext']
@@ -839,13 +849,17 @@ emulator_link_args = []
 midl = not_found
 widl = not_found
 pathcch = not_found
+synchronization = not_found
 host_dsosuf = '.so'
 if host_os == 'windows'
   midl = find_program('midl', required: false)
   widl = find_program('widl', required: false)
-  pathcch = cc.find_library('pathcch')
-  socket = cc.find_library('ws2_32')
-  winmm = cc.find_library('winmm')
+
+  # MinGW uses lowercase for library names
+  pathcch = cc.find_library('pathcch', required: true)
+  synchronization = cc.find_library('synchronization', required: true)
+  socket = cc.find_library('ws2_32', required: true)
+  winmm = cc.find_library('winmm', required: true)
 
   win = import('windows')
   version_res = win.compile_resources('version.rc',
@@ -867,7 +881,7 @@ elif host_os == 'haiku'
             cc.find_library('network'),
             cc.find_library('bsd')]
 elif host_os == 'openbsd'
-  if get_option('tcg').allowed() and target_dirs.length() > 0
+  if have_tcg
     # Disable OpenBSD W^X if available
     emulator_link_args = cc.get_supported_link_arguments('-Wl,-z,wxneeded')
   endif
@@ -908,10 +922,14 @@ if host_os == 'netbsd'
 endif
 
 tcg_arch = host_arch
-if get_option('tcg').allowed()
+if have_tcg
   if host_arch == 'unknown'
     if not get_option('tcg_interpreter')
       error('Unsupported CPU @0@, try --enable-tcg-interpreter'.format(cpu))
+    endif
+  elif host_arch == 'wasm32'
+    if not get_option('tcg_interpreter')
+      error('WebAssembly host requires --enable-tcg-interpreter')
     endif
   elif get_option('tcg_interpreter')
     warning('Use of the TCG interpreter is not recommended on this host')
@@ -1278,6 +1296,10 @@ if not get_option('slirp').auto() or have_system
   endif
 endif
 
+enable_passt = get_option('passt') \
+  .require(host_os == 'linux', error_message: 'passt is supported only on Linux') \
+  .allowed()
+
 vde = not_found
 if not get_option('vde').auto() or have_system or have_tools
   vde = cc.find_library('vdeplug', has_headers: ['libvdeplug.h'],
@@ -1416,6 +1438,12 @@ if host_os == 'linux' and (have_system or have_tools)
   libudev = dependency('libudev',
                        method: 'pkg-config',
                        required: get_option('libudev'))
+endif
+igvm = not_found
+if not get_option('igvm').auto() or have_system
+  igvm = dependency('igvm', version: '>= 0.3.0',
+                    method: 'pkg-config',
+                    required: get_option('igvm'))
 endif
 
 mpathlibs = [libudev]
@@ -2196,19 +2224,23 @@ if not has_malloc_trim and get_option('malloc_trim').enabled()
   endif
 endif
 
-gnu_source_prefix = '''
+osdep_prefix = '''
   #ifndef _GNU_SOURCE
   #define _GNU_SOURCE
   #endif
+
+  #include <stddef.h>
+  #include <sys/types.h>
+
+  #include <string.h>
+  #include <limits.h>
+  /* Put unistd.h before time.h as that triggers localtime_r/gmtime_r
+   * function availability on recentish Mingw-w64 platforms. */
+  #include <unistd.h>
+  #include <time.h>
+  #include <errno.h>
+  #include <fcntl.h>
 '''
-
-# Check whether the glibc provides STATX_BASIC_STATS
-
-has_statx = cc.has_header_symbol('sys/stat.h', 'STATX_BASIC_STATS', prefix: gnu_source_prefix)
-
-# Check whether statx() provides mount ID information
-
-has_statx_mnt_id = cc.has_header_symbol('sys/stat.h', 'STATX_MNT_ID', prefix: gnu_source_prefix)
 
 have_vhost_user_blk_server = get_option('vhost_user_blk_server') \
   .require(host_os == 'linux',
@@ -2527,10 +2559,11 @@ if seccomp.found()
   config_host_data.set('CONFIG_SECCOMP_SYSRAWRC', seccomp_has_sysrawrc)
 endif
 config_host_data.set('CONFIG_PIXMAN', pixman.found())
+config_host_data.set('CONFIG_PASST', enable_passt)
 config_host_data.set('CONFIG_SLIRP', slirp.found())
 config_host_data.set('CONFIG_SNAPPY', snappy.found())
 config_host_data.set('CONFIG_SOLARIS', host_os == 'sunos')
-if get_option('tcg').allowed()
+if have_tcg
   config_host_data.set('CONFIG_TCG', 1)
   config_host_data.set('CONFIG_TCG_INTERPRETER', tcg_arch == 'tci')
 endif
@@ -2571,8 +2604,6 @@ config_host_data.set('CONFIG_CRYPTO_SM3', crypto_sm3.found())
 config_host_data.set('CONFIG_HOGWEED', hogweed.found())
 config_host_data.set('CONFIG_QEMU_PRIVATE_XTS', xts == 'private')
 config_host_data.set('CONFIG_MALLOC_TRIM', has_malloc_trim)
-config_host_data.set('CONFIG_STATX', has_statx)
-config_host_data.set('CONFIG_STATX_MNT_ID', has_statx_mnt_id)
 config_host_data.set('CONFIG_ZSTD', zstd.found())
 config_host_data.set('CONFIG_QPL', qpl.found())
 config_host_data.set('CONFIG_UADK', uadk.found())
@@ -2592,6 +2623,7 @@ config_host_data.set('CONFIG_CFI', get_option('cfi'))
 config_host_data.set('CONFIG_SELINUX', selinux.found())
 config_host_data.set('CONFIG_XEN_BACKEND', xen.found())
 config_host_data.set('CONFIG_LIBDW', libdw.found())
+config_host_data.set('CONFIG_IGVM', igvm.found())
 if xen.found()
   # protect from xen.version() having less than three components
   xen_version = xen.version().split('.') + ['0', '0']
@@ -2627,7 +2659,17 @@ config_host_data.set('CONFIG_FSTRIM', qga_fstrim)
 # has_header
 config_host_data.set('CONFIG_EPOLL', cc.has_header('sys/epoll.h'))
 config_host_data.set('CONFIG_LINUX_MAGIC_H', cc.has_header('linux/magic.h'))
-config_host_data.set('CONFIG_VALGRIND_H', cc.has_header('valgrind/valgrind.h'))
+valgrind = false
+if get_option('valgrind').allowed()
+    if cc.has_header('valgrind/valgrind.h')
+        valgrind = true
+    else
+        if get_option('valgrind').enabled()
+            error('valgrind requested but valgrind.h not found')
+        endif
+    endif
+endif
+config_host_data.set('CONFIG_VALGRIND_H', valgrind)
 config_host_data.set('HAVE_BTRFS_H', cc.has_header('linux/btrfs.h'))
 config_host_data.set('HAVE_DRM_H', cc.has_header('libdrm/drm.h'))
 config_host_data.set('HAVE_OPENAT2_H', cc.has_header('linux/openat2.h'))
@@ -2646,7 +2688,6 @@ config_host_data.set('CONFIG_CLOCK_ADJTIME', cc.has_function('clock_adjtime'))
 config_host_data.set('CONFIG_DUP3', cc.has_function('dup3'))
 config_host_data.set('CONFIG_FALLOCATE', cc.has_function('fallocate'))
 config_host_data.set('CONFIG_POSIX_FALLOCATE', cc.has_function('posix_fallocate'))
-config_host_data.set('CONFIG_GETCPU', cc.has_function('getcpu', prefix: gnu_source_prefix))
 config_host_data.set('CONFIG_SCHED_GETCPU', cc.has_function('sched_getcpu', prefix: '#include <sched.h>'))
 # Note that we need to specify prefix: here to avoid incorrectly
 # thinking that Windows has posix_memalign()
@@ -2668,7 +2709,7 @@ config_host_data.set('HAVE_GETIFADDRS', cc.has_function('getifaddrs'))
 config_host_data.set('HAVE_GLIB_WITH_SLICE_ALLOCATOR', glib_has_gslice)
 config_host_data.set('HAVE_GLIB_WITH_ALIGNED_ALLOC', glib_has_aligned_alloc)
 config_host_data.set('HAVE_OPENPTY', cc.has_function('openpty', dependencies: util))
-config_host_data.set('HAVE_STRCHRNUL', cc.has_function('strchrnul'))
+config_host_data.set('HAVE_STRCHRNUL', cc.has_function('strchrnul', prefix: osdep_prefix))
 config_host_data.set('HAVE_SYSTEM_FUNCTION', cc.has_function('system', prefix: '#include <stdlib.h>'))
 if rbd.found()
   config_host_data.set('HAVE_RBD_NAMESPACE_EXISTS',
@@ -2724,6 +2765,8 @@ config_host_data.set('CONFIG_FALLOCATE_ZERO_RANGE',
 config_host_data.set('CONFIG_FIEMAP',
                      cc.has_header('linux/fiemap.h') and
                      cc.has_header_symbol('linux/fs.h', 'FS_IOC_FIEMAP'))
+config_host_data.set('CONFIG_GETCPU',
+                     cc.has_header_symbol('sched.h', 'getcpu', prefix: osdep_prefix))
 config_host_data.set('CONFIG_GETRANDOM',
                      cc.has_function('getrandom') and
                      cc.has_header_symbol('sys/random.h', 'GRND_NONBLOCK'))
@@ -2745,6 +2788,36 @@ if linux_io_uring.found()
   config_host_data.set('HAVE_IO_URING_PREP_WRITEV2',
                        cc.has_header_symbol('liburing.h', 'io_uring_prep_writev2'))
 endif
+config_host_data.set('HAVE_TCP_KEEPCNT',
+                     cc.has_header_symbol('netinet/tcp.h', 'TCP_KEEPCNT') or
+                     cc.compiles('''
+                     #include <ws2tcpip.h>
+                     #ifndef TCP_KEEPCNT
+                     #error
+                     #endif
+                     int main(void) { return 0; }''',
+                     name: 'Win32 TCP_KEEPCNT'))
+# On Darwin TCP_KEEPIDLE is available under different name, TCP_KEEPALIVE.
+# https://github.com/apple/darwin-xnu/blob/xnu-4570.1.46/bsd/man/man4/tcp.4#L172
+config_host_data.set('HAVE_TCP_KEEPIDLE',
+                     cc.has_header_symbol('netinet/tcp.h', 'TCP_KEEPIDLE') or
+                     cc.has_header_symbol('netinet/tcp.h', 'TCP_KEEPALIVE') or
+                     cc.compiles('''
+                     #include <ws2tcpip.h>
+                     #ifndef TCP_KEEPIDLE
+                     #error
+                     #endif
+                     int main(void) { return 0; }''',
+                     name: 'Win32 TCP_KEEPIDLE'))
+config_host_data.set('HAVE_TCP_KEEPINTVL',
+                     cc.has_header_symbol('netinet/tcp.h', 'TCP_KEEPINTVL') or
+                     cc.compiles('''
+                     #include <ws2tcpip.h>
+                     #ifndef TCP_KEEPINTVL
+                     #error
+                     #endif
+                     int main(void) { return 0; }''',
+                     name: 'Win32 TCP_KEEPINTVL'))
 
 # has_member
 config_host_data.set('HAVE_SIGEV_NOTIFY_THREAD_ID',
@@ -2768,8 +2841,7 @@ config_host_data.set('HAVE_UTMPX',
 config_host_data.set('CONFIG_EVENTFD', cc.links('''
   #include <sys/eventfd.h>
   int main(void) { return eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC); }'''))
-config_host_data.set('CONFIG_FDATASYNC', cc.links(gnu_source_prefix + '''
-  #include <unistd.h>
+config_host_data.set('CONFIG_FDATASYNC', cc.links(osdep_prefix + '''
   int main(void) {
   #if defined(_POSIX_SYNCHRONIZED_IO) && _POSIX_SYNCHRONIZED_IO > 0
   return fdatasync(0);
@@ -2778,10 +2850,8 @@ config_host_data.set('CONFIG_FDATASYNC', cc.links(gnu_source_prefix + '''
   #endif
   }'''))
 
-has_madvise = cc.links(gnu_source_prefix + '''
-  #include <sys/types.h>
+has_madvise = cc.links(osdep_prefix + '''
   #include <sys/mman.h>
-  #include <stddef.h>
   int main(void) { return madvise(NULL, 0, MADV_DONTNEED); }''')
 missing_madvise_proto = false
 if has_madvise
@@ -2791,21 +2861,18 @@ if has_madvise
   # missing-prototype case, we try again with a definitely-bogus prototype.
   # This will only compile if the system headers don't provide the prototype;
   # otherwise the conflicting prototypes will cause a compiler error.
-  missing_madvise_proto = cc.links(gnu_source_prefix + '''
-    #include <sys/types.h>
+  missing_madvise_proto = cc.links(osdep_prefix + '''>
     #include <sys/mman.h>
-    #include <stddef.h>
     extern int madvise(int);
     int main(void) { return madvise(0); }''')
 endif
 config_host_data.set('CONFIG_MADVISE', has_madvise)
 config_host_data.set('HAVE_MADVISE_WITHOUT_PROTOTYPE', missing_madvise_proto)
 
-config_host_data.set('CONFIG_MEMFD', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_MEMFD', cc.links(osdep_prefix + '''
   #include <sys/mman.h>
   int main(void) { return memfd_create("foo", MFD_ALLOW_SEALING); }'''))
-config_host_data.set('CONFIG_OPEN_BY_HANDLE', cc.links(gnu_source_prefix + '''
-  #include <fcntl.h>
+config_host_data.set('CONFIG_OPEN_BY_HANDLE', cc.links(osdep_prefix + '''
   #if !defined(AT_EMPTY_PATH)
   # error missing definition
   #else
@@ -2816,13 +2883,12 @@ config_host_data.set('CONFIG_OPEN_BY_HANDLE', cc.links(gnu_source_prefix + '''
 # i.e. errno is set and -1 is returned. That's not really how POSIX defines the
 # function. On the flip side, it has madvise() which is preferred anyways.
 if host_os != 'darwin'
-  config_host_data.set('CONFIG_POSIX_MADVISE', cc.links(gnu_source_prefix + '''
+  config_host_data.set('CONFIG_POSIX_MADVISE', cc.links(osdep_prefix + '''
     #include <sys/mman.h>
-    #include <stddef.h>
     int main(void) { return posix_madvise(NULL, 0, POSIX_MADV_DONTNEED); }'''))
 endif
 
-config_host_data.set('CONFIG_PTHREAD_SETNAME_NP_W_TID', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_PTHREAD_SETNAME_NP_W_TID', cc.links(osdep_prefix + '''
   #include <pthread.h>
 
   static void *f(void *p) { return NULL; }
@@ -2833,7 +2899,7 @@ config_host_data.set('CONFIG_PTHREAD_SETNAME_NP_W_TID', cc.links(gnu_source_pref
     pthread_setname_np(thread, "QEMU");
     return 0;
   }''', dependencies: threads))
-config_host_data.set('CONFIG_PTHREAD_SETNAME_NP_WO_TID', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_PTHREAD_SETNAME_NP_WO_TID', cc.links(osdep_prefix + '''
   #include <pthread.h>
 
   static void *f(void *p) { pthread_setname_np("QEMU"); return NULL; }
@@ -2843,7 +2909,7 @@ config_host_data.set('CONFIG_PTHREAD_SETNAME_NP_WO_TID', cc.links(gnu_source_pre
     pthread_create(&thread, 0, f, 0);
     return 0;
   }''', dependencies: threads))
-config_host_data.set('CONFIG_PTHREAD_SET_NAME_NP', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_PTHREAD_SET_NAME_NP', cc.links(osdep_prefix + '''
   #include <pthread.h>
   #include <pthread_np.h>
 
@@ -2855,9 +2921,8 @@ config_host_data.set('CONFIG_PTHREAD_SET_NAME_NP', cc.links(gnu_source_prefix + 
     pthread_set_name_np(thread, "QEMU");
     return 0;
   }''', dependencies: threads))
-config_host_data.set('CONFIG_PTHREAD_CONDATTR_SETCLOCK', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_PTHREAD_CONDATTR_SETCLOCK', cc.links(osdep_prefix + '''
   #include <pthread.h>
-  #include <time.h>
 
   int main(void)
   {
@@ -2866,7 +2931,7 @@ config_host_data.set('CONFIG_PTHREAD_CONDATTR_SETCLOCK', cc.links(gnu_source_pre
     pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
     return 0;
   }''', dependencies: threads))
-config_host_data.set('CONFIG_PTHREAD_AFFINITY_NP', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_PTHREAD_AFFINITY_NP', cc.links(osdep_prefix + '''
   #include <pthread.h>
 
   static void *f(void *p) { return NULL; }
@@ -2883,15 +2948,10 @@ config_host_data.set('CONFIG_PTHREAD_AFFINITY_NP', cc.links(gnu_source_prefix + 
     CPU_FREE(cpuset);
     return 0;
   }''', dependencies: threads))
-config_host_data.set('CONFIG_SIGNALFD', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_SIGNALFD', cc.links(osdep_prefix + '''
   #include <sys/signalfd.h>
-  #include <stddef.h>
   int main(void) { return signalfd(-1, NULL, SFD_CLOEXEC); }'''))
-config_host_data.set('CONFIG_SPLICE', cc.links(gnu_source_prefix + '''
-  #include <unistd.h>
-  #include <fcntl.h>
-  #include <limits.h>
-
+config_host_data.set('CONFIG_SPLICE', cc.links(osdep_prefix + '''
   int main(void)
   {
     int len, fd = 0;
@@ -2900,13 +2960,13 @@ config_host_data.set('CONFIG_SPLICE', cc.links(gnu_source_prefix + '''
     return 0;
   }'''))
 
-config_host_data.set('HAVE_MLOCKALL', cc.links(gnu_source_prefix + '''
+config_host_data.set('HAVE_MLOCKALL', cc.links(osdep_prefix + '''
   #include <sys/mman.h>
   int main(void) {
     return mlockall(MCL_FUTURE);
   }'''))
 
-config_host_data.set('HAVE_MLOCK_ONFAULT', cc.links(gnu_source_prefix + '''
+config_host_data.set('HAVE_MLOCK_ONFAULT', cc.links(osdep_prefix + '''
   #include <sys/mman.h>
   int main(void) {
       return mlockall(MCL_FUTURE | MCL_ONFAULT);
@@ -2915,7 +2975,7 @@ config_host_data.set('HAVE_MLOCK_ONFAULT', cc.links(gnu_source_prefix + '''
 have_l2tpv3 = false
 if get_option('l2tpv3').allowed() and have_system
   have_l2tpv3 = cc.has_type('struct mmsghdr',
-    prefix: gnu_source_prefix + '''
+    prefix: osdep_prefix + '''
       #include <sys/socket.h>
       #include <linux/ip.h>''')
 endif
@@ -2973,7 +3033,9 @@ config_host_data.set('CONFIG_ATOMIC64', cc.links('''
     return 0;
   }''', args: qemu_isa_flags))
 
-has_int128_type = cc.compiles('''
+# has_int128_type is set to false on Emscripten to avoid errors by libffi
+# during runtime.
+has_int128_type = host_os != 'emscripten' and cc.compiles('''
   __int128_t a;
   __uint128_t b;
   int main(void) { b = a; }''')
@@ -3031,13 +3093,13 @@ if has_int128_type
   endif
 endif
 
-config_host_data.set('CONFIG_GETAUXVAL', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_GETAUXVAL', cc.links(osdep_prefix + '''
   #include <sys/auxv.h>
   int main(void) {
     return getauxval(AT_HWCAP) == 0;
   }'''))
 
-config_host_data.set('CONFIG_ELF_AUX_INFO', cc.links(gnu_source_prefix + '''
+config_host_data.set('CONFIG_ELF_AUX_INFO', cc.links(osdep_prefix + '''
   #include <sys/auxv.h>
   int main(void) {
     unsigned long hwcap = 0;
@@ -3095,22 +3157,16 @@ config_host_data.set('CONFIG_ASM_HWPROBE_H',
                      cc.has_header_symbol('asm/hwprobe.h',
                                           'RISCV_HWPROBE_EXT_ZBA'))
 
-config_host_data.set('CONFIG_AVX2_OPT', get_option('avx2') \
-  .require(have_cpuid_h, error_message: 'cpuid.h not available, cannot enable AVX2') \
-  .require(cc.links('''
-    #include <cpuid.h>
+if have_cpuid_h
+  have_avx2 = cc.links('''
     #include <immintrin.h>
     static int __attribute__((target("avx2"))) bar(void *a) {
       __m256i x = *(__m256i *)a;
       return _mm256_testz_si256(x, x);
     }
     int main(int argc, char *argv[]) { return bar(argv[argc - 1]); }
-  '''), error_message: 'AVX2 not available').allowed())
-
-config_host_data.set('CONFIG_AVX512BW_OPT', get_option('avx512bw') \
-  .require(have_cpuid_h, error_message: 'cpuid.h not available, cannot enable AVX512BW') \
-  .require(cc.links('''
-    #include <cpuid.h>
+  ''')
+  have_avx512bw = cc.links('''
     #include <immintrin.h>
     static int __attribute__((target("avx512bw"))) bar(void *a) {
       __m512i *x = a;
@@ -3118,7 +3174,21 @@ config_host_data.set('CONFIG_AVX512BW_OPT', get_option('avx512bw') \
       return res[1];
     }
     int main(int argc, char *argv[]) { return bar(argv[0]); }
-  '''), error_message: 'AVX512BW not available').allowed())
+  ''')
+  if get_option('x86_version') >= '3' and not have_avx2
+    error('Cannot enable AVX optimizations due to missing intrinsics')
+  elif get_option('x86_version') >= '4' and not have_avx512bw
+    error('Cannot enable AVX512 optimizations due to missing intrinsics')
+  endif
+else
+  have_avx2 = false
+  have_avx512bw = false
+  if get_option('x86_version') >= '3'
+    error('Cannot enable AVX optimizations due to missing cpuid.h')
+  endif
+endif
+config_host_data.set('CONFIG_AVX2_OPT', have_avx2)
+config_host_data.set('CONFIG_AVX512BW_OPT', have_avx512bw)
 
 # For both AArch64 and AArch32, detect if builtins are available.
 config_host_data.set('CONFIG_ARM_AES_BUILTIN', cc.compiles('''
@@ -3150,9 +3220,7 @@ config_host_data.set('CONFIG_MEMBARRIER', get_option('membarrier') \
   .allowed())
 
 have_afalg = get_option('crypto_afalg') \
-  .require(cc.compiles(gnu_source_prefix + '''
-    #include <errno.h>
-    #include <sys/types.h>
+  .require(cc.compiles(osdep_prefix + '''
     #include <sys/socket.h>
     #include <linux/if_alg.h>
     int main(void) {
@@ -3191,6 +3259,11 @@ if host_os == 'windows'
     }''', name: '_lock_file and _unlock_file'))
 endif
 
+if spice.found()
+  config_host_data.set('HAVE_SPICE_QXL_GL_SCANOUT2',
+    cc.has_function('spice_qxl_gl_scanout2', dependencies: spice))
+endif
+
 if host_os == 'windows'
   mingw_has_setjmp_longjmp = cc.links('''
     #include <setjmp.h>
@@ -3227,6 +3300,7 @@ config_devices_mak_list = []
 config_devices_h = {}
 config_target_h = {}
 config_target_mak = {}
+config_base_arch_mak = {}
 
 disassemblers = {
   'alpha' : ['CONFIG_ALPHA_DIS'],
@@ -3418,6 +3492,11 @@ foreach target : target_dirs
     config_all_devices += config_devices
   endif
   config_target_mak += {target: config_target}
+
+  # build a merged config for all targets with the same TARGET_BASE_ARCH
+  target_base_arch = config_target['TARGET_BASE_ARCH']
+  config_base_arch = config_base_arch_mak.get(target_base_arch, {}) + config_target
+  config_base_arch_mak += {target_base_arch: config_base_arch}
 endforeach
 target_dirs = actual_target_dirs
 
@@ -3574,6 +3653,7 @@ if have_block
 endif
 if have_system
   trace_events_subdirs += [
+    'accel/hvf',
     'accel/kvm',
     'audio',
     'backends',
@@ -3627,6 +3707,7 @@ if have_system
     'hw/ufs',
     'hw/usb',
     'hw/vfio',
+    'hw/vfio-user',
     'hw/virtio',
     'hw/vmapple',
     'hw/watchdog',
@@ -3691,6 +3772,9 @@ hw_arch = {}
 target_arch = {}
 target_system_arch = {}
 target_user_arch = {}
+hw_common_arch = {}
+target_common_arch = {}
+target_common_system_arch = {}
 
 # NOTE: the trace/ subdirectory needs the qapi_trace_events variable
 # that is filled in by qapi/.
@@ -3785,6 +3869,8 @@ if have_block
   # os-win32.c does not
   if host_os == 'windows'
     system_ss.add(files('os-win32.c'))
+  elif host_os == 'emscripten'
+    blockdev_ss.add(files('os-wasm.c'))
   else
     blockdev_ss.add(files('os-posix.c'))
   endif
@@ -3814,6 +3900,9 @@ if get_option('b_lto')
 endif
 common_ss.add(pagevary)
 specific_ss.add(files('page-target.c', 'page-vary-target.c'))
+
+common_ss.add(files('target-info.c'))
+specific_ss.add(files('target-info-stub.c'))
 
 subdir('backends')
 subdir('disas')
@@ -3880,16 +3969,11 @@ foreach d, list : modules
                     install: true,
                     install_dir: qemu_moddir)
       if module_ss.sources() != []
-        # FIXME: Should use sl.extract_all_objects(recursive: true) as
-        # input. Sources can be used multiple times but objects are
-        # unique when it comes to lookup in compile_commands.json.
-        # Depnds on a mesion version with
-        # https://github.com/mesonbuild/meson/pull/8900
         modinfo_files += custom_target(d + '-' + m + '.modinfo',
                                        output: d + '-' + m + '.modinfo',
-                                       input: module_ss.sources() + genh,
+                                       input: sl.extract_all_objects(recursive: true),
                                        capture: true,
-                                       command: [modinfo_collect, module_ss.sources()])
+                                       command: [modinfo_collect, '@INPUT@'])
       endif
     else
       if d == 'block'
@@ -3928,12 +4012,11 @@ foreach d, list : target_modules
                     dependencies: target_module_ss.dependencies(),
                     install: true,
                     install_dir: qemu_moddir)
-            # FIXME: Should use sl.extract_all_objects(recursive: true) too.
             modinfo_files += custom_target(module_name + '.modinfo',
                                            output: module_name + '.modinfo',
-                                           input: target_module_ss.sources() + genh,
+                                           input: sl.extract_all_objects(recursive: true),
                                            capture: true,
-                                           command: [modinfo_collect, '--target', target, target_module_ss.sources()])
+                                           command: [modinfo_collect, '--target', target, '@INPUT@'])
           endif
         endif
       endforeach
@@ -4053,8 +4136,20 @@ common_ss.add(hwcore)
 system_ss.add(authz, blockdev, chardev, crypto, io, qmp)
 common_ss.add(qom, qemuutil)
 
-common_ss.add_all(when: 'CONFIG_SYSTEM_ONLY', if_true: [system_ss])
-common_ss.add_all(when: 'CONFIG_USER_ONLY', if_true: user_ss)
+libuser = static_library('user',
+                         user_ss.all_sources() + genh,
+                         c_args: ['-DCONFIG_USER_ONLY',
+                                  '-DCOMPILING_SYSTEM_VS_USER'],
+                         include_directories: common_user_inc,
+                         dependencies: user_ss.all_dependencies(),
+                         build_by_default: false)
+
+libsystem = static_library('system',
+                           system_ss.all_sources() + genh,
+                           c_args: ['-DCONFIG_SOFTMMU',
+                                    '-DCOMPILING_SYSTEM_VS_USER'],
+                           dependencies: system_ss.all_dependencies(),
+                           build_by_default: false)
 
 # Note that this library is never used directly (only through extract_objects)
 # and is not built by default; therefore, source files not used by the build
@@ -4062,15 +4157,79 @@ common_ss.add_all(when: 'CONFIG_USER_ONLY', if_true: user_ss)
 common_all = static_library('common',
                             build_by_default: false,
                             sources: common_ss.all_sources() + genh,
-                            include_directories: common_user_inc,
                             implicit_include_directories: false,
                             dependencies: common_ss.all_dependencies())
 
+# construct common libraries per base architecture
+target_common_arch_libs = {}
+target_common_system_arch_libs = {}
+foreach target_base_arch, config_base_arch : config_base_arch_mak
+  target_inc = [include_directories('target' / target_base_arch)]
+  inc = [common_user_inc + target_inc]
+
+  target_common = common_ss.apply(config_base_arch, strict: false)
+  target_system = system_ss.apply(config_base_arch, strict: false)
+  target_user = user_ss.apply(config_base_arch, strict: false)
+  common_deps = []
+  system_deps = []
+  user_deps = []
+  foreach dep: target_common.dependencies()
+    common_deps += dep.partial_dependency(compile_args: true, includes: true)
+  endforeach
+  foreach dep: target_system.dependencies()
+    system_deps += dep.partial_dependency(compile_args: true, includes: true)
+  endforeach
+  foreach dep: target_user.dependencies()
+    user_deps += dep.partial_dependency(compile_args: true, includes: true)
+  endforeach
+
+  # prevent common code to access cpu compile time definition,
+  # but still allow access to cpu.h
+  target_c_args = ['-DCPU_DEFS_H']
+  target_system_c_args = target_c_args + ['-DCOMPILING_SYSTEM_VS_USER', '-DCONFIG_SOFTMMU']
+
+  if target_base_arch in target_common_arch
+    src = target_common_arch[target_base_arch]
+    lib = static_library(
+      'common_' + target_base_arch,
+      build_by_default: false,
+      sources: src.all_sources() + genh,
+      include_directories: inc,
+      c_args: target_c_args,
+      dependencies: src.all_dependencies() + common_deps +
+                    system_deps + user_deps)
+    target_common_arch_libs += {target_base_arch: lib}
+  endif
+
+  # merge hw_common_arch in target_common_system_arch
+  if target_base_arch in hw_common_arch
+    hw_src = hw_common_arch[target_base_arch]
+    if target_base_arch in target_common_system_arch
+      target_common_system_arch[target_base_arch].add_all(hw_src)
+    else
+      target_common_system_arch += {target_base_arch: hw_src}
+    endif
+  endif
+
+  if target_base_arch in target_common_system_arch
+    src = target_common_system_arch[target_base_arch]
+    lib = static_library(
+      'system_' + target_base_arch,
+      build_by_default: false,
+      sources: src.all_sources() + genh,
+      include_directories: inc,
+      c_args: target_system_c_args,
+      dependencies: src.all_dependencies() + common_deps + system_deps)
+    target_common_system_arch_libs += {target_base_arch: lib}
+  endif
+endforeach
+
 if have_rust
+  bindings_incdir = include_directories('.', 'include')
   # We would like to use --generate-cstr, but it is only available
   # starting with bindgen 0.66.0.  The oldest supported versions
   # is 0.60.x (Debian 12 has 0.60.1) which introduces --allowlist-file.
-  bindgen_args = [
+  bindgen_args_common = [
     '--disable-header-comment',
     '--raw-line', '// @generated',
     '--ctypes-prefix', 'std::os::raw',
@@ -4086,59 +4245,20 @@ if have_rust
     ]
   if not rustfmt.found()
     if bindgen.version().version_compare('<0.65.0')
-      bindgen_args += ['--no-rustfmt-bindings']
+      bindgen_args_common += ['--no-rustfmt-bindings']
     else
-      bindgen_args += ['--formatter', 'none']
+      bindgen_args_common += ['--formatter', 'none']
     endif
   endif
   if bindgen.version().version_compare('>=0.66.0')
-    bindgen_args += ['--rust-target', '1.59']
+    bindgen_args_common += ['--rust-target', '1.59']
   endif
   if bindgen.version().version_compare('<0.61.0')
     # default in 0.61+
-    bindgen_args += ['--size_t-is-usize']
+    bindgen_args_common += ['--size_t-is-usize']
   else
-    bindgen_args += ['--merge-extern-blocks']
+    bindgen_args_common += ['--merge-extern-blocks']
   endif
-  c_enums = [
-    'DeviceCategory',
-    'GpioPolarity',
-    'MachineInitPhase',
-    'MemoryDeviceInfoKind',
-    'MigrationPolicy',
-    'MigrationPriority',
-    'QEMUChrEvent',
-    'QEMUClockType',
-    'ResetType',
-    'device_endian',
-    'module_init_type',
-  ]
-  foreach enum : c_enums
-    bindgen_args += ['--rustified-enum', enum]
-  endforeach
-  c_bitfields = [
-    'ClockEvent',
-    'VMStateFlags',
-  ]
-  foreach enum : c_bitfields
-    bindgen_args += ['--bitfield-enum', enum]
-  endforeach
-
-  # TODO: Remove this comment when the clang/libclang mismatch issue is solved.
-  #
-  # Rust bindings generation with `bindgen` might fail in some cases where the
-  # detected `libclang` does not match the expected `clang` version/target. In
-  # this case you must pass the path to `clang` and `libclang` to your build
-  # command invocation using the environment variables CLANG_PATH and
-  # LIBCLANG_PATH
-  bindings_rs = rust.bindgen(
-    input: 'rust/wrapper.h',
-    dependencies: common_ss.all_dependencies(),
-    output: 'bindings.inc.rs',
-    include_directories: include_directories('.', 'include'),
-    bindgen_version: ['>=0.60.0'],
-    args: bindgen_args,
-    )
   subdir('rust')
 endif
 
@@ -4231,8 +4351,30 @@ foreach target : target_dirs
   arch_deps += t.dependencies()
 
   target_common = common_ss.apply(config_target, strict: false)
-  objects = common_all.extract_objects(target_common.sources())
+  objects = [common_all.extract_objects(target_common.sources())]
   arch_deps += target_common.dependencies()
+  if target_base_arch in target_common_arch_libs
+    src = target_common_arch[target_base_arch].apply(config_target, strict: false)
+    lib = target_common_arch_libs[target_base_arch]
+    objects += lib.extract_objects(src.sources())
+    arch_deps += src.dependencies()
+  endif
+  if target_type == 'system'
+    src = system_ss.apply(config_target, strict: false)
+    objects += libsystem.extract_objects(src.sources())
+    arch_deps += src.dependencies()
+  endif
+  if target_type == 'user'
+    src = user_ss.apply(config_target, strict: false)
+    objects += libuser.extract_objects(src.sources())
+    arch_deps += src.dependencies()
+  endif
+  if target_type == 'system' and target_base_arch in target_common_system_arch_libs
+    src = target_common_system_arch[target_base_arch].apply(config_target, strict: false)
+    lib = target_common_system_arch_libs[target_base_arch]
+    objects += lib.extract_objects(src.sources())
+    arch_deps += src.dependencies()
+  endif
 
   target_specific = specific_ss.apply(config_target, strict: false)
   arch_srcs += target_specific.sources()
@@ -4252,7 +4394,7 @@ foreach target : target_dirs
                               build_by_default: true,
                               build_always_stale: true)
       rlib = static_library('rust_' + target.underscorify(),
-                            rlib_rs,
+                            structured_sources([], {'.': rlib_rs}),
                             dependencies: target_rust.dependencies(),
                             override_options: ['rust_std=2021', 'build.rust_std=2021'],
                             rust_abi: 'c')
@@ -4467,7 +4609,11 @@ subdir('scripts')
 subdir('tools')
 subdir('pc-bios')
 subdir('docs')
-subdir('tests')
+# Tests are disabled on emscripten because they rely on host features that aren't
+# supported by emscripten (e.g. fork and unix socket).
+if host_os != 'emscripten'
+  subdir('tests')
+endif
 if gtk.found()
   subdir('po')
 endif
@@ -4570,7 +4716,6 @@ summary_info += {'Trace backends':    ','.join(get_option('trace_backends'))}
 if 'simple' in get_option('trace_backends')
   summary_info += {'Trace output file': get_option('trace_file') + '-<pid>'}
 endif
-summary_info += {'D-Bus display':     dbus_display}
 summary_info += {'QOM debugging':     get_option('qom_cast_debug')}
 summary_info += {'Relocatable install': get_option('relocatable')}
 summary_info += {'vhost-kernel support': have_vhost_kernel}
@@ -4603,6 +4748,7 @@ if have_rust
   summary_info += {'Rust target':     config_host['RUST_TARGET_TRIPLE']}
   summary_info += {'rustc':           ' '.join(rustc.cmd_array())}
   summary_info += {'rustc version':   rustc.version()}
+  summary_info += {'rustdoc':         rustdoc}
   summary_info += {'bindgen':         bindgen.full_path()}
   summary_info += {'bindgen version': bindgen.version()}
 endif
@@ -4753,6 +4899,7 @@ summary_info = {}
 if host_os == 'darwin'
   summary_info += {'Cocoa support':           cocoa}
 endif
+summary_info += {'D-Bus display':     dbus_display}
 summary_info += {'SDL support':       sdl}
 summary_info += {'SDL image support': sdl_image}
 summary_info += {'GTK support':       gtk}
@@ -4802,6 +4949,7 @@ if host_os == 'darwin'
   summary_info += {'vmnet.framework support': vmnet}
 endif
 summary_info += {'AF_XDP support':    libxdp}
+summary_info += {'passt support':     enable_passt}
 summary_info += {'slirp support':     slirp}
 summary_info += {'vde support':       vde}
 summary_info += {'netmap support':    have_netmap}
@@ -4841,6 +4989,7 @@ summary_info += {'seccomp support':   seccomp}
 summary_info += {'GlusterFS support': glusterfs}
 summary_info += {'hv-balloon support': hv_balloon}
 summary_info += {'TPM support':       have_tpm}
+summary_info += {'IGVM support':      igvm}
 summary_info += {'libssh support':    libssh}
 summary_info += {'lzo support':       lzo}
 summary_info += {'snappy support':    snappy}
@@ -4866,6 +5015,7 @@ endif
 if host_os == 'darwin'
   summary_info += {'ParavirtualizedGraphics support': pvg}
 endif
+summary_info += {'valgrind':          valgrind}
 summary(summary_info, bool_yn: true, section: 'Dependencies')
 
 if host_arch == 'unknown'
@@ -4877,7 +5027,7 @@ if host_arch == 'unknown'
   message('compile or work on this host CPU. You can help by volunteering')
   message('to maintain it and providing a build host for our continuous')
   message('integration setup.')
-  if get_option('tcg').allowed() and target_dirs.length() > 0
+  if have_tcg
     message()
     message('configure has succeeded and you can continue to build, but')
     message('QEMU will use a slow interpreter to emulate the target CPU.')

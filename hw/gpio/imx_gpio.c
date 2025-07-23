@@ -72,7 +72,7 @@ static void imx_gpio_update_int(IMXGPIOState *s)
 static void imx_gpio_set_int_line(IMXGPIOState *s, int line, IMXGPIOLevel level)
 {
     /* if this signal isn't configured as an input signal, nothing to do */
-    if (!extract32(s->gdir, line, 1)) {
+    if (extract32(s->gdir, line, 1)) {
         return;
     }
 
@@ -257,8 +257,6 @@ static void imx_gpio_write(void *opaque, hwaddr offset, uint64_t value,
                       HWADDR_PRIx "\n", TYPE_IMX_GPIO, __func__, offset);
         break;
     }
-
-    return;
 }
 
 static const MemoryRegionOps imx_gpio_ops = {
@@ -323,7 +321,7 @@ static void imx_gpio_realize(DeviceState *dev, Error **errp)
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iomem);
 }
 
-static void imx_gpio_class_init(ObjectClass *klass, void *data)
+static void imx_gpio_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 

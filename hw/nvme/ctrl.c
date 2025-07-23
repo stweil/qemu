@@ -22,7 +22,7 @@
  *
  * Usage
  * -----
- * See docs/system/nvme.rst for extensive documentation.
+ * See docs/system/devices/nvme.rst for extensive documentation.
  *
  * Add options:
  *      -drive file=<file>,if=none,id=<drive_id>
@@ -1057,7 +1057,8 @@ static uint16_t nvme_map_sgl(NvmeCtrl *n, NvmeSg *sg, NvmeSglDescriptor sgl,
      */
 #define SEG_CHUNK_SIZE 256
 
-    NvmeSglDescriptor segment[SEG_CHUNK_SIZE], *sgld, *last_sgld;
+    QEMU_UNINITIALIZED NvmeSglDescriptor segment[SEG_CHUNK_SIZE];
+    NvmeSglDescriptor *sgld, *last_sgld;
     uint64_t nsgld;
     uint32_t seg_len;
     uint16_t status;
@@ -5128,7 +5129,7 @@ static uint16_t nvme_error_info(NvmeCtrl *n, uint8_t rae, uint32_t buf_len,
 static uint16_t nvme_changed_nslist(NvmeCtrl *n, uint8_t rae, uint32_t buf_len,
                                     uint64_t off, NvmeRequest *req)
 {
-    uint32_t nslist[1024];
+    uint32_t nslist[1024] = {};
     uint32_t trans_len;
     int i = 0;
     uint32_t nsid;
@@ -5138,7 +5139,6 @@ static uint16_t nvme_changed_nslist(NvmeCtrl *n, uint8_t rae, uint32_t buf_len,
         return NVME_INVALID_FIELD | NVME_DNR;
     }
 
-    memset(nslist, 0x0, sizeof(nslist));
     trans_len = MIN(sizeof(nslist) - off, buf_len);
 
     while ((nsid = find_first_bit(n->changed_nsids, NVME_CHANGED_NSID_SIZE)) !=
@@ -9183,7 +9183,7 @@ static const VMStateDescription nvme_vmstate = {
     .unmigratable = 1,
 };
 
-static void nvme_class_init(ObjectClass *oc, void *data)
+static void nvme_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
     PCIDeviceClass *pc = PCI_DEVICE_CLASS(oc);
@@ -9221,7 +9221,7 @@ static const TypeInfo nvme_info = {
     .instance_size = sizeof(NvmeCtrl),
     .instance_init = nvme_instance_init,
     .class_init    = nvme_class_init,
-    .interfaces = (InterfaceInfo[]) {
+    .interfaces = (const InterfaceInfo[]) {
         { INTERFACE_PCIE_DEVICE },
         { }
     },

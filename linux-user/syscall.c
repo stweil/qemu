@@ -26,6 +26,7 @@
 #include "tcg/startup.h"
 #include "target_mman.h"
 #include "exec/page-protection.h"
+#include "exec/mmap-lock.h"
 #include "exec/tb-flush.h"
 #include "exec/translation-block.h"
 #include <elf.h>
@@ -788,6 +789,10 @@ safe_syscall5(int, mq_timedreceive, int, mqdes, char *, msg_ptr,
 safe_syscall6(ssize_t, copy_file_range, int, infd, loff_t *, pinoff,
               int, outfd, loff_t *, poutoff, size_t, length,
               unsigned int, flags)
+#endif
+#if defined(TARGET_NR_fchmodat2) && defined(__NR_fchmodat2)
+safe_syscall4(int, fchmodat2, int, dfd, const char *, filename,
+              unsigned short, mode, unsigned int, flags)
 #endif
 
 /* We do ioctl like this rather than via safe_syscall3 to preserve the
@@ -6741,10 +6746,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
                 int pid_child = ret;
                 pid_fd = pidfd_open(pid_child, 0);
                 if (pid_fd >= 0) {
-                        fcntl(pid_fd, F_SETFD, fcntl(pid_fd, F_GETFL)
-                                               | FD_CLOEXEC);
+                    qemu_set_cloexec(pid_fd);
                 } else {
-                        pid_fd = 0;
+                    pid_fd = 0;
                 }
 #endif
                 put_user_u32(pid_fd, parent_tidptr);
@@ -8133,8 +8137,8 @@ static void open_self_maps_4(const struct open_self_maps_data *d,
  * Callback for walk_memory_regions, when read_self_maps() fails.
  * Proceed without the benefit of host /proc/self/maps cross-check.
  */
-static int open_self_maps_3(void *opaque, target_ulong guest_start,
-                            target_ulong guest_end, unsigned long flags)
+static int open_self_maps_3(void *opaque, vaddr guest_start,
+                            vaddr guest_end, int flags)
 {
     static const MapInfo mi = { .is_priv = true };
 
@@ -8145,8 +8149,8 @@ static int open_self_maps_3(void *opaque, target_ulong guest_start,
 /*
  * Callback for walk_memory_regions, when read_self_maps() succeeds.
  */
-static int open_self_maps_2(void *opaque, target_ulong guest_start,
-                            target_ulong guest_end, unsigned long flags)
+static int open_self_maps_2(void *opaque, vaddr guest_start,
+                            vaddr guest_end, int flags)
 {
     const struct open_self_maps_data *d = opaque;
     uintptr_t host_start = (uintptr_t)g2h_untagged(guest_start);
@@ -8233,6 +8237,9 @@ static int open_self_stat(CPUArchState *cpu_env, int fd)
         } else if (i == 3) {
             /* ppid */
             g_string_printf(buf, FMT_pid " ", getppid());
+        } else if (i == 4) {
+            /* pgid */
+            g_string_printf(buf, FMT_pid " ", getpgrp());
         } else if (i == 19) {
             /* num_threads */
             int cpus = 0;
@@ -10709,6 +10716,15 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
         unlock_user(p, arg2, 0);
         return ret;
 #endif
+#if defined(TARGET_NR_fchmodat2) && defined(__NR_fchmodat2)
+    case TARGET_NR_fchmodat2:
+        if (!(p = lock_user_string(arg2))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(safe_fchmodat2(arg1, p, arg3, arg4));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
     case TARGET_NR_getpriority:
         /* Note that negative values are valid for getpriority, so we must
            differentiate based on errno settings.  */
@@ -11625,10 +11641,14 @@ static abi_long do_syscall1(CPUArchState *cpu_env, int num, abi_long arg1,
     case TARGET_NR_nanosleep:
         {
             struct timespec req, rem;
-            target_to_host_timespec(&req, arg1);
+            if (target_to_host_timespec(&req, arg1)) {
+                return -TARGET_EFAULT;
+            }
             ret = get_errno(safe_nanosleep(&req, &rem));
             if (is_error(ret) && arg2) {
-                host_to_target_timespec(arg2, &rem);
+                if (host_to_target_timespec(arg2, &rem)) {
+                    return -TARGET_EFAULT;
+                }
             }
         }
         return ret;

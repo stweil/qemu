@@ -25,6 +25,7 @@
 #include "signal-common.h"
 #include "semihosting/common-semi.h"
 #include "exec/page-protection.h"
+#include "exec/mmap-lock.h"
 #include "user/page-protection.h"
 #include "target/arm/syndrome.h"
 
@@ -362,6 +363,7 @@ void cpu_loop(CPUARMState *env)
                     switch (n) {
                     case ARM_NR_cacheflush:
                         /* nop */
+                        env->regs[0] = 0;
                         break;
                     case ARM_NR_set_tls:
                         cpu_set_tls(env, env->regs[0]);

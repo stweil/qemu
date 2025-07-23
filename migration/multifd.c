@@ -16,7 +16,7 @@
 #include "qemu/rcu.h"
 #include "exec/target_page.h"
 #include "system/system.h"
-#include "exec/ramblock.h"
+#include "system/ramblock.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "file.h"
@@ -35,11 +35,6 @@
 #include "io/channel-file.h"
 #include "io/channel-socket.h"
 #include "yank_functions.h"
-
-/* Multiple fd's */
-
-#define MULTIFD_MAGIC 0x11223344U
-#define MULTIFD_VERSION 1
 
 typedef struct {
     uint32_t magic;
@@ -695,6 +690,7 @@ static void *multifd_send_thread(void *opaque)
         if (qatomic_load_acquire(&p->pending_job)) {
             bool is_device_state = multifd_payload_device_state(p->data);
             size_t total_size;
+            int write_flags_masked = 0;
 
             p->flags = 0;
             p->iovs_num = 0;
@@ -702,6 +698,9 @@ static void *multifd_send_thread(void *opaque)
 
             if (is_device_state) {
                 multifd_device_state_send_prepare(p);
+
+                /* Device state packets cannot be sent via zerocopy */
+                write_flags_masked |= QIO_CHANNEL_WRITE_FLAG_ZERO_COPY;
             } else {
                 ret = multifd_send_state->ops->send_prepare(p, &local_err);
                 if (ret != 0) {
@@ -723,7 +722,8 @@ static void *multifd_send_thread(void *opaque)
                                               &p->data->u.ram, &local_err);
             } else {
                 ret = qio_channel_writev_full_all(p->c, p->iov, p->iovs_num,
-                                                  NULL, 0, p->write_flags,
+                                                  NULL, 0,
+                                                  p->write_flags & ~write_flags_masked,
                                                   &local_err);
             }
 
@@ -1384,6 +1384,13 @@ static void *multifd_recv_thread(void *opaque)
         }
 
         if (has_data) {
+            /*
+             * multifd thread should not be active and receive data
+             * when migration is in the Postcopy phase. Two threads
+             * writing the same memory area could easily corrupt
+             * the guest state.
+             */
+            assert(!migration_in_postcopy());
             if (is_device_state) {
                 assert(use_packets);
                 ret = multifd_device_state_recv(p, &local_err);

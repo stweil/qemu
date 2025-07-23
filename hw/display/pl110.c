@@ -585,7 +585,7 @@ static void pl111_init(Object *obj)
     s->version = VERSION_PL111;
 }
 
-static void pl110_class_init(ObjectClass *klass, void *data)
+static void pl110_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 

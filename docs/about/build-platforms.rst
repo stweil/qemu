@@ -101,7 +101,7 @@ Python runtime
   option of the ``configure`` script to point QEMU to a supported
   version of the Python runtime.
 
-  As of QEMU |version|, the minimum supported version of Python is 3.8.
+  As of QEMU |version|, the minimum supported version of Python is 3.9.
 
 Python build dependencies
   Some of QEMU's build dependencies are written in Python.  Usually these
@@ -118,16 +118,21 @@ Rust build dependencies
   include bindgen or have an older version, it is recommended to install
   a newer version using ``cargo install bindgen-cli``.
 
-  Developers may want to use Cargo-based tools in the QEMU source tree;
-  this requires Cargo 1.74.0.  Note that Cargo is not required in order
-  to build QEMU.
+  QEMU requires Rust 1.77.0.  This is available on all supported platforms
+  with one exception, namely the ``mips64el`` architecture on Debian bookworm.
+  For all other architectures, Debian bookworm provides a new-enough Rust
+  compiler in the ``rustc-web`` package.
+
+  Also, on Ubuntu 22.04 or 24.04 this requires the ``rustc-1.77``
+  (or newer) package.  The path to ``rustc`` and ``rustdoc`` must be
+  provided manually to the configure script.
 
 Optional build dependencies
-  Build components whose absence does not affect the ability to build
-  QEMU may not be available in distros, or may be too old for QEMU's
-  requirements.  Many of these, such as the Avocado testing framework
-  or various linters, are written in Python and therefore can also
-  be installed using ``pip``.  Cross compilers are another example
+  Build components whose absence does not affect the ability to build QEMU
+  may not be available in distros, or may be too old for our requirements.
+  Many of these, such as additional modules for the functional testing
+  framework or various linters, are written in Python and therefore can
+  also be installed using ``pip``.  Cross compilers are another example
   of optional build-time dependency; in this case it is possible to
   download them from repositories such as EPEL, to use container-based
   cross compilation using ``docker`` or ``podman``, or to use pre-built

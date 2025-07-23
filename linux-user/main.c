@@ -40,9 +40,9 @@
 #include "qemu/plugin.h"
 #include "user/guest-base.h"
 #include "user/page-protection.h"
-#include "exec/exec-all.h"
 #include "exec/gdbstub.h"
 #include "gdbstub/user.h"
+#include "accel/accel-ops.h"
 #include "tcg/startup.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
@@ -123,6 +123,7 @@ static const char *last_log_filename;
 #endif
 
 unsigned long reserved_va;
+unsigned long guest_addr_max;
 
 static void usage(int exitcode);
 
@@ -149,12 +150,14 @@ void fork_start(void)
     cpu_list_lock();
     qemu_plugin_user_prefork_lock();
     gdbserver_fork_start();
+    fd_trans_prefork();
 }
 
 void fork_end(pid_t pid)
 {
     bool child = pid == 0;
 
+    fd_trans_postfork();
     qemu_plugin_user_postfork(child);
     mmap_fork_end(child);
     if (child) {
@@ -820,7 +823,7 @@ int main(int argc, char **argv, char **envp)
                                  opt_one_insn_per_tb, &error_abort);
         object_property_set_int(OBJECT(accel), "tb-size",
                                 opt_tb_size, &error_abort);
-        ac->init_machine(NULL);
+        ac->init_machine(accel, NULL);
     }
 
     /*
@@ -858,6 +861,13 @@ int main(int argc, char **argv, char **envp)
     } else if (HOST_LONG_BITS == 64 && TARGET_VIRT_ADDR_SPACE_BITS <= 32) {
         /* MAX_RESERVED_VA + 1 is a large power of 2, so is aligned. */
         reserved_va = max_reserved_va;
+    }
+    if (reserved_va != 0) {
+        guest_addr_max = reserved_va;
+    } else if (MIN(TARGET_VIRT_ADDR_SPACE_BITS, TARGET_ABI_BITS) <= 32) {
+        guest_addr_max = UINT32_MAX;
+    } else {
+        guest_addr_max = ~0ul;
     }
 
     /*

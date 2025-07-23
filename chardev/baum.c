@@ -671,7 +671,7 @@ static void baum_chr_open(Chardev *chr,
 #pragma GCC diagnostic pop
 }
 
-static void char_braille_class_init(ObjectClass *oc, void *data)
+static void char_braille_class_init(ObjectClass *oc, const void *data)
 {
     ChardevClass *cc = CHARDEV_CLASS(oc);
 

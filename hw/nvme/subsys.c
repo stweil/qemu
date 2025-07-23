@@ -218,7 +218,7 @@ static const Property nvme_subsystem_props[] = {
     DEFINE_PROP_UINT16("fdp.nruh", NvmeSubsystem, params.fdp.nruh, 0),
 };
 
-static void nvme_subsys_class_init(ObjectClass *oc, void *data)
+static void nvme_subsys_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
 
@@ -226,7 +226,6 @@ static void nvme_subsys_class_init(ObjectClass *oc, void *data)
 
     dc->realize = nvme_subsys_realize;
     dc->desc = "Virtual NVMe subsystem";
-    dc->hotpluggable = false;
 
     device_class_set_props(dc, nvme_subsystem_props);
 }
