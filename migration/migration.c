@@ -2263,6 +2263,7 @@ void qmp_migrate(const char *uri, bool has_channels,
      * connection, so qmp_migrate_finish will fail to connect, and then recover.
      */
     if (s->parameters.mode == MIG_MODE_CPR_TRANSFER) {
+#pragma GCC diagnostic ignored "-Wcast-function-type"
         migrate_hup_add(s, cpr_state_ioc(), (GSourceFunc)qmp_migrate_finish_cb,
                         QAPI_CLONE(MigrationAddress, addr));
 
