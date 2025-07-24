@@ -21,13 +21,15 @@ if false; then
 )
 fi
 
-(
-  if grep -q exe /mingw64/lib/pkgconfig/gio-2.0.pc; then
-    echo Please patch /mingw64/lib/pkgconfig/gio-2.0.pc
-    exit 1
-  fi
+if grep -q exe /mingw64/lib/pkgconfig/gio-2.0.pc; then
+  echo Please patch /mingw64/lib/pkgconfig/gio-2.0.pc
+  exit 1
+fi
 
+(
   target=x86_64-w64-mingw32
+
+  export PKG_CONFIG_PATH=/mingw64/lib/pkgconfig:/mingw64/share/pkgconfig
 
   echo Building $target...
   rm -rf /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
@@ -35,7 +37,7 @@ fi
   cd /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target
   # -DNO_OLDNAMES geht nicht.
   # -D_MSC_VER geht nicht.
-  ../../../configure --cross-prefix=${target}- --disable-guest-agent-msi --disable-werror --enable-strip --extra-cflags="-D_FORTIFY_SOURCE=2 -D__pragma(x)= -I/mingw64/include" --extra-ldflags="-L/mingw64/lib"
+  ../../../configure --cross-prefix=${target}- --disable-guest-agent-msi --disable-werror --enable-strip --extra-cflags="-D_FORTIFY_SOURCE=2 -D__pragma(x)= -idirafter /mingw64/include" --extra-ldflags="-L/mingw64/lib"
   make -O -j4
   make -C /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/$target installer SIGNCODE=signcode
   instdir=$WEBDIR/w64/$year
@@ -51,5 +53,14 @@ fi
 
 echo Update documentation...
 cp -auv /home/stefan/src/qemu/repo.or.cz/qemu/ar7/bin/ndebug/x86_64-w64-mingw32/docs/manual/* /var/www/html/doc/latest/
+
+echo Get installer for WoA...
+instdir=$WEBDIR/aarch64/$year
+mkdir -p $instdir
+cd $instdir
+wget https://v22024089067283036.luckysrv.de/~stefan/qemu-arm-setup-$date.exe
+wget https://v22024089067283036.luckysrv.de/~stefan/qemu-arm-setup-$date.sha512
+cd ..
+ln -sv $year/qemu-arm-setup-$date.* .
 
 echo Done.
