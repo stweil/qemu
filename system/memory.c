@@ -53,6 +53,7 @@ static QTAILQ_HEAD(, AddressSpace) address_spaces
 
 static GHashTable *flat_views;
 
+typedef size_t target_ulong;
 typedef struct AddrRange AddrRange;
 
 /*
@@ -1329,6 +1330,7 @@ static int qemu_target_backtrace(target_ulong *array, size_t size)
 {
     int n = 0;
     if (size >= 2) {
+#if 0
 #if defined(TARGET_ARM)
         CPUArchState *env = cpu_env(current_cpu);
         array[0] = env->regs[15];
@@ -1337,6 +1339,10 @@ static int qemu_target_backtrace(target_ulong *array, size_t size)
         CPUArchState *env = cpu_env(current_cpu);
         array[0] = env->active_tc.PC;
         array[1] = env->active_tc.gpr[31];
+#else
+        array[0] = 0;
+        array[1] = 0;
+#endif
 #else
         array[0] = 0;
         array[1] = 0;
