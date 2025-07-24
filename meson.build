@@ -4880,11 +4880,12 @@ summary_info += {'TLS priority':      get_option('tls_priority')}
 summary_info += {'GNUTLS support':    gnutls}
 if gnutls.found()
   summary_info += {'  GNUTLS crypto':   gnutls_crypto.found()}
-endif
+else
 summary_info += {'libgcrypt':         gcrypt}
 summary_info += {'nettle':            nettle}
 if nettle.found()
    summary_info += {'  XTS':             xts != 'private'}
+endif
 endif
 summary_info += {'SM4 ALG support':   crypto_sm4}
 summary_info += {'SM3 ALG support':   crypto_sm3}
