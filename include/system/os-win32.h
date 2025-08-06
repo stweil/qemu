@@ -29,7 +29,9 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
 #pragma GCC diagnostic ignored "-Wredundant-decls"
+#ifndef __cplusplus
 #pragma GCC diagnostic ignored "-Wstrict-prototypes"
+#endif
 #pragma GCC diagnostic ignored "-Wundef"
 #include <winsock2.h>
 #include <windows.h>

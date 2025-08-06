@@ -106,7 +106,9 @@ QEMU_EXTERN_C int daemon(int, int);
 #endif
 
 #pragma GCC diagnostic push
+#ifndef __cplusplus
 #pragma GCC diagnostic ignored "-Wnested-externs"
+#endif
 #pragma GCC diagnostic ignored "-Wredundant-decls"
 #include <stdarg.h>
 #include <stddef.h>
