@@ -108,6 +108,8 @@ def main():
         iconsdir = "/mingw32/share/icons"
         if args.cpu == "x86_64":
             iconsdir = "/mingw64/share/icons"
+        elif args.cpu == "aarch64":
+            iconsdir = "/clangarm64/share/icons"
         if os.path.exists("/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"):
             iconsdir = "/usr/" + args.cpu + "-w64-mingw32/sys-root/mingw/share/icons"
 
@@ -126,7 +128,7 @@ def main():
         if signcode_cmd:
             makensis += ["-DSIGNCODE=" + signcode_cmd]
 
-        if args.cpu == "x86_64":
+        if args.cpu == "aarch64" or args.cpu == "x86_64":
             makensis += ["-DW64"]
 
         makensis += args.nsisargs
