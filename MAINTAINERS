@@ -1695,6 +1695,7 @@ S: Supported
 F: docs/system/riscv/sifive_u.rst
 F: hw/*/*sifive*.c
 F: include/hw/*/*sifive*.h
+F: tests/functional/test_riscv64_sifive_u.py
 
 AMD Microblaze-V Generic Board
 M: Sai Pavan Boddu <sai.pavan.boddu@amd.com>
@@ -2322,6 +2323,7 @@ F: include/*/vhost*
 F: subprojects/libvhost-user/
 F: block/export/vhost-user*
 F: util/vhost-user-server.c
+F: net/vhost*
 
 vhost-shadow-virtqueue
 R: Eugenio Pérez <eperezma@redhat.com>
