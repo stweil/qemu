@@ -665,6 +665,10 @@ static void baum_chr_open(Chardev *chr,
 
     baum->cellCount_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, baum_cellCount_timer_cb, baum);
 
+    /*
+     * On Windows, brlapi_fd is a pointer, which is being used here
+     * as an integer, but in practice it seems to work
+     */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic warning "-Wint-conversion"
     qemu_set_fd_handler(baum->brlapi_fd, baum_chr_read, NULL, baum);

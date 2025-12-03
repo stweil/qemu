@@ -90,6 +90,7 @@ cp_portable() {
         -e 's/<linux\/\([^>]*\)>/"standard-headers\/linux\/\1"/' \
         -e "$arch_cmd" \
         -e 's/__bitwise//' \
+        -e 's/__counted_by(\w*)//' \
         -e 's/__attribute__((packed))/QEMU_PACKED/' \
         -e 's/__inline__/inline/' \
         -e 's/__BITS_PER_LONG/HOST_LONG_BITS/' \
@@ -195,7 +196,7 @@ rm -rf "$output/linux-headers/linux"
 mkdir -p "$output/linux-headers/linux"
 for header in const.h stddef.h kvm.h vfio.h vfio_ccw.h vfio_zdev.h vhost.h \
               psci.h psp-sev.h userfaultfd.h memfd.h mman.h nvme_ioctl.h \
-              vduse.h iommufd.h bits.h; do
+              vduse.h iommufd.h bits.h mshv.h; do
     cp "$hdrdir/include/linux/$header" "$output/linux-headers/linux"
 done
 

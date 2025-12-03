@@ -294,4 +294,6 @@
 
 #define PCI_VENDOR_ID_NVIDIA             0x10de
 
+#define PCI_VENDOR_ID_ASPEED             0x1A03
+
 #endif
