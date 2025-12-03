@@ -175,7 +175,7 @@ static void elfN(process)(FILE *outf, void *buf, long len, bool need_bswap)
             fprintf(stderr, "LOAD segment's filesz and memsz differ\n");
             errors++;
         }
-        if (phdr[i].p_filesz > len) {
+        if (phdr[i].p_filesz > (unsigned long)len) {
             fprintf(stderr, "LOAD segment is larger than the whole VDSO\n");
             errors++;
         }
