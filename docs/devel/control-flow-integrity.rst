@@ -4,39 +4,38 @@
 Control-Flow Integrity (CFI)
 ============================
 
-This document describes the current control-flow integrity (CFI) mechanism in
-QEMU. How it can be enabled, its benefits and deficiencies, and how it affects
-new and existing code in QEMU
+This document describes the current CFI mechanism in QEMU,
+how to enable it, its benefits and drawbacks,
+and its impact on new and existing QEMU code.
 
 Basics
 ------
 
-CFI is a hardening technique that focusing on guaranteeing that indirect
+CFI is a hardening technique that focuses on ensuring that indirect
 function calls have not been altered by an attacker.
-The type used in QEMU is a forward-edge control-flow integrity that ensures
-function calls performed through function pointers, always call a "compatible"
-function. A compatible function is a function with the same signature of the
+The type used in QEMU is forward-edge CFI, which ensures that
+function calls performed through function pointers always call a "compatible"
+function. A compatible function has the same signature as the
 function pointer declared in the source code.
 
-This type of CFI is entirely compiler-based and relies on the compiler knowing
-the signature of every function and every function pointer used in the code.
-As of now, the only compiler that provides support for CFI is Clang.
+This type of CFI relies entirely on the compiler knowing the signature of
+every function and function pointer used in the code.
+Currently, Clang is the only compiler that provides support for CFI.
 
 CFI is best used on production binaries, to protect against unknown attack
 vectors.
 
-In case of a CFI violation (i.e. call to a non-compatible function) QEMU will
-terminate abruptly, to stop the possible attack.
+In the event of a CFI violation, i.e., a call to a non-compatible function,
+QEMU will abruptly terminate to prevent a potential attack.
 
 Building with CFI
 -----------------
 
 NOTE: CFI requires the use of link-time optimization. Therefore, when CFI is
-selected, LTO will be automatically enabled.
+selected, LTO is automatically enabled.
 
-To build with CFI, the minimum requirement is Clang 6+. If you
-are planning to also enable fuzzing, then Clang 11+ is needed (more on this
-later).
+The minimum requirement to build with CFI is Clang 6+. If you
+plan to enable fuzzing as well, Clang 11+ is needed (more on this later).
 
 Given the use of LTO, a version of AR that supports LLVM IR is required.
 The easies way of doing this is by selecting the AR provided by LLVM::
