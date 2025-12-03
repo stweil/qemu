@@ -450,7 +450,7 @@ static void multifd_send_set_error(Error *err)
  */
 static void migration_ioc_shutdown_gracefully(QIOChannel *ioc)
 {
-    g_autoptr(Error) local_err = NULL;
+    Error *local_err = NULL;
 
     if (!migration_has_failed(migrate_get_current()) &&
         object_dynamic_cast((Object *)ioc, TYPE_QIO_CHANNEL_TLS)) {
@@ -464,8 +464,8 @@ static void migration_ioc_shutdown_gracefully(QIOChannel *ioc)
          */
         migration_tls_channel_end(ioc, &local_err);
         if (local_err) {
-            warn_report("Failed to gracefully terminate TLS connection: %s",
-                        error_get_pretty(local_err));
+            warn_reportf_err(local_err,
+                        "Failed to gracefully terminate TLS connection: ");
         }
     }
 
@@ -964,6 +964,7 @@ bool multifd_send_setup(void)
 
         if (!multifd_new_send_channel_create(p, &local_err)) {
             migrate_set_error(s, local_err);
+            error_free(local_err);
             ret = -1;
         }
     }
@@ -988,6 +989,7 @@ bool multifd_send_setup(void)
         ret = multifd_send_state->ops->send_setup(p, &local_err);
         if (ret) {
             migrate_set_error(s, local_err);
+            error_free(local_err);
             goto err;
         }
         assert(p->iov);
