@@ -14,7 +14,7 @@
 #include "hw/hw.h"
 #include "ui/console.h"
 #include "framebuffer.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 
 #include "s3c24xx.h"
 

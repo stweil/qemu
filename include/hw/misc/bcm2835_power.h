@@ -6,7 +6,7 @@
 #ifndef BCM2835_POWER_H
 #define BCM2835_POWER_H
 
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 
 #define TYPE_BCM2835_POWER "bcm2835-power"
 #define BCM2835_POWER(obj) \

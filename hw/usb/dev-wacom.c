@@ -4,7 +4,7 @@
  * Copyright (c) 2006 Openedhand Ltd.
  * Author: Andrzej Zaborowski <balrog@zabor.org>
  *
- * Based on hw/usb-hid.c:
+ * Based on hw/usb/hid.c:
  * Copyright (c) 2005 Fabrice Bellard
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy

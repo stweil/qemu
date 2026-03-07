@@ -12,7 +12,7 @@
 #include "cpu.h"
 #include "hw/arm/bcm2835.h"
 #include "hw/arm/raspi_platform.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "exec/address-spaces.h"
 #include "qapi/error.h"          /* error_abort */
 

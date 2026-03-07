@@ -14,14 +14,14 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "hw/arm/boot.h"
 #include "hw/boards.h"
 #include "hw/hw.h"               /* hw_error */
 #include "hw/i2c/i2c.h"
 #include "hw/i386/pc.h"
 #include "hw/irq.h"              /* qemu_irq_raise */
-#include "hw/ptimer.h"           /* ptimer_state */
+#include "hw/core/ptimer.h"           /* ptimer_state */
 #include "exec/address-spaces.h" /* get_system_memory */
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "net/net.h"

@@ -12,7 +12,7 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "hw/qdev-properties.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "qapi/error.h"          /* error_abort */
 #include "system/system.h"
 #include "exec/address-spaces.h" /* get_system_memory */

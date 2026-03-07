@@ -24,7 +24,7 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "hw/boards.h"
 #include "hw/arm/boot.h"
 #include "exec/address-spaces.h"

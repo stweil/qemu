@@ -7,8 +7,8 @@
 #define BCM2835_USB_H
 
 #include "qemu/timer.h"
-#include "hw/sysbus.h"
-#include "hw/usb.h"
+#include "hw/core/sysbus.h"
+#include "hw/usb/usb.h"
 
 #define BCM2835_USB_HCHANS 8
 

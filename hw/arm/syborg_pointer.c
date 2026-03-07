@@ -24,7 +24,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "ui/console.h"
 #include "syborg.h"
 

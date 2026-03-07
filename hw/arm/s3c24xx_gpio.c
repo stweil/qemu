@@ -14,7 +14,7 @@
 #include "hw/hw.h"
 #include "hw/irq.h"              /* qemu_set_irq */
 #include "hw/qdev-properties.h"  /* DEFINE_PROP_END_OF_LIST */
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "s3c24xx.h"
 

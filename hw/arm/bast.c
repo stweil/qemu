@@ -29,7 +29,7 @@
 #include "hw/ide/internal.h"    /* ide_cmd_write, ... */
 #include "hw/loader.h"          /* load_image_targphys */
 #include "hw/qdev-properties.h"
-#include "hw/sysbus.h"          /* SYS_BUS_DEVICE, ... */
+#include "hw/core/sysbus.h"          /* SYS_BUS_DEVICE, ... */
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "net/net.h"
 #include "s3c2410x.h"

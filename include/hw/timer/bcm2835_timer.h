@@ -6,8 +6,8 @@
 #ifndef BCM2835_TIMER_H
 #define BCM2835_TIMER_H
 
-#include "hw/sysbus.h"
-#include "hw/ptimer.h"
+#include "hw/core/sysbus.h"
+#include "hw/core/ptimer.h"
 
 #define TYPE_BCM2835_TIMER "bcm2835_timer"
 #define BCM2835_TIMER(obj) \

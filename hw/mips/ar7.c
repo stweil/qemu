@@ -80,7 +80,7 @@
 
 #include "hw/char/serial.h"     /* serial_16550_init, ... */
 #include "hw/block/pflash.h"    /* pflash_device_register, ... */
-#include "hw/sysbus.h"          /* SysBusDevice */
+#include "hw/core/sysbus.h"          /* SysBusDevice */
 #include "hw/char/vlynq.h"      /* vlynq_create_bus */
 
 #include "qapi/error.h"          /* error_abort */

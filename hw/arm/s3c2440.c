@@ -12,7 +12,7 @@
 #include "qemu/osdep.h"
 #include "cpu.h"
 #include "hw/qdev-properties.h"  /* qdev_prop_set_uint32 */
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "migration/vmstate.h"   /* VMStateDescription */
 #include "qapi/error.h"          /* error_abort */
 #include "system/system.h"

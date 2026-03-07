@@ -25,7 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "syborg.h"
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "virtio.h"
 #include "virtio-net.h"
 

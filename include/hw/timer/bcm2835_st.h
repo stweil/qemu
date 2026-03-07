@@ -6,7 +6,7 @@
 #ifndef BCM2835_ST_H
 #define BCM2835_ST_H
 
-#include "hw/sysbus.h"
+#include "hw/core/sysbus.h"
 #include "qemu/timer.h"
 
 #define TYPE_BCM2835_ST "bcm2835_st"
