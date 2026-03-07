@@ -44,6 +44,7 @@
 
 #include "qemu/osdep.h"
 #include "qemu/units.h"
+#include "exec/cpu-common.h"
 #include "hw/pci/pci_device.h"
 #include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
