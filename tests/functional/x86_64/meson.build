@@ -34,6 +34,8 @@ tests_x86_64_system_thorough = [
   'reverse_debug',
   'tuxrun',
   'vfio_user_client',
+  'vhost_user_bridge',
   'virtio_balloon',
   'virtio_gpu',
+  'rebuild_vmfd',
 ]

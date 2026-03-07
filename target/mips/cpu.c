@@ -29,8 +29,8 @@
 #include "qemu/module.h"
 #include "system/kvm.h"
 #include "system/qtest.h"
-#include "hw/qdev-properties.h"
-#include "hw/qdev-clock.h"
+#include "hw/core/qdev-properties.h"
+#include "hw/core/qdev-clock.h"
 #include "fpu_helper.h"
 #ifndef CONFIG_USER_ONLY
 #include "semihosting/semihost.h"
@@ -422,9 +422,12 @@ static void mips_cpu_reset_hold(Object *obj, ResetType type)
 #endif
 }
 
-static void mips_cpu_disas_set_info(CPUState *s, disassemble_info *info)
+static void mips_cpu_disas_set_info(const CPUState *cs, disassemble_info *info)
 {
-    if (!(cpu_env(s)->insn_flags & ISA_NANOMIPS32)) {
+    const MIPSCPU *cpu = MIPS_CPU(cs);
+    const CPUMIPSState *env = &cpu->env;
+
+    if (!(env->insn_flags & ISA_NANOMIPS32)) {
         info->endian = TARGET_BIG_ENDIAN ? BFD_ENDIAN_BIG
                                          : BFD_ENDIAN_LITTLE;
         info->print_insn = TARGET_BIG_ENDIAN ? print_insn_big_mips

@@ -54,6 +54,13 @@ as short-form boolean values, and passed to plugins as ``arg_name=on``.
 However, short-form booleans are deprecated and full explicit ``arg_name=on``
 form is preferred.
 
+``debug-threads`` option for ``-name`` (since 11.0)
+'''''''''''''''''''''''''''''''''''''''''''''''''''
+
+The ``debug-threads`` option of the ``-name`` argument is now
+ignored. Thread naming is unconditionally enabled for all platforms
+where it is supported.
+
 QEMU Machine Protocol (QMP) commands
 ------------------------------------
 
@@ -111,14 +118,6 @@ options are removed in favor of using explicit ``blockdev-create`` and
 ``blockdev-add`` calls. See :doc:`/interop/live-block-operations` for
 details.
 
-``query-migrationthreads`` (since 9.2)
-''''''''''''''''''''''''''''''''''''''
-
-To be removed with no replacement, as it reports only a limited set of
-threads (for example, it only reports source side of multifd threads,
-without reporting any destination threads, or non-multifd source threads).
-For debugging purpose, please use ``-name $VM,debug-threads=on`` instead.
-
 ``block-job-pause`` (since 10.1)
 ''''''''''''''''''''''''''''''''
 
@@ -149,11 +148,6 @@ Use ``job-dismiss`` instead.
 '''''''''''''''''''''''''''''''''''
 
 Use ``job-finalize`` instead.
-
-``migrate`` argument ``detach`` (since 10.1)
-''''''''''''''''''''''''''''''''''''''''''''
-
-This argument has always been ignored.
 
 Human Machine Protocol (HMP) commands
 -------------------------------------
@@ -186,28 +180,6 @@ maintain our cross-compilation CI tests of the architecture. As we no longer
 have CI coverage support may bitrot away before the deprecation process
 completes.
 
-System emulation on 32-bit x86 hosts (since 8.0)
-''''''''''''''''''''''''''''''''''''''''''''''''
-
-Support for 32-bit x86 host deployments is increasingly uncommon in mainstream
-OS distributions given the widespread availability of 64-bit x86 hardware.
-The QEMU project no longer considers 32-bit x86 support for system emulation to
-be an effective use of its limited resources, and thus intends to discontinue
-it. Since all recent x86 hardware from the past >10 years is capable of the
-64-bit x86 extensions, a corresponding 64-bit OS should be used instead.
-
-TCG Plugin support not enabled by default on 32-bit hosts (since 9.2)
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-While it is still possible to enable TCG plugin support for 32-bit
-hosts there are a number of potential pitfalls when instrumenting
-64-bit guests. The plugin APIs typically pass most addresses as
-uint64_t but practices like encoding that address in a host pointer
-for passing as user-data will lose data. As most software analysis
-benefits from having plenty of host memory it seems reasonable to
-encourage users to use 64 bit builds of QEMU for analysis work
-whatever targets they are instrumenting.
-
 TCG Plugin support not enabled by default with TCI (since 9.2)
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
@@ -215,13 +187,6 @@ While the TCG interpreter can interpret the TCG ops used by plugins it
 is going to be so much slower it wouldn't make sense for any serious
 instrumentation. Due to implementation differences there will also be
 anomalies in things like memory instrumentation.
-
-32-bit host operating systems (since 10.0)
-''''''''''''''''''''''''''''''''''''''''''
-
-Keeping 32-bit host support alive is a substantial burden for the
-QEMU project.  Thus QEMU will in future drop the support for all
-32-bit host systems.
 
 System emulator CPUs
 --------------------
@@ -280,14 +245,6 @@ deprecated; use the new name ``dtb-randomness`` instead. The new name
 better reflects the way this property affects all random data within
 the device tree blob, not just the ``kaslr-seed`` node.
 
-Arm ``ast2700a0-evb`` machine (since 10.1)
-''''''''''''''''''''''''''''''''''''''''''
-
-The ``ast2700a0-evb`` machine represents the first revision of the AST2700
-and serves as the initial engineering sample rather than a production version.
-A newer revision, A1, is now supported, and the ``ast2700a1-evb`` should
-replace the older A0 version.
-
 Arm ``sonorapass-bmc`` machine (since 10.2)
 '''''''''''''''''''''''''''''''''''''''''''
 
@@ -342,26 +299,6 @@ Removing the default machine option forces users to always set the machine
 they want to use and avoids confusion.  Existing users of the ``spike``
 machine must ensure that they're setting the ``spike`` machine in the
 command line (``-M spike``).
-
-Arm ``highbank`` and ``midway`` machines (since 10.1)
-'''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-There are no known users left for these machines (if you still use it,
-please write a mail to the qemu-devel mailing list). If you just want to
-boot a Cortex-A15 or Cortex-A9 Linux, use the ``virt`` machine instead.
-
-
-System emulator binaries
-------------------------
-
-``qemu-system-microblazeel`` (since 10.1)
-'''''''''''''''''''''''''''''''''''''''''
-
-The ``qemu-system-microblaze`` binary can emulate little-endian machines
-now, too, so the separate binary ``qemu-system-microblazeel`` (with the
-``el`` suffix) for little-endian targets is not required anymore. The
-``petalogix-s3adsp1800`` machine can now be switched to little endian by
-setting its ``endianness`` property to ``little``.
 
 
 Backend options
@@ -568,23 +505,3 @@ If the user requests a modern x86 CPU model (i.e. not one of ``486``,
 ``athlon``, ``kvm32``, ``pentium``, ``pentium2``, ``pentium3``or ``qemu32``)
 a warning will be displayed until a future QEMU version when such CPUs will
 be rejected.
-
-Migration
----------
-
-``fd:`` URI when used for file migration (since 9.1)
-''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-The ``fd:`` URI can currently provide a file descriptor that
-references either a socket or a plain file. These are two different
-types of migration. In order to reduce ambiguity, the ``fd:`` URI
-usage of providing a file descriptor to a plain file has been
-deprecated in favor of explicitly using the ``file:`` URI with the
-file descriptor being passed as an ``fdset``. Refer to the ``add-fd``
-command documentation for details on the ``fdset`` usage.
-
-``zero-blocks`` capability (since 9.2)
-''''''''''''''''''''''''''''''''''''''
-
-The ``zero-blocks`` capability was part of the block migration which
-doesn't exist anymore since it was removed in QEMU v9.1.

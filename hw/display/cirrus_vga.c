@@ -40,7 +40,7 @@
 #include "qapi/error.h"
 #include "trace.h"
 #include "hw/pci/pci_device.h"
-#include "hw/qdev-properties.h"
+#include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "ui/pixel_ops.h"
 #include "vga_regs.h"
@@ -2987,8 +2987,6 @@ static const Property pci_vga_cirrus_properties[] = {
                        cirrus_vga.vga.vram_size_mb, 4),
     DEFINE_PROP_BOOL("blitter", struct PCICirrusVGAState,
                      cirrus_vga.enable_blitter, true),
-    DEFINE_PROP_BOOL("global-vmstate", struct PCICirrusVGAState,
-                     cirrus_vga.vga.global_vmstate, false),
 };
 
 static void cirrus_vga_class_init(ObjectClass *klass, const void *data)
