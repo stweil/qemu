@@ -508,13 +508,13 @@ static int qemu_debug_requested(void)
  */
 void qemu_system_reset(ShutdownCause reason)
 {
-    MachineClass *mc;
-    ResetType type;
+    MachineClass *mc = current_machine ? MACHINE_GET_CLASS(current_machine) : NULL;
     AccelClass *ac = ACCEL_GET_CLASS(current_accel());
+    bool force_vmfd_change =
+        current_machine ? current_machine->new_accel_vmfd_on_reset : false;
     bool guest_state_rebuilt = false;
     int ret;
-
-    mc = current_machine ? MACHINE_GET_CLASS(current_machine) : NULL;
+    ResetType type;
 
     cpu_synchronize_all_states();
 
@@ -528,13 +528,15 @@ void qemu_system_reset(ShutdownCause reason)
 
     if ((reason == SHUTDOWN_CAUSE_GUEST_RESET ||
          reason == SHUTDOWN_CAUSE_HOST_QMP_SYSTEM_RESET) &&
-        (current_machine->new_accel_vmfd_on_reset || !cpus_are_resettable())) {
+        (force_vmfd_change || !cpus_are_resettable())) {
         if (ac->rebuild_guest) {
             ret = ac->rebuild_guest(current_machine);
-            if (ret < 0) {
+            if (ret < 0 && ret != -EOPNOTSUPP) {
                 error_report("unable to rebuild guest: %s(%d)",
                              strerror(-ret), ret);
                 vm_stop(RUN_STATE_INTERNAL_ERROR);
+            } else if (ret == -EOPNOTSUPP) {
+                error_report("accelerator does not support reset!");
             } else {
                 info_report("virtual machine state has been rebuilt with new "
                             "guest file handle.");

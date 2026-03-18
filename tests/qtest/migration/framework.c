@@ -216,6 +216,19 @@ static void migrate_start_set_capabilities(QTestState *from, QTestState *to,
      * MigrationCapability_lookup and MIGRATION_CAPABILITY_ constants
      * are from qapi-types-migration.h.
      */
+
+    /*
+     * Enable return path first, since other features depend on it.
+     */
+    if (args->caps[MIGRATION_CAPABILITY_RETURN_PATH]) {
+        if (from) {
+            migrate_set_capability(from, "return-path", true);
+        }
+        if (to) {
+            migrate_set_capability(to, "return-path", true);
+        }
+    }
+
     for (uint8_t i = 0; i < MIGRATION_CAPABILITY__MAX; i++) {
         if (!args->caps[i]) {
             continue;
@@ -563,6 +576,7 @@ static int migrate_postcopy_prepare(QTestState **from_ptr,
     migrate_prepare_for_dirty_mem(from);
     qtest_qmp_assert_success(to, "{ 'execute': 'migrate-incoming',"
                              "  'arguments': { "
+                             "      'exit-on-error': false,"
                              "      'channels': [ { 'channel-type': 'main',"
                              "      'addr': { 'transport': 'socket',"
                              "                'type': 'inet',"
@@ -893,10 +907,6 @@ int test_precopy_common(MigrateCommon *args)
     if (args->result != MIG_TEST_SUCCEED) {
         bool allow_active = args->result == MIG_TEST_FAIL;
         wait_for_migration_fail(from, allow_active);
-
-        if (args->result == MIG_TEST_FAIL_DEST_QUIT_ERR) {
-            qtest_set_expected_status(to, EXIT_FAILURE);
-        }
     } else {
         if (args->live) {
             /*
@@ -1148,6 +1158,8 @@ int migration_env_clean(MigrationTestEnv *env)
                        tmpfs, strerror(errno));
     }
     g_free(tmpfs);
+
+    migration_tests_free();
 
     return ret;
 }

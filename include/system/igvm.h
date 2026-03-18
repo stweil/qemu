@@ -13,9 +13,10 @@
 #define BACKENDS_IGVM_H
 
 #include "hw/core/boards.h"
-#include "qemu/typedefs.h"
 #include "system/confidential-guest-support.h"
 #include "qapi/error.h"
+
+typedef struct QIgvm QIgvm;
 
 int qigvm_process_file(IgvmCfg *igvm, MachineState *machine_state,
                        bool onlyVpContext, Error **errp);
@@ -26,5 +27,10 @@ int qigvm_x86_get_mem_map_entry(int index,
                                 Error **errp);
 int qigvm_x86_set_vp_context(void *data, int index,
                              Error **errp);
+
+/*
+ *  IGVM parameter handlers
+ */
+int qigvm_directive_madt(QIgvm *ctx, const uint8_t *header_data, Error **errp);
 
 #endif

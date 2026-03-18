@@ -1098,14 +1098,14 @@ uint64_t x86_cpu_get_supported_feature_word(X86CPU *cpu, FeatureWord w);
 /* Packets which contain IP payload have LIP values */
 #define CPUID_14_0_ECX_LIP              (1U << 31)
 
-/* AMX_INT8 instruction (mirror of CPUID_7_0_EDX_AMX_INT8) */
-#define CPUID_1E_1_EAX_AMX_INT8_MIRROR      (1U << 0)
-/* AMX_BF16 instruction (mirror of CPUID_7_0_EDX_AMX_BF16) */
-#define CPUID_1E_1_EAX_AMX_BF16_MIRROR      (1U << 1)
-/* AMX_COMPLEX instruction (mirror of CPUID_7_1_EDX_AMX_COMPLEX) */
-#define CPUID_1E_1_EAX_AMX_COMPLEX_MIRROR   (1U << 2)
-/* AMX_FP16 instruction (mirror of CPUID_7_1_EAX_AMX_FP16) */
-#define CPUID_1E_1_EAX_AMX_FP16_MIRROR      (1U << 3)
+/* AMX_INT8 instruction (alias of CPUID_7_0_EDX_AMX_INT8) */
+#define CPUID_1E_1_EAX_AMX_INT8_ALIAS      (1U << 0)
+/* AMX_BF16 instruction (alias of CPUID_7_0_EDX_AMX_BF16) */
+#define CPUID_1E_1_EAX_AMX_BF16_ALIAS      (1U << 1)
+/* AMX_COMPLEX instruction (alias of CPUID_7_1_EDX_AMX_COMPLEX) */
+#define CPUID_1E_1_EAX_AMX_COMPLEX_ALIAS   (1U << 2)
+/* AMX_FP16 instruction (alias of CPUID_7_1_EAX_AMX_FP16) */
+#define CPUID_1E_1_EAX_AMX_FP16_ALIAS      (1U << 3)
 /* AMX_FP8 instruction */
 #define CPUID_1E_1_EAX_AMX_FP8              (1U << 4)
 /* AMX_TF32 instruction */
@@ -2335,7 +2335,6 @@ struct ArchCPU {
 
     uint32_t hyperv_spinlock_attempts;
     char *hyperv_vendor;
-    bool hyperv_synic_kvm_only;
     uint64_t hyperv_features;
     bool hyperv_passthrough;
     OnOffAuto hyperv_no_nonarch_cs;
@@ -2362,6 +2361,7 @@ struct ArchCPU {
     bool expose_tcg;
     bool migratable;
     bool migrate_smi_count;
+    bool migrate_error_code;
     uint32_t apic_id;
 
     /* Enables publishing of TSC increment and Local APIC bus frequencies to
@@ -2457,9 +2457,6 @@ struct ArchCPU {
 
     /* Only advertise TOPOEXT features that AMD defines */
     bool amd_topoext_features_only;
-
-    /* Enable auto level-increase for Intel Processor Trace leave */
-    bool intel_pt_auto_level;
 
     /* if true fill the top bits of the MTRR_PHYSMASKn variable range */
     bool fill_mtrr_mask;

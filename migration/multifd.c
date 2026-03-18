@@ -29,6 +29,7 @@
 #include "qemu-file.h"
 #include "trace.h"
 #include "multifd.h"
+#include "multifd-colo.h"
 #include "options.h"
 #include "qemu/yank.h"
 #include "io/channel-file.h"
@@ -411,28 +412,25 @@ bool multifd_send(MultiFDSendData **send_data)
 /* Multifd send side hit an error; remember it and prepare to quit */
 static void multifd_send_error_propagate(Error *err)
 {
+    MigrationState *s = migrate_get_current();
+
     /*
-     * We don't want to exit each threads twice.  Depending on where
-     * we get the error, or if there are two independent errors in two
-     * threads at the same time, we can end calling this function
-     * twice.
+     * There may be independent errors in each thread. Propagate the
+     * first and free the subsequent ones.
      */
     if (qatomic_xchg(&multifd_send_state->exiting, 1)) {
+        error_free(err);
         return;
     }
 
-    if (err) {
-        MigrationState *s = migrate_get_current();
+    migrate_error_propagate(s, err);
 
-        migrate_error_propagate(s, err);
-
-        if (s->state == MIGRATION_STATUS_SETUP ||
-            s->state == MIGRATION_STATUS_PRE_SWITCHOVER ||
-            s->state == MIGRATION_STATUS_DEVICE ||
-            s->state == MIGRATION_STATUS_ACTIVE) {
-            migrate_set_state(&s->state, s->state,
-                              MIGRATION_STATUS_FAILED);
-        }
+    if (s->state == MIGRATION_STATUS_SETUP ||
+        s->state == MIGRATION_STATUS_PRE_SWITCHOVER ||
+        s->state == MIGRATION_STATUS_DEVICE ||
+        s->state == MIGRATION_STATUS_ACTIVE) {
+        migrate_set_state(&s->state, s->state,
+                          MIGRATION_STATUS_FAILING);
     }
 }
 
@@ -771,8 +769,13 @@ out:
         assert(local_err);
         trace_multifd_send_error(p->id);
         multifd_send_error_propagate(local_err);
-        multifd_send_kick_main(p);
     }
+
+    /*
+     * Always kick the main thread: The main thread might wait on this thread
+     * while another thread encounters an error and signals this thread to exit.
+     */
+    multifd_send_kick_main(p);
 
     rcu_unregister_thread();
     trace_multifd_send_thread_end(p->id, p->packets_sent);
@@ -986,7 +989,7 @@ bool multifd_send_setup(void)
 
 err:
     migrate_set_state(&s->state, MIGRATION_STATUS_SETUP,
-                      MIGRATION_STATUS_FAILED);
+                      MIGRATION_STATUS_FAILING);
     return false;
 }
 
@@ -1253,6 +1256,22 @@ static int multifd_device_state_recv(MultiFDRecvParams *p, Error **errp)
     return ret;
 }
 
+static int multifd_ram_state_recv(MultiFDRecvParams *p, Error **errp)
+{
+    int ret;
+
+    ret = multifd_recv_state->ops->recv(p, errp);
+    if (ret != 0) {
+        return ret;
+    }
+
+    if (migrate_colo()) {
+        multifd_colo_process_recv(p);
+    }
+
+    return ret;
+}
+
 static void *multifd_recv_thread(void *opaque)
 {
     MigrationState *s = migrate_get_current();
@@ -1387,7 +1406,7 @@ static void *multifd_recv_thread(void *opaque)
                 assert(use_packets);
                 ret = multifd_device_state_recv(p, &local_err);
             } else {
-                ret = multifd_recv_state->ops->recv(p, &local_err);
+                ret = multifd_ram_state_recv(p, &local_err);
             }
             if (ret != 0) {
                 break;

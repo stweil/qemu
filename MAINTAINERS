@@ -67,7 +67,6 @@ F: */
 Project policy and developer guides
 R: Alex Bennée <alex.bennee@linaro.org>
 R: Daniel P. Berrangé <berrange@redhat.com>
-R: Thomas Huth <thuth@redhat.com>
 R: Markus Armbruster <armbru@redhat.com>
 R: Philippe Mathieu-Daudé <philmd@linaro.org>
 W: https://www.qemu.org/docs/master/devel/index.html
@@ -102,11 +101,13 @@ T: git https://github.com/vivier/qemu.git trivial-patches
 Architecture support
 --------------------
 S390 general architecture support
-M: Thomas Huth <thuth@redhat.com>
+M: Cornelia Huck <cohuck@redhat.com>
+M: Eric Farman <farman@linux.ibm.com>
+M: Matthew Rosato <mjrosato@linux.ibm.com>
 S: Supported
 F: configs/devices/s390x-softmmu/default.mak
 F: configs/targets/s390x-softmmu.mak
-F: gdb-xml/s390*.xml
+F: gdbstub/gdb-xml/s390*.xml
 F: hw/char/sclp*.[hc]
 F: hw/char/terminal3270.c
 F: hw/intc/s390_flic.c
@@ -221,8 +222,8 @@ F: include/hw/cpu/a*mpcore.h
 F: docs/system/target-arm.rst
 F: docs/system/arm/cpu-features.rst
 F: docs/system/arm/emulation.rst
-F: gdb-xml/arm*.xml
-F: gdb-xml/aarch64*.xml
+F: gdbstub/gdb-xml/arm*.xml
+F: gdbstub/gdb-xml/aarch64*.xml
 
 ARM SMMU
 M: Eric Auger <eric.auger@redhat.com>
@@ -237,7 +238,7 @@ AVR TCG CPUs
 M: Michael Rolnik <mrolnik@gmail.com>
 S: Maintained
 F: docs/system/target-avr.rst
-F: gdb-xml/avr-cpu.xml
+F: gdbstub/gdb-xml/avr-cpu.xml
 F: target/avr/
 F: tests/functional/avr/
 
@@ -252,7 +253,7 @@ F: tests/tcg/hexagon/
 F: disas/hexagon.c
 F: configs/targets/hexagon-linux-user/default.mak
 F: docker/dockerfiles/debian-hexagon-cross.docker
-F: gdb-xml/hexagon*.xml
+F: gdbstub/gdb-xml/hexagon*.xml
 T: git https://github.com/quic/qemu.git hex-next
 
 Hexagon idef-parser
@@ -311,7 +312,7 @@ M: Stafford Horne <shorne@gmail.com>
 S: Odd Fixes
 F: docs/system/or1k/cpu-features.rst
 F: target/or1k/
-F: gdb-xml/or1k-core.xml
+F: gdbstub/gdb-xml/or1k-core.xml
 F: hw/or1k/
 F: include/hw/or1k/
 F: tests/functional/or1k/meson.build
@@ -411,7 +412,7 @@ M: Mark Cave-Ayland <mark.cave-ayland@ilande.co.uk>
 M: Artyom Tarasenko <atar4qemu@gmail.com>
 S: Maintained
 F: target/sparc/
-F: gdb-xml/sparc*.xml
+F: gdbstub/gdb-xml/sparc*.xml
 F: hw/sparc/
 F: hw/sparc64/
 F: include/hw/sparc/sparc64.h
@@ -422,7 +423,6 @@ F: tests/tcg/sparc64/
 X86 TCG CPUs
 M: Paolo Bonzini <pbonzini@redhat.com>
 M: Richard Henderson <richard.henderson@linaro.org>
-M: Eduardo Habkost <eduardo@habkost.net>
 S: Maintained
 F: target/i386/tcg/
 F: tests/tcg/i386/
@@ -430,7 +430,6 @@ F: tests/tcg/x86_64/
 F: hw/i386/
 F: docs/system/i386/cpu.rst
 F: docs/system/cpu-models-x86*
-T: git https://gitlab.com/ehabkost/qemu.git x86-next
 
 Xtensa TCG CPUs
 M: Max Filippov <jcmvbkbc@gmail.com>
@@ -499,7 +498,7 @@ S: Supported
 F: target/s390x/kvm/
 F: target/s390x/machine.c
 F: target/s390x/sigp.c
-F: gdb-xml/s390*.xml
+F: gdbstub/gdb-xml/s390*.xml
 T: git https://github.com/borntraeger/qemu.git s390-next
 L: qemu-s390x@nongnu.org
 
@@ -553,7 +552,6 @@ F: target/arm/hvf/
 F: target/arm/hvf-stub.c
 
 X86 HVF CPUs
-M: Cameron Esfahani <dirty@apple.com>
 M: Roman Bolshakov <rbolshakov@ddn.com>
 R: Phil Dennis-Jordan <phil@philjordan.eu>
 W: https://wiki.qemu.org/Features/HVF
@@ -561,7 +559,6 @@ S: Maintained
 F: target/i386/hvf/
 
 HVF
-M: Cameron Esfahani <dirty@apple.com>
 M: Roman Bolshakov <rbolshakov@ddn.com>
 R: Phil Dennis-Jordan <phil@philjordan.eu>
 W: https://wiki.qemu.org/Features/HVF
@@ -607,7 +604,6 @@ S: Supported
 F: target/i386/mshv/
 
 X86 Instruction Emulator
-M: Cameron Esfahani <dirty@apple.com>
 M: Roman Bolshakov <rbolshakov@ddn.com>
 R: Phil Dennis-Jordan <phil@philjordan.eu>
 R: Wei Liu <wei.liu@kernel.org>
@@ -908,7 +904,6 @@ F: docs/system/arm/mcimx6ul-evk.rst
 
 MCIMX7D SABRE / i.MX7
 M: Peter Maydell <peter.maydell@linaro.org>
-R: Andrey Smirnov <andrew.smirnov@gmail.com>
 L: qemu-arm@nongnu.org
 S: Odd Fixes
 F: hw/arm/mcimx7d-sabre.c
@@ -1041,7 +1036,6 @@ F: include/hw/misc/imx6_*.h
 F: include/hw/ssi/imx_spi.h
 
 SBSA-REF
-M: Radoslaw Biernacki <rad@semihalf.com>
 M: Peter Maydell <peter.maydell@linaro.org>
 R: Leif Lindholm <leif.lindholm@oss.qualcomm.com>
 L: qemu-arm@nongnu.org
@@ -1352,18 +1346,18 @@ F: include/hw/intc/loongson_ipi_common.h
 F: hw/intc/loongarch_*.c
 F: hw/intc/loongson_ipi_common.c
 F: hw/rtc/ls7a_rtc.c
-F: gdb-xml/loongarch*.xml
+F: gdbstub/gdb-xml/loongarch*.xml
 
 M68K Machines
 -------------
 an5206
-M: Thomas Huth <huth@tuxfamily.org>
+M: Thomas Huth <th.huth+qemu@posteo.eu>
 S: Odd Fixes
 F: hw/m68k/an5206.c
 F: hw/m68k/mcf5206.c
 
 mcf5208
-M: Thomas Huth <huth@tuxfamily.org>
+M: Thomas Huth <th.huth+qemu@posteo.eu>
 S: Odd Fixes
 F: hw/m68k/mcf5208.c
 F: hw/m68k/mcf_intc.c
@@ -1373,7 +1367,7 @@ F: include/hw/m68k/mcf*.h
 F: tests/functional/m68k/test_mcf5208evb.py
 
 NeXTcube
-M: Thomas Huth <huth@tuxfamily.org>
+M: Thomas Huth <th.huth+qemu@posteo.eu>
 S: Odd Fixes
 F: hw/m68k/next-*.c
 F: hw/display/next-fb.c
@@ -1862,10 +1856,10 @@ T: git https://github.com/borntraeger/qemu.git s390-next
 L: qemu-s390x@nongnu.org
 
 S390-ccw boot
-M: Christian Borntraeger <borntraeger@linux.ibm.com>
-M: Thomas Huth <thuth@redhat.com>
-R: Jared Rossi <jrossi@linux.ibm.com>
+M: Jared Rossi <jrossi@linux.ibm.com>
 R: Zhuoying Cai <zycai@linux.ibm.com>
+R: Christian Borntraeger <borntraeger@linux.ibm.com>
+R: Jason Herne <jjherne@linux.ibm.com>
 S: Supported
 F: hw/s390x/ipl.*
 F: pc-bios/s390-ccw/
@@ -1882,6 +1876,7 @@ R: Eric Farman <farman@linux.ibm.com>
 S: Supported
 F: hw/s390x/s390-pci*
 F: include/hw/s390x/s390-pci*
+F: include/hw/s390x/ipl/s390-pci*
 F: util/s390x_pci_mmio.c
 L: qemu-s390x@nongnu.org
 
@@ -2017,7 +2012,6 @@ F: include/hw/i386/nitro_enclave.h
 F: docs/system/i386/nitro-enclave.rst
 
 Machine core
-M: Eduardo Habkost <eduardo@habkost.net>
 M: Marcel Apfelbaum <marcel.apfelbaum@gmail.com>
 R: Philippe Mathieu-Daudé <philmd@linaro.org>
 R: Yanan Wang <wangyanan55@huawei.com>
@@ -2040,7 +2034,6 @@ F: include/system/numa.h
 F: tests/functional/x86_64/test_cpu_queries.py
 F: tests/functional/generic/test_empty_cpu_model.py
 F: tests/unit/test-smp-parse.c
-T: git https://gitlab.com/ehabkost/qemu.git machine-next
 
 TargetInfo API
 M: Pierrick Bouvier <pierrick.bouvier@linaro.org>
@@ -2168,7 +2161,6 @@ F: docs/system/sriov.rst
 
 PCIE DOE
 M: Huai-Cheng Kuo <hchkuo@avery-design.com.tw>
-M: Chris Browy <cbrowy@avery-design.com>
 S: Supported
 F: include/hw/pci/pcie_doe.h
 F: hw/pci/pcie_doe.c
@@ -2635,9 +2627,8 @@ F: include/block/ufs.h
 F: tests/qtest/ufs-test.c
 
 megasas
-M: Hannes Reinecke <hare@suse.com>
 L: qemu-block@nongnu.org
-S: Supported
+S: Orphan
 F: hw/scsi/megasas.c
 F: hw/scsi/mfi.h
 F: tests/qtest/megasas-test.c
@@ -2742,7 +2733,7 @@ F: tests/qtest/hexloader-test.c
 F: tests/data/hex-loader/test.hex
 
 CHRP NVRAM
-M: Thomas Huth <thuth@redhat.com>
+M: Mark Cave-Ayland <mark.cave-ayland@ilande.co.uk>
 S: Maintained
 F: hw/nvram/chrp_nvram.c
 F: include/hw/nvram/chrp_nvram.h
@@ -3088,7 +3079,7 @@ F: audio/paaudio.c
 
 SDL Audio backend
 M: Gerd Hoffmann <kraxel@redhat.com>
-R: Thomas Huth <huth@tuxfamily.org>
+R: Thomas Huth <th.huth+qemu@posteo.eu>
 S: Odd Fixes
 F: audio/sdlaudio.c
 
@@ -3310,7 +3301,6 @@ F: docs/system/gdb.rst
 F: gdbstub/*
 F: include/exec/gdbstub.h
 F: include/gdbstub/*
-F: gdb-xml/
 F: tests/tcg/multiarch/gdbstub/*
 F: scripts/feature_to_c.py
 F: scripts/probe-gdb-support.py
@@ -3450,7 +3440,6 @@ S: Maintained
 F: backends/hostmem*.c
 F: include/system/hostmem.h
 F: docs/system/vm-templating.rst
-T: git https://gitlab.com/ehabkost/qemu.git machine-next
 
 Cryptodev Backends
 M: Gonglei <arei.gonglei@huawei.com>
@@ -3553,7 +3542,6 @@ T: git https://github.com/kostyanf14/qemu.git qga-win32
 QOM
 M: Paolo Bonzini <pbonzini@redhat.com>
 R: Daniel P. Berrange <berrange@redhat.com>
-R: Eduardo Habkost <eduardo@habkost.net>
 S: Supported
 F: docs/devel/qom.rst
 F: docs/qdev-device-use.txt
@@ -3576,8 +3564,7 @@ F: tests/unit/test-qdev-global-props.c
 F: tests/qtest/qom-test.c
 
 QOM boilerplate conversion script
-M: Eduardo Habkost <eduardo@habkost.net>
-S: Maintained
+S: Orphan
 F: scripts/codeconverter/
 
 QMP
@@ -3880,12 +3867,14 @@ F: include/qemu/yank.h
 F: qapi/yank.json
 
 COLO Framework
-M: Hailiang Zhang <zhanghailiang@xfusion.com>
+M: Lukas Straub <lukasstraub2@web.de>
 S: Maintained
 F: migration/colo*
+F: migration/multifd-colo.*
 F: include/migration/colo.h
 F: include/migration/failover.h
-F: docs/COLO-FT.txt
+F: tests/qtest/migration/colo-tests.c
+F: docs/system/qemu-colo.rst
 
 COLO Proxy
 M: Zhang Chen <zhangckid@gmail.com>
@@ -4485,7 +4474,6 @@ Build and test automation, general continuous integration
 M: Alex Bennée <alex.bennee@linaro.org>
 T: git https://gitlab.com/stsquad/qemu testing/next
 M: Philippe Mathieu-Daudé <philmd@linaro.org>
-M: Thomas Huth <thuth@redhat.com>
 S: Maintained
 F: .github/workflows/lockdown.yml
 F: .gitlab-ci.yml
@@ -4512,10 +4500,10 @@ F: tests/vm/freebsd
 W: https://cirrus-ci.com/github/qemu/qemu
 
 Functional testing framework
-M: Thomas Huth <thuth@redhat.com>
+M: Thomas Huth <th.huth+qemu@posteo.eu>
 R: Philippe Mathieu-Daudé <philmd@linaro.org>
 R: Daniel P. Berrange <berrange@redhat.com>
-S: Maintained
+S: Odd Fixes
 F: docs/devel/testing/functional.rst
 F: scripts/clean_functional_cache.py
 F: tests/functional/meson.build
@@ -4582,7 +4570,6 @@ F: scripts/symlink-install-tree.py
 Top Level Makefile and configure
 M: Paolo Bonzini <pbonzini@redhat.com>
 R: Alex Bennée <alex.bennee@linaro.org>
-R: Thomas Huth <thuth@redhat.com>
 S: Maintained
 F: Makefile
 F: configure
