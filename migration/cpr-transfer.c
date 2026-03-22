@@ -80,10 +80,13 @@ void cpr_transfer_add_hup_watch(MigrationState *s, QIOChannelFunc func,
                                 void *opaque)
 {
     s->hup_source = qio_channel_create_watch(cpr_state_ioc(), G_IO_HUP);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
     g_source_set_callback(s->hup_source,
                           (GSourceFunc)func,
                           QAPI_CLONE(MigrationAddress, opaque),
                           (GDestroyNotify)qapi_free_MigrationAddress);
+#pragma GCC diagnostic pop
     g_source_attach(s->hup_source, NULL);
 }
 
