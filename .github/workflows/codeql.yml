@@ -95,7 +95,7 @@ jobs:
       name: Build
       run: |
            echo "Run, Build Application using script"
-           ./configure --enable-debug
+           ./configure --enable-debug --disable-werror
            make
 
     - if: matrix.language == 'python'
