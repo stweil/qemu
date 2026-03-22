@@ -42,7 +42,7 @@ jobs:
         # Learn more about CodeQL language support at https://aka.ms/codeql-docs/language-support
 
     steps:
-    - if: matrix.language == 'c-cpp'
+    - if: matrix.language == '_c-cpp'
       name: Free disk space
       run: |
            df -h
@@ -71,11 +71,11 @@ jobs:
            cat /mnt/DATALOSS_WARNING_README.txt || true
 
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
+      uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
         # If you wish to specify custom queries, you can do so here or in a config file.
@@ -88,7 +88,7 @@ jobs:
     - if: matrix.language == 'c-cpp'
       name: Install required packages
       run: |
-           sudo apt-get install -y ninja-build
+           sudo apt-get install -y ninja-build libglib2.0-dev
 
     - if: matrix.language == 'c-cpp'
       name: Build
