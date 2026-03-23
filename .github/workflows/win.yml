@@ -30,7 +30,7 @@ jobs:
       run: .github/workflows/pacman.sh clang-aarch64
     - name: Build QEMU installer (arm)
       run: .github/workflows/build.sh clang-aarch64
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: QEMU Installer Windows on ARM
         path: dist
@@ -44,7 +44,7 @@ jobs:
       run: .github/workflows/pacman.sh i686
     - name: Build QEMU installer (32 bit)
       run: .github/workflows/build.sh i686
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: QEMU Installer Windows 32 bit
         path: dist
@@ -58,7 +58,7 @@ jobs:
       run: .github/workflows/pacman.sh x86_64
     - name: Build QEMU installer (64 bit)
       run: .github/workflows/build.sh x86_64
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: QEMU Installer Windows 64 bit
         path: dist
