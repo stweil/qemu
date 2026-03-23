@@ -12,7 +12,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: Build QEMU installer (32 bit)
       run: .github/workflows/build.sh i686
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: QEMU Installer Windows 32 bit
         path: dist
@@ -24,7 +24,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: Build QEMU installer (64 bit)
       run: .github/workflows/build.sh x86_64
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: QEMU Installer Windows 64 bit
         path: dist
