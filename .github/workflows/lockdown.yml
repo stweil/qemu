@@ -27,4 +27,4 @@ jobs:
             guidelines about contributing on the project website:
             https://www.qemu.org/contribute/
           lock-pr: true
-          close-pr: true
+          close-pr: false
