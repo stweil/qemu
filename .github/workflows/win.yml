@@ -25,7 +25,7 @@ jobs:
     if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == 'arm') }}
     runs-on: [ubuntu-24.04-arm]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Get pacman package manager
       run: .github/workflows/pacman.sh clang-aarch64
     - name: Build QEMU installer (arm)
@@ -39,7 +39,7 @@ jobs:
     if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '32-bit') }}
     runs-on: [ubuntu-22.04]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Get pacman package manager
       run: .github/workflows/pacman.sh i686
     - name: Build QEMU installer (32 bit)
@@ -53,7 +53,7 @@ jobs:
     if: ${{ (github.event.inputs.bits == 'any') || (github.event.inputs.bits == '64-bit') }}
     runs-on: [ubuntu-22.04]
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
     - name: Get pacman package manager
       run: .github/workflows/pacman.sh x86_64
     - name: Build QEMU installer (64 bit)
