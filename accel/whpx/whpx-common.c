@@ -394,8 +394,6 @@ static bool load_whp_dispatch_fns(HMODULE *handle,
         whp_dispatch.function_name = \
             (function_name ## _t)GetProcAddress(hLib, #function_name); \
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wcast-function-type"
     #define WHP_LOAD_FIELD(return_type, function_name, signature) \
         whp_dispatch.function_name = \
             (function_name ## _t)GetProcAddress(hLib, #function_name); \
@@ -403,7 +401,6 @@ static bool load_whp_dispatch_fns(HMODULE *handle,
             error_report("Could not load function %s", #function_name); \
             goto error; \
         } \
-#pragma GCC diagnostic pop
 
     #define WHP_LOAD_LIB(lib_name, handle_lib) \
     if (!handle_lib) { \
@@ -417,11 +414,17 @@ static bool load_whp_dispatch_fns(HMODULE *handle,
     switch (function_list) {
     case WINHV_PLATFORM_FNS_DEFAULT:
         WHP_LOAD_LIB(WINHV_PLATFORM_DLL, hLib)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
         LIST_WINHVPLATFORM_FUNCTIONS(WHP_LOAD_FIELD)
+#pragma GCC diagnostic pop
         break;
     case WINHV_PLATFORM_FNS_SUPPLEMENTAL:
         WHP_LOAD_LIB(WINHV_PLATFORM_DLL, hLib)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
         LIST_WINHVPLATFORM_FUNCTIONS_SUPPLEMENTAL(WHP_LOAD_FIELD_OPTIONAL)
+#pragma GCC diagnostic pop
         break;
     }
 
