@@ -341,8 +341,9 @@ RISC-V TCG CPUs
 M: Palmer Dabbelt <palmer@dabbelt.com>
 M: Alistair Francis <alistair.francis@wdc.com>
 R: Weiwei Li <liwei1518@gmail.com>
-R: Daniel Henrique Barboza <dbarboza@ventanamicro.com>
+R: Daniel Henrique Barboza <daniel.barboza@oss.qualcomm.com>
 R: Liu Zhiwei <zhiwei_liu@linux.alibaba.com>
+R: Chao Liu <chao.liu.zevorn@gmail.com>
 L: qemu-riscv@nongnu.org
 S: Supported
 F: configs/targets/riscv*
@@ -1246,6 +1247,7 @@ M: Peter Maydell <peter.maydell@linaro.org>
 R: Steven Lee <steven_lee@aspeedtech.com>
 R: Troy Lee <leetroy@gmail.com>
 R: Jamin Lin <jamin_lin@aspeedtech.com>
+R: Kane Chen <kane_chen@aspeedtech.com>
 R: Andrew Jeffery <andrew@codeconstruct.com.au>
 R: Joel Stanley <joel@jms.id.au>
 L: qemu-arm@nongnu.org
@@ -1916,7 +1918,7 @@ F: hw/s390x/sclp*.c
 L: qemu-s390x@nongnu.org
 
 S390 CPU topology
-M: Nina Schoetterl-Glausch <nsg@linux.ibm.com>
+M: Gautam Gala <ggala@linux.ibm.com>
 S: Supported
 F: include/hw/s390x/cpu-topology.h
 F: hw/s390x/cpu-topology.c
@@ -4134,6 +4136,7 @@ F: tcg/ppc64/
 RISC-V TCG target
 M: Palmer Dabbelt <palmer@dabbelt.com>
 M: Alistair Francis <Alistair.Francis@wdc.com>
+R: Daniel Henrique Barboza <daniel.barboza@oss.qualcomm.com>
 L: qemu-riscv@nongnu.org
 S: Maintained
 F: tcg/riscv64/
