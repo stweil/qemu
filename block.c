@@ -8478,7 +8478,7 @@ static bool bdrv_bsc_range_overlaps_locked(BlockDriverState *bs,
 }
 
 /**
- * See block_int.h for this function's documentation.
+ * See block_int-io.h for this function's documentation.
  */
 bool bdrv_bsc_is_data(BlockDriverState *bs, int64_t offset, int64_t *pnum)
 {
@@ -8488,7 +8488,7 @@ bool bdrv_bsc_is_data(BlockDriverState *bs, int64_t offset, int64_t *pnum)
 }
 
 /**
- * See block_int.h for this function's documentation.
+ * See block_int-io.h for this function's documentation.
  */
 void bdrv_bsc_invalidate_range(BlockDriverState *bs,
                                int64_t offset, int64_t bytes)
@@ -8502,7 +8502,7 @@ void bdrv_bsc_invalidate_range(BlockDriverState *bs,
 }
 
 /**
- * See block_int.h for this function's documentation.
+ * See block_int-io.h for this function's documentation.
  */
 void bdrv_bsc_fill(BlockDriverState *bs, int64_t offset, int64_t bytes)
 {
