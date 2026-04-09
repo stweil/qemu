@@ -2,7 +2,7 @@
 
 # GitHub actions - Install packages for Windows cross builds
 
-# Author: Stefan Weil (2023-2025)
+# Author: Stefan Weil (2023-2026)
 
 ARCH=$1
 
@@ -29,11 +29,11 @@ sudo apt-get install --no-install-recommends --yes \
 # Get newer version of mingw-w64-*-dev (with pathcch).
 
 if test "$ARCH" = "i686"; then
-curl -sS -O http://de.archive.ubuntu.com/ubuntu/pool/universe/m/mingw-w64/mingw-w64-i686-dev_10.0.0-3_all.deb
-sudo dpkg -i mingw-w64-i686-dev_10.0.0-3_all.deb
+curl -sS -O http://de.archive.ubuntu.com/ubuntu/pool/universe/m/mingw-w64/mingw-w64-i686-dev_11.0.1-3build1_all.deb
+sudo dpkg -i mingw-w64-i686-dev_*_all.deb
 else
-curl -sS -O http://de.archive.ubuntu.com/ubuntu/pool/universe/m/mingw-w64/mingw-w64-x86-64-dev_10.0.0-3_all.deb
-sudo dpkg -i mingw-w64-x86-64-dev_10.0.0-3_all.deb
+curl -sS -O http://de.archive.ubuntu.com/ubuntu/pool/universe/m/mingw-w64/mingw-w64-x86-64-dev_11.0.1-3build1_all.deb
+sudo dpkg -i mingw-w64-x86-64-dev_*_all.deb
 fi
 
 # Install pacman.
