@@ -54,67 +54,76 @@ __thread uintptr_t tci_tb_ptr;
  *   s = signed ldst offset
  */
 
-static void tci_args_l(uint32_t insn, const void *tb_ptr, void **l0)
+static QEMU_ALWAYS_INLINE void
+tci_args_l(uint32_t insn, const void *tb_ptr, void **l0)
 {
     int diff = sextract32(insn, 12, 20);
     *l0 = diff ? (void *)tb_ptr + diff : NULL;
 }
 
-static void tci_args_r(uint32_t insn, TCGReg *r0)
+static QEMU_ALWAYS_INLINE void tci_args_r(uint32_t insn, TCGReg *r0)
 {
     *r0 = extract32(insn, 8, 4);
 }
 
-static void tci_args_nl(uint32_t insn, const void *tb_ptr,
-                        uint8_t *n0, void **l1)
+static QEMU_ALWAYS_INLINE void
+tci_args_nl(uint32_t insn, const void *tb_ptr,
+            uint8_t *n0, void **l1)
 {
     *n0 = extract32(insn, 8, 4);
     *l1 = sextract32(insn, 12, 20) + (void *)tb_ptr;
 }
 
-static void tci_args_rl(uint32_t insn, const void *tb_ptr,
-                        TCGReg *r0, void **l1)
+static QEMU_ALWAYS_INLINE void
+tci_args_rl(uint32_t insn, const void *tb_ptr,
+            TCGReg *r0, void **l1)
 {
     *r0 = extract32(insn, 8, 4);
     *l1 = sextract32(insn, 12, 20) + (void *)tb_ptr;
 }
 
-static void tci_args_rr(uint32_t insn, TCGReg *r0, TCGReg *r1)
+static QEMU_ALWAYS_INLINE void
+tci_args_rr(uint32_t insn, TCGReg *r0, TCGReg *r1)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
 }
 
-static void tci_args_ri(uint32_t insn, TCGReg *r0, tcg_target_ulong *i1)
+static QEMU_ALWAYS_INLINE void
+tci_args_ri(uint32_t insn, TCGReg *r0, tcg_target_ulong *i1)
 {
     *r0 = extract32(insn, 8, 4);
     *i1 = sextract32(insn, 12, 20);
 }
 
-static void tci_args_rrm(uint32_t insn, TCGReg *r0,
-                         TCGReg *r1, MemOpIdx *m2)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrm(uint32_t insn, TCGReg *r0,
+             TCGReg *r1, MemOpIdx *m2)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
     *m2 = extract32(insn, 16, 16);
 }
 
-static void tci_args_rrr(uint32_t insn, TCGReg *r0, TCGReg *r1, TCGReg *r2)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrr(uint32_t insn, TCGReg *r0, TCGReg *r1, TCGReg *r2)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
     *r2 = extract32(insn, 16, 4);
 }
 
-static void tci_args_rrs(uint32_t insn, TCGReg *r0, TCGReg *r1, int32_t *i2)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrs(uint32_t insn, TCGReg *r0, TCGReg *r1, int32_t *i2)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
     *i2 = sextract32(insn, 16, 16);
 }
 
-static void tci_args_rrbb(uint32_t insn, TCGReg *r0, TCGReg *r1,
-                          uint8_t *i2, uint8_t *i3)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrbb(uint32_t insn, TCGReg *r0, TCGReg *r1,
+              uint8_t *i2, uint8_t *i3)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
@@ -122,8 +131,9 @@ static void tci_args_rrbb(uint32_t insn, TCGReg *r0, TCGReg *r1,
     *i3 = extract32(insn, 22, 6);
 }
 
-static void tci_args_rrrc(uint32_t insn,
-                          TCGReg *r0, TCGReg *r1, TCGReg *r2, TCGCond *c3)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrrc(uint32_t insn,
+              TCGReg *r0, TCGReg *r1, TCGReg *r2, TCGCond *c3)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
@@ -131,8 +141,9 @@ static void tci_args_rrrc(uint32_t insn,
     *c3 = extract32(insn, 20, 4);
 }
 
-static void tci_args_rrrbb(uint32_t insn, TCGReg *r0, TCGReg *r1,
-                           TCGReg *r2, uint8_t *i3, uint8_t *i4)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrrbb(uint32_t insn, TCGReg *r0, TCGReg *r1,
+               TCGReg *r2, uint8_t *i3, uint8_t *i4)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
@@ -141,8 +152,9 @@ static void tci_args_rrrbb(uint32_t insn, TCGReg *r0, TCGReg *r1,
     *i4 = extract32(insn, 26, 6);
 }
 
-static void tci_args_rrrr(uint32_t insn,
-                          TCGReg *r0, TCGReg *r1, TCGReg *r2, TCGReg *r3)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrrr(uint32_t insn,
+              TCGReg *r0, TCGReg *r1, TCGReg *r2, TCGReg *r3)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
@@ -150,8 +162,9 @@ static void tci_args_rrrr(uint32_t insn,
     *r3 = extract32(insn, 20, 4);
 }
 
-static void tci_args_rrrrrc(uint32_t insn, TCGReg *r0, TCGReg *r1,
-                            TCGReg *r2, TCGReg *r3, TCGReg *r4, TCGCond *c5)
+static QEMU_ALWAYS_INLINE void
+tci_args_rrrrrc(uint32_t insn, TCGReg *r0, TCGReg *r1,
+                TCGReg *r2, TCGReg *r3, TCGReg *r4, TCGCond *c5)
 {
     *r0 = extract32(insn, 8, 4);
     *r1 = extract32(insn, 12, 4);
@@ -161,7 +174,8 @@ static void tci_args_rrrrrc(uint32_t insn, TCGReg *r0, TCGReg *r1,
     *c5 = extract32(insn, 28, 4);
 }
 
-static bool tci_compare32(uint32_t u0, uint32_t u1, TCGCond condition)
+static QEMU_ALWAYS_INLINE bool
+tci_compare32(uint32_t u0, uint32_t u1, TCGCond condition)
 {
     bool result = false;
     int32_t i0 = u0;
@@ -209,7 +223,8 @@ static bool tci_compare32(uint32_t u0, uint32_t u1, TCGCond condition)
     return result;
 }
 
-static bool tci_compare64(uint64_t u0, uint64_t u1, TCGCond condition)
+static QEMU_ALWAYS_INLINE bool
+tci_compare64(uint64_t u0, uint64_t u1, TCGCond condition)
 {
     bool result = false;
     int64_t i0 = u0;
