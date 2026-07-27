@@ -924,16 +924,19 @@ if host_os == 'netbsd'
 endif
 
 tcg_arch = host_arch
+tcg_interpreter = get_option('tcg_interpreter')
+tcg_use_interpreter = tcg_interpreter != 'false'
+tcg_use_both = tcg_interpreter == 'both'
 if have_tcg
   if host_arch == 'unknown'
-    if not get_option('tcg_interpreter')
+    if not tcg_use_interpreter
       error('Unsupported CPU @0@, try --enable-tcg-interpreter'.format(cpu))
     endif
   elif host_arch == 'wasm64'
-    if not get_option('tcg_interpreter')
+    if not tcg_use_interpreter
       error('WebAssembly host requires --enable-tcg-interpreter')
     endif
-  elif get_option('tcg_interpreter')
+  elif tcg_use_interpreter and not tcg_use_both
     warning('Use of the TCG interpreter is not recommended on this host')
     warning('architecture. There is a native TCG execution backend available')
     warning('which provides substantially better performance and reliability.')
@@ -941,11 +944,21 @@ if have_tcg
     warning('configuration option on this architecture to use the native')
     warning('backend.')
   endif
-  if get_option('tcg_interpreter')
+  if tcg_interpreter == 'true'
     tcg_arch = 'tci'
   endif
-  add_project_arguments('-iquote', meson.current_source_dir() / 'tcg' / tcg_arch,
-                        language: all_languages)
+  if tcg_use_both
+    # In dual mode, add only the TCI path globally; the native arch path
+    # is added per-source-set in tcg/meson.build to avoid tci.c picking up
+    # native backend headers via -iquote priority.
+    add_project_arguments('-iquote', meson.current_source_dir() / 'tcg' / 'tci',
+                          language: all_languages)
+    tcg_native_inc = include_directories('tcg' / host_arch)
+  else
+    tcg_native_inc = include_directories('')
+    add_project_arguments('-iquote', meson.current_source_dir() / 'tcg' / tcg_arch,
+                          language: all_languages)
+  endif
 
   accelerators += 'CONFIG_TCG'
 endif
@@ -2497,7 +2510,9 @@ config_host_data.set('CONFIG_SNAPPY', snappy.found())
 config_host_data.set('CONFIG_SOLARIS', host_os == 'sunos')
 if have_tcg
   config_host_data.set('CONFIG_TCG', 1)
-  config_host_data.set('CONFIG_TCG_INTERPRETER', tcg_arch == 'tci')
+  config_host_data.set('CONFIG_TCG_INTERPRETER', tcg_use_interpreter)
+  config_host_data.set('CONFIG_TCG_NATIVE',
+    tcg_interpreter == 'false' or tcg_use_both)
 endif
 config_host_data.set('CONFIG_TPM', have_tpm)
 config_host_data.set('CONFIG_TSAN', get_option('tsan'))
@@ -4832,8 +4847,10 @@ if have_system
 endif
 summary_info += {'TCG support':       config_all_accel.has_key('CONFIG_TCG')}
 if config_all_accel.has_key('CONFIG_TCG')
-  if get_option('tcg_interpreter')
+  if get_option('tcg_interpreter') == 'true'
     summary_info += {'TCG backend':   'TCI (TCG with bytecode interpreter, slow)'}
+  elif get_option('tcg_interpreter') == 'both'
+    summary_info += {'TCG backend':   'native + TCI (both, runtime selectable)'}
   else
     summary_info += {'TCG backend':   'native (@0@)'.format(cpu)}
   endif
