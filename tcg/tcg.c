@@ -58,6 +58,12 @@
 #include "tcg-internal.h"
 #include "tcg/perf.h"
 #include "tcg-has.h"
+#ifdef CONFIG_TCG_INTERPRETER
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wundef"
+#include <ffi.h>
+#pragma GCC diagnostic pop
+#endif
 #ifdef CONFIG_USER_ONLY
 #include "user/guest-base.h"
 #endif
