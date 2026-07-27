@@ -9,8 +9,9 @@
 #ifndef TCG_HELPER_INFO_H
 #define TCG_HELPER_INFO_H
 
-#ifdef CONFIG_TCG_INTERPRETER
+#if defined(CONFIG_TCG_INTERPRETER) && !defined(CONFIG_TCG_NATIVE)
 /*
+ * TCI-only mode: include ffi.h here so ffi_cif is available.
  * MacOSX 15 uses an old version of libffi which contains
  *   #if FFI_GO_CLOSURES
  * but does not define that in <ffitarget.h>, included from <ffi.h>.
@@ -60,7 +61,10 @@ struct TCGHelperInfo {
     const char *name;
 
     /* Used with g_once_init_enter. */
-#ifdef CONFIG_TCG_INTERPRETER
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+    void *cif;
+    uintptr_t init;
+#elif defined(CONFIG_TCG_INTERPRETER)
     ffi_cif *cif;
 #else
     uintptr_t init;

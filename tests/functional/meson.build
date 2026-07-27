@@ -6,7 +6,7 @@
 
 # Most tests run too slow with TCI enabled, and they haven't been adapted
 # to Windows yet, so skip the functional tests in these environments
-if get_option('tcg_interpreter') or host_os == 'windows'
+if get_option('tcg_interpreter') != 'false' or host_os == 'windows'
   subdir_done()
 endif
 

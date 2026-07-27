@@ -1063,7 +1063,7 @@ if test "$static" = "yes" ; then
   plugins="no"
 fi
 if test "$plugins" != "no"; then
-    if has_meson_option "-Dtcg_interpreter=true"; then
+    if has_meson_option "-Dtcg_interpreter=true" || has_meson_option "-Dtcg_interpreter=both"; then
         plugins="no"
     else
         plugins=yes

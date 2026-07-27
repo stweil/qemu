@@ -15,11 +15,29 @@ tcg_ss.add(files(
   'tcg-op-vec.c',
 ))
 
-if get_option('tcg_interpreter')
+tcg_interpreter = get_option('tcg_interpreter')
+if tcg_interpreter != 'false'
   libffi = dependency('libffi', version: '>=3.0', required: true,
                       method: 'pkg-config')
   tcg_ss.add(libffi)
-  tcg_ss.add(files('tci.c'))
+
+  if tcg_interpreter == 'both'
+    # In dual mode, tci.c must be compiled with the TCI include path
+    # as primary, since it needs the TCI-specific TCGReg, opcodes, etc.
+    # The native arch include path (tcg_native_inc from top-level meson.build)
+    # is added only to tcg_ss so native TCG core files find the right headers.
+    tci_inc = include_directories('tci')
+    tci_lib = static_library('tci',
+      files('tci.c'),
+      include_directories: tci_inc,
+      dependencies: libffi)
+    tci_dep = declare_dependency(link_with: tci_lib)
+    native_inc_dep = declare_dependency(include_directories: tcg_native_inc)
+    tcg_ss.add(when: tci_dep, if_true: [])
+    tcg_ss.add(native_inc_dep)
+  else
+    tcg_ss.add(files('tci.c'))
+  endif
 endif
 
 tcg_ss.add(when: libdw, if_true: files('debuginfo.c'))
