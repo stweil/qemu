@@ -329,7 +329,11 @@ static void tci_qemu_st(CPUArchState *env, uint64_t taddr, uint64_t val,
  * Therefore, disable CFI checks in the interpreter function
  */
 __attribute__((hot))
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec_interpreter(CPUArchState *env,
+#else
 uintptr_t QEMU_DISABLE_CFI tcg_qemu_tb_exec(CPUArchState *env,
+#endif
                                              const void *v_tb_ptr)
 {
     const uint32_t *tb_ptr = v_tb_ptr;
