@@ -25,6 +25,7 @@
 
 #include "qemu/osdep.h"
 #include "system/tcg.h"
+#include "tcg/tcg.h"
 #include "exec/replay-core.h"
 #include "exec/icount.h"
 #include "tcg/startup.h"
@@ -52,6 +53,7 @@ struct TCGState {
 
     OnOffAuto mttcg_enabled;
     bool one_insn_per_tb;
+    bool interp_enabled;
     int splitwx_enabled;
     unsigned long tb_size;
 };
@@ -73,6 +75,17 @@ bool qemu_tcg_mttcg_enabled(void)
 static void tcg_accel_instance_init(Object *obj)
 {
     TCGState *s = TCG_STATE(obj);
+
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+    /* In dual mode only the TCI codegen backend is currently compiled in, so
+     * default to the interpreter (the only functional execution path).
+     * Selecting the native backend (interp=off) needs dual codegen, which is
+     * not implemented yet; see the dual-mode TCG notes in AGENTS.md.
+     */
+    s->interp_enabled = true;
+#else
+    s->interp_enabled = false;
+#endif
 
     /* If debugging enabled, default "auto on", otherwise off. */
 #if defined(CONFIG_DEBUG_TCG) && !defined(CONFIG_USER_ONLY)
@@ -167,6 +180,13 @@ static int tcg_init_machine(AccelState *as, MachineState *ms)
     tb_htable_init();
     tcg_init(s->tb_size * MiB, s->splitwx_enabled, max_threads);
 
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+    /* Dual mode: select the TCI interpreter if requested, before the native
+     * prologue is installed by tcg_prologue_init().
+     */
+    tcg_enable_interp(s->interp_enabled);
+#endif
+
 #if defined(CONFIG_SOFTMMU)
     /*
      * There's no guest base to take into account, so go ahead and
@@ -256,6 +276,20 @@ static void tcg_set_one_insn_per_tb(Object *obj, bool value, Error **errp)
     qatomic_set(&one_insn_per_tb, value);
 }
 
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+static bool tcg_get_interp(Object *obj, Error **errp)
+{
+    TCGState *s = TCG_STATE(obj);
+    return s->interp_enabled;
+}
+
+static void tcg_set_interp(Object *obj, bool value, Error **errp)
+{
+    TCGState *s = TCG_STATE(obj);
+    s->interp_enabled = value;
+}
+#endif
+
 static void tcg_accel_class_init(ObjectClass *oc, const void *data)
 {
     AccelClass *ac = ACCEL_CLASS(oc);
@@ -282,10 +316,17 @@ static void tcg_accel_class_init(ObjectClass *oc, const void *data)
         "Map jit pages into separate RW and RX regions");
 
     object_class_property_add_bool(oc, "one-insn-per-tb",
-                                   tcg_get_one_insn_per_tb,
-                                   tcg_set_one_insn_per_tb);
+                                    tcg_get_one_insn_per_tb,
+                                    tcg_set_one_insn_per_tb);
     object_class_property_set_description(oc, "one-insn-per-tb",
         "Only put one guest insn in each translation block");
+
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+    object_class_property_add_bool(oc, "interp",
+                                   tcg_get_interp, tcg_set_interp);
+    object_class_property_set_description(oc, "interp",
+        "Use the TCI interpreter instead of the native TCG backend");
+#endif
 }
 
 static const TypeInfo tcg_accel_type = {
