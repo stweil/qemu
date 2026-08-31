@@ -6998,6 +6998,10 @@ static uint16_t nvme_ns_attachment(NvmeCtrl *n, NvmeRequest *req)
 
         switch (sel) {
         case NVME_NS_ATTACHMENT_ATTACH:
+            if (ctrl->params.nn && nsid > ctrl->params.nn) {
+                return NVME_INVALID_NSID | NVME_DNR;
+            }
+
             if (nvme_ns(ctrl, nsid)) {
                 return NVME_NS_ALREADY_ATTACHED | NVME_DNR;
             }
@@ -8233,7 +8237,11 @@ static int nvme_start_ctrl(NvmeCtrl *n)
 
         if (nvme_csi_supported(n, ns->csi) && !ns->params.detached) {
             if (!ns->attached || ns->params.shared) {
-                nvme_attach_ns(n, ns);
+                if (!nvme_attach_ns(n, ns)) {
+                    error_report("nvme: namespace id %u not attached: "
+                                 "exceeds nn (%u)",
+                                 ns->params.nsid, n->params.nn);
+                }
             }
         }
     }
@@ -8769,6 +8777,11 @@ static bool nvme_check_params(NvmeCtrl *n, Error **errp)
         params->max_ioqpairs > NVME_MAX_IOQPAIRS) {
         error_setg(errp, "max_ioqpairs must be between 1 and %d",
                    NVME_MAX_IOQPAIRS);
+        return false;
+    }
+
+    if (params->nn > 0xffff) {
+        error_setg(errp, "nn must be at most 0xffff");
         return false;
     }
 
@@ -9368,7 +9381,7 @@ static void nvme_init_ctrl(NvmeCtrl *n, PCIDevice *pci_dev)
 
     id->sqes = (NVME_SQES << 4) | NVME_SQES;
     id->cqes = (NVME_CQES << 4) | NVME_CQES;
-    id->nn = cpu_to_le32(NVME_MAX_NAMESPACES);
+    id->nn = cpu_to_le32(n->params.nn ? n->params.nn : NVME_MAX_NAMESPACES);
     id->oncs = cpu_to_le16(NVME_ONCS_WRITE_ZEROES | NVME_ONCS_TIMESTAMP |
                            NVME_ONCS_FEATURES | NVME_ONCS_DSM |
                            NVME_ONCS_COMPARE | NVME_ONCS_COPY |
@@ -9644,13 +9657,18 @@ static int nvme_init_subsys(NvmeCtrl *n, Error **errp)
     return 0;
 }
 
-void nvme_attach_ns(NvmeCtrl *n, NvmeNamespace *ns)
+bool nvme_attach_ns(NvmeCtrl *n, NvmeNamespace *ns)
 {
     uint32_t nsid = ns->params.nsid;
     assert(nsid && nsid <= NVME_MAX_NAMESPACES);
 
+    if (n->params.nn && nsid > n->params.nn) {
+        return false;
+    }
+
     n->namespaces[nsid] = ns;
     ns->attached++;
+    return true;
 }
 
 static void nvme_realize(PCIDevice *pci_dev, Error **errp)
@@ -9786,6 +9804,7 @@ static const Property nvme_props[] = {
     DEFINE_PROP_UINT32("cmb_size_mb", NvmeCtrl, params.cmb_size_mb, 0),
     DEFINE_PROP_UINT32("num_queues", NvmeCtrl, params.num_queues, 0),
     DEFINE_PROP_UINT32("max_ioqpairs", NvmeCtrl, params.max_ioqpairs, 64),
+    DEFINE_PROP_UINT32("nn", NvmeCtrl, params.nn, 0),
     DEFINE_PROP_UINT16("msix_qsize", NvmeCtrl, params.msix_qsize, 65),
     DEFINE_PROP_UINT8("aerl", NvmeCtrl, params.aerl, 3),
     DEFINE_PROP_UINT32("aer_max_queued", NvmeCtrl, params.aer_max_queued, 64),
@@ -10506,7 +10525,7 @@ static bool nvme_ctrl_post_load(void *opaque, int version_id, Error **errp)
 
         if (nvme_csi_supported(n, ns->csi) && !ns->params.detached) {
             if (!ns->attached || ns->params.shared) {
-                nvme_attach_ns(n, ns);
+                g_assert(nvme_attach_ns(n, ns));
             }
         }
     }
@@ -10642,6 +10661,21 @@ static void nvme_ns_hot_plug(const HotplugHandler *hotplug_dev,
      * Skip controllers that haven't started yet (boot-time realize) —
      * nvme_start_ctrl() will attach namespaces during controller init.
      */
+    for (i = 0; i < NVME_MAX_CONTROLLERS; i++) {
+        NvmeCtrl *ctrl = nvme_subsys_ctrl(subsys, i);
+        if (!ctrl || !ctrl->qs_created) {
+            continue;
+        }
+
+        if (nvme_csi_supported(ctrl, ns->csi) && !ns->params.detached &&
+            ctrl->params.nn && nsid > ctrl->params.nn) {
+            error_setg(errp, "namespace id %u exceeds nn (%u) of "
+                       "controller %u", nsid, ctrl->params.nn,
+                       ctrl->cntlid);
+            return;
+        }
+    }
+
     for (i = 0; i < NVME_MAX_CONTROLLERS; i++) {
         NvmeCtrl *ctrl = nvme_subsys_ctrl(subsys, i);
         if (!ctrl || !ctrl->qs_created) {

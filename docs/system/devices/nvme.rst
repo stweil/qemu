@@ -48,6 +48,15 @@ parameters.
 ``mdts=UINT8`` (default: ``7``)
   Set the Maximum Data Transfer Size of the device.
 
+``nn=UINT32`` (default: ``0``)
+  Override the "Number of Namespaces" (NN) field of the Identify Controller
+  data structure. By default QEMU reports 256, the maximum number of
+  namespaces the controller can serve. Set this to the number of namespaces
+  supported by the emulated device (e.g. ``nn=1`` for a single-namespace
+  consumer SSD) to more closely impersonate a particular device type, or to
+  accommodate guest drivers that rely on this field. When set, attaching a
+  namespace with an ID greater than ``nn`` is refused.
+
 ``use-intel-id`` (default: ``off``)
   Since QEMU 5.2, the device uses a QEMU allocated "Red Hat" PCI Device and
   Vendor ID. Set this to ``on`` to revert to the unallocated Intel ID

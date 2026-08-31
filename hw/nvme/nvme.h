@@ -565,6 +565,7 @@ typedef struct NvmeParams {
     uint32_t aer_max_queued;
     uint8_t  mdts;
     uint8_t  vsl;
+    uint32_t nn; /* 0 = default (NVME_MAX_NAMESPACES) */
     bool     use_intel_id;
     uint8_t  zasl;
     bool     auto_transition_zones;
@@ -750,7 +751,7 @@ static inline NvmeSecCtrlEntry *nvme_sctrl_for_cntlid(NvmeCtrl *n,
     return NULL;
 }
 
-void nvme_attach_ns(NvmeCtrl *n, NvmeNamespace *ns);
+bool nvme_attach_ns(NvmeCtrl *n, NvmeNamespace *ns);
 uint16_t nvme_bounce_data(NvmeCtrl *n, void *ptr, uint32_t len,
                           NvmeTxDirection dir, NvmeRequest *req);
 uint16_t nvme_bounce_mdata(NvmeCtrl *n, void *ptr, uint32_t len,
