@@ -934,11 +934,16 @@ static inline size_t tcg_current_code_size(TCGContext *s)
 #define TB_EXIT_IDXMAX    1
 #define TB_EXIT_REQUESTED 3
 
-#ifdef CONFIG_TCG_INTERPRETER
-uintptr_t tcg_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
-#else
+#ifdef CONFIG_TCG_NATIVE
 typedef uintptr_t tcg_prologue_fn(CPUArchState *env, const void *tb_ptr);
 extern tcg_prologue_fn *tcg_qemu_tb_exec;
+#endif
+#if defined(CONFIG_TCG_INTERPRETER) && !defined(CONFIG_TCG_NATIVE)
+uintptr_t tcg_qemu_tb_exec(CPUArchState *env, const void *tb_ptr);
+#endif
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+uintptr_t tcg_qemu_tb_exec_interpreter(CPUArchState *env, const void *tb_ptr);
+void tcg_enable_interp(bool enable);
 #endif
 
 void tcg_register_jit(const void *buf, size_t buf_size);

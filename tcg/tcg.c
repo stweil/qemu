@@ -252,8 +252,27 @@ TCGv_env tcg_env;
 const void *tcg_code_gen_epilogue;
 ptrdiff_t tcg_splitwx_diff;
 
-#ifndef CONFIG_TCG_INTERPRETER
+#ifdef CONFIG_TCG_NATIVE
 tcg_prologue_fn *tcg_qemu_tb_exec;
+#endif
+
+#if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+/* In dual mode this selects whether tb_exec uses the TCI interpreter or the
+ * native backend.  Chosen at startup (see tcg_init_machine); defaults to the
+ * native backend.  GETPC() reads this to pick the correct host pc source.
+ */
+bool tcg_use_interp = false;
+
+/* Point tb_exec at the TCI interpreter.  Must be called before the native
+ * prologue is installed (i.e. before tcg_prologue_init).
+ */
+void tcg_enable_interp(bool enable)
+{
+    tcg_use_interp = enable;
+    if (enable) {
+        tcg_qemu_tb_exec = tcg_qemu_tb_exec_interpreter;
+    }
+}
 #endif
 
 static TCGRegSet tcg_target_available_regs[TCG_TYPE_COUNT];
@@ -1103,7 +1122,7 @@ typedef struct TCGOutOpSubtract {
 
 #include "tcg-target.c.inc"
 
-#ifndef CONFIG_TCG_INTERPRETER
+#if defined(CONFIG_TCG_NATIVE) && defined(MIN_TLB_MASK_TABLE_OFS)
 /* Validate CPUTLBDescFast placement. */
 QEMU_BUILD_BUG_ON((int)(offsetof(CPUNegativeOffsetState, tlb.f[0]) -
                         sizeof(CPUNegativeOffsetState))
@@ -1871,8 +1890,14 @@ void tcg_prologue_init(void)
     s->code_buf = s->code_gen_ptr;
     s->data_gen_ptr = NULL;
 
-#ifndef CONFIG_TCG_INTERPRETER
+#ifdef CONFIG_TCG_NATIVE
+# if defined(CONFIG_TCG_INTERPRETER) && defined(CONFIG_TCG_NATIVE)
+    if (!tcg_use_interp) {
+        tcg_qemu_tb_exec = (tcg_prologue_fn *)tcg_splitwx_to_rx(s->code_ptr);
+    }
+# else
     tcg_qemu_tb_exec = (tcg_prologue_fn *)tcg_splitwx_to_rx(s->code_ptr);
+# endif
 #endif
 
     s->pool_labels = NULL;
@@ -1890,7 +1915,7 @@ void tcg_prologue_init(void)
     prologue_size = tcg_current_code_size(s);
     perf_report_prologue(s->code_gen_ptr, prologue_size);
 
-#ifndef CONFIG_TCG_INTERPRETER
+#ifdef CONFIG_TCG_NATIVE
     flush_idcache_range((uintptr_t)tcg_splitwx_to_rx(s->code_buf),
                         (uintptr_t)s->code_buf, prologue_size);
 #endif
@@ -1927,7 +1952,7 @@ void tcg_prologue_init(void)
         }
     }
 
-#ifndef CONFIG_TCG_INTERPRETER
+#ifdef CONFIG_TCG_NATIVE
     /*
      * Assert that goto_ptr is implemented completely, setting an epilogue.
      * For tci, we use NULL as the signal to return from the interpreter,
@@ -6782,7 +6807,7 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb, uint64_t pc_start)
         return -2;
     }
 
-#ifndef CONFIG_TCG_INTERPRETER
+#ifdef CONFIG_TCG_NATIVE
     /* flush instruction cache */
     flush_idcache_range((uintptr_t)tcg_splitwx_to_rx(s->code_buf),
                         (uintptr_t)s->code_buf,
