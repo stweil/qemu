@@ -953,6 +953,12 @@ static void nvme_ns_realize(DeviceState *dev, Error **errp)
         return;
     }
 
+    if (n->params.nn && nsid > n->params.nn) {
+        error_setg(errp, "namespace id %u exceeds nn (%u) of the "
+                   "controller", nsid, n->params.nn);
+        return;
+    }
+
     subsys->namespaces[nsid] = ns;
 
     ns->id_ns.endgid = cpu_to_le16(0x1);
